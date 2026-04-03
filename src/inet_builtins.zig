@@ -144,6 +144,91 @@ pub fn inetTritFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return Value.makeInt(@intCast(net.tritSumMod3()));
 }
 
+/// (inet-from-forest) → net-id
+/// Converts the tree VFS transclusion graph into an interaction net.
+/// Each tree node → γ cell (arity = number of transclusions).
+/// Each transclusion edge → wire from parent's aux port to child's principal.
+/// Hub nodes (high out-degree) become natural fan-out points.
+pub fn inetFromForestFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const tree_vfs = @import("tree_vfs.zig");
+    const alloc = ensureAllocator(gc);
+    const slot = findFreeSlot() orelse return error.Overflow;
+    nets[slot] = Net.init(alloc);
+    const net = &(nets[slot].?);
+
+    // Get forest data
+    const ids = tree_vfs.getAllIds() orelse return Value.makeInt(@intCast(slot));
+
+    // Phase 1: create γ cell per tree node, track id→cell mapping
+    var id_to_cell = std.StringHashMap(u16).init(alloc);
+    defer id_to_cell.deinit();
+
+    for (ids) |id| {
+        const arity = tree_vfs.getTranscludeCount(id) orelse 0;
+        const cell = try net.addCell(.gamma, @intCast(@min(arity, 255)), Value.makeNil());
+        try id_to_cell.put(id, cell);
+    }
+
+    // Phase 2: wire transclusion edges
+    for (ids) |id| {
+        const parent_cell = id_to_cell.get(id) orelse continue;
+        const transcludes = tree_vfs.getTranscludes(id) orelse continue;
+        for (transcludes, 0..) |target_id, port_n| {
+            const child_cell = id_to_cell.get(target_id) orelse continue;
+            if (port_n >= 255) break;
+            net.connect(
+                Port.aux(parent_cell, @intCast(port_n)),
+                Port.principal(child_cell),
+            ) catch continue;
+        }
+    }
+
+    return Value.makeInt(@intCast(slot));
+}
+
+/// (inet-dot net-id) → DOT graph string
+/// Outputs a Graphviz DOT representation of the net.
+pub fn inetDotFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const net = try getNet(args);
+    var buf = std.ArrayListUnmanaged(u8){};
+    const w = buf.writer(gc.allocator);
+
+    try w.writeAll("digraph inet {\n  rankdir=LR;\n  node [shape=circle];\n");
+
+    // Cells
+    for (net.cells.items, 0..) |cell, i| {
+        if (!cell.alive) continue;
+        const shape: []const u8 = switch (cell.kind) {
+            .gamma => "triangle",
+            .delta => "invtriangle",
+            .epsilon => "point",
+            .iota => "diamond",
+        };
+        const label: []const u8 = switch (cell.kind) {
+            .gamma => "γ",
+            .delta => "δ",
+            .epsilon => "ε",
+            .iota => "ι",
+        };
+        try w.print("  c{d} [shape={s} label=\"{s}{d}\"];\n", .{ i, shape, label, i });
+    }
+
+    // Wires
+    for (net.wires.items) |wire| {
+        const style: []const u8 = if (wire.a.port == 0 and wire.b.port == 0) "bold" else "solid";
+        try w.print("  c{d}:p{d} -> c{d}:p{d} [style={s} dir=none];\n", .{
+            wire.a.cell, wire.a.port,
+            wire.b.cell, wire.b.port,
+            style,
+        });
+    }
+
+    try w.writeAll("}\n");
+
+    const str_id = try gc.internString(buf.items);
+    return Value.makeString(str_id);
+}
+
 // ============================================================================
 // TESTS
 // ============================================================================

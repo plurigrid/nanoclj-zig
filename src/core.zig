@@ -95,6 +95,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "inet-live", &inet_builtins.inetLiveFn },
         .{ "inet-pairs", &inet_builtins.inetPairsFn },
         .{ "inet-trit", &inet_builtins.inetTritFn },
+        .{ "inet-from-forest", &inet_builtins.inetFromForestFn },
+        .{ "inet-dot", &inet_builtins.inetDotFn },
     };
 
     inline for (builtins) |b| {

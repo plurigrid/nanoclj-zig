@@ -194,6 +194,41 @@ fn loadForest(allocator: std.mem.Allocator) !*Forest {
 }
 
 // ============================================================================
+// Public accessors (for inet_builtins, etc.)
+// ============================================================================
+
+/// Get all tree IDs as a slice. Returns null if forest not loaded.
+pub fn getAllIds() ?[][]const u8 {
+    const f = &(forest orelse return null);
+    // Return the keys from entries. We collect into a static buffer.
+    const S = struct {
+        var id_buf: [8192][]const u8 = undefined;
+    };
+    var count: usize = 0;
+    var it = f.entries.iterator();
+    while (it.next()) |e| {
+        if (count >= 8192) break;
+        S.id_buf[count] = e.key_ptr.*;
+        count += 1;
+    }
+    return S.id_buf[0..count];
+}
+
+/// Get transclusion count for a tree ID.
+pub fn getTranscludeCount(id: []const u8) ?usize {
+    const f = &(forest orelse return null);
+    const entry = f.entries.get(id) orelse return null;
+    return entry.transcludes.items.len;
+}
+
+/// Get transclusion targets for a tree ID.
+pub fn getTranscludes(id: []const u8) ?[][]const u8 {
+    const f = &(forest orelse return null);
+    const entry = f.entries.get(id) orelse return null;
+    return entry.transcludes.items;
+}
+
+// ============================================================================
 // Builtins for nanoclj-zig
 // ============================================================================
 
