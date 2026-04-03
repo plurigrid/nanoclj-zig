@@ -246,33 +246,12 @@ fn evalBoundedFnStar(items: []Value, env: *Env, gc: *GC, _: *Resources) Domain {
 }
 
 /// (peval expr1 expr2 ...) — evaluate all exprs with forked fuel, return vector of results.
-/// Level 1 parallelism primitive: each expr gets independent fuel budget.
+/// Level 2 parallelism: dispatches to real OS threads via thread_peval.
+/// Zig 0.15: std.Thread + Mutex. Zig 0.16: swap to std.Io fibers.
 fn evalBoundedPeval(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     const exprs = items[1..];
-    if (exprs.len == 0) return Domain.pure(Value.makeNil());
-
-    var child_res = res.fork(exprs.len);
-    var results_buf: [64]Value = undefined;
-    var count: usize = 0;
-    for (exprs, 0..) |expr, i| {
-        if (count >= 64) return Domain.fail(.collection_too_large);
-        const d = evalBounded(expr, env, gc, &child_res[i]);
-        if (!d.isValue()) {
-            res.join(&child_res, count);
-            return d;
-        }
-        results_buf[count] = d.value;
-        count += 1;
-    }
-    res.join(&child_res, count);
-
-    // Return as vector
-    const vec = gc.allocObj(.vector) catch return Domain.fail(.type_error);
-    for (results_buf[0..count]) |v| {
-        vec.data.vector.items.append(gc.allocator, v) catch
-            return Domain.fail(.type_error);
-    }
-    return Domain.pure(Value.makeObj(vec));
+    const thread_peval = @import("thread_peval.zig");
+    return thread_peval.threadPeval(@constCast(exprs), env, gc, res);
 }
 
 fn applyBounded(func: Value, args: []Value, _: *Env, gc: *GC, res: *Resources) Domain {

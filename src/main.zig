@@ -176,4 +176,5 @@ test {
     _ = @import("inet.zig");
     _ = @import("inet_builtins.zig");
     _ = @import("inet_compile.zig");
+    _ = @import("thread_peval.zig");
 }

@@ -165,6 +165,8 @@ const Tool = struct {
     input_schema: []const u8,
 };
 
+const http_fetch = @import("http_fetch.zig");
+
 const tools = [_]Tool{
     .{
         .name = "nanoclj_eval",
@@ -195,6 +197,12 @@ const tools = [_]Tool{
         .description = "Traverse to another substrate (e.g. zig-syrup, nashator, goblins-adapter)",
         .input_schema =
         \\{"type":"object","properties":{"target":{"type":"string","description":"Target substrate name"}},"required":["target"]}
+    },
+    .{
+        .name = "nanoclj_http_fetch",
+        .description = "HTTP GET/POST. Returns {:status N :body \"...\"}. Methods: get, post, put, delete.",
+        .input_schema =
+        \\{"type":"object","properties":{"url":{"type":"string","description":"URL to fetch"},"method":{"type":"string","enum":["get","post","put","delete"],"default":"get","description":"HTTP method"},"body":{"type":"string","description":"Request body (for POST/PUT)"}},"required":["url"]}
     },
 };
 
@@ -351,6 +359,36 @@ fn handleSubstrate(allocator: std.mem.Allocator) !json.Value {
     return toolResult(allocator, text);
 }
 
+fn handleHttpFetch(allocator: std.mem.Allocator, args: json.ObjectMap) !json.Value {
+    const url_val = args.get("url") orelse return toolError(allocator, "missing 'url'");
+    const url = switch (url_val) {
+        .string => |s| s,
+        else => return toolError(allocator, "'url' must be string"),
+    };
+    // Build Clojure expression and eval it
+    const method_str = if (args.get("method")) |m| switch (m) {
+        .string => |s| s,
+        else => "get",
+    } else "get";
+    const body_str = if (args.get("body")) |b| switch (b) {
+        .string => |s| s,
+        else => null,
+    } else null;
+
+    // Construct and eval: (http-fetch "url") or (http-fetch "url" :method) or (http-fetch "url" :method "body")
+    var expr_buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&expr_buf);
+    const w = fbs.writer();
+    if (body_str) |body| {
+        try w.print("(http-fetch \"{s}\" :{s} \"{s}\")", .{ url, method_str, body });
+    } else {
+        try w.print("(http-fetch \"{s}\" :{s})", .{ url, method_str });
+    }
+    const expr = fbs.getWritten();
+    const result_str = try rep(allocator, expr);
+    return toolResult(allocator, result_str);
+}
+
 fn handleTraverse(allocator: std.mem.Allocator, args: json.ObjectMap) !json.Value {
     const target_val = args.get("target") orelse return toolError(allocator, "missing 'target'");
     const target = switch (target_val) {
@@ -411,6 +449,8 @@ fn handleCallTool(allocator: std.mem.Allocator, params: json.ObjectMap) !json.Va
         return handleSubstrate(allocator);
     } else if (std.mem.eql(u8, name, "nanoclj_traverse")) {
         return handleTraverse(allocator, arguments);
+    } else if (std.mem.eql(u8, name, "nanoclj_http_fetch")) {
+        return handleHttpFetch(allocator, arguments);
     } else {
         const msg = try std.fmt.allocPrint(allocator, "Unknown tool '{s}'", .{name});
         return toolError(allocator, msg);

@@ -12,6 +12,7 @@ const gay_skills = @import("gay_skills.zig");
 const tree_vfs = @import("tree_vfs.zig");
 const inet_builtins = @import("inet_builtins.zig");
 const inet_compile = @import("inet_compile.zig");
+const http_fetch = @import("http_fetch.zig");
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
@@ -101,6 +102,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "inet-compile", &inet_compile.inetCompileFn },
         .{ "inet-readback", &inet_compile.inetReadbackFn },
         .{ "inet-eval", &inet_compile.inetEvalFn },
+        // HTTP fetch
+        .{ "http-fetch", &http_fetch.httpFetchFn },
     };
 
     inline for (builtins) |b| {
