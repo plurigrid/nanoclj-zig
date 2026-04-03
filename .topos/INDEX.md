@@ -9,6 +9,12 @@ Thermodynamic floor: kT·ln(3) per trit, kT·ln(2) per bit (Landauer).
 
 ---
 
+## Skill Maps (`.topos/`)
+
+- `SKILL_MAP.md` — runtime builtin/skill topology mapped to expander faces, levels, and communities served.
+
+---
+
 ## Repos (`.topos/repos/`)
 
 | Repo | Face | Signal |

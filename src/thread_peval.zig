@@ -25,7 +25,7 @@ const compat = @import("compat.zig");
 pub const SharedContext = struct {
     gc: *GC,
     env: *Env,
-    mutex: compat.Mutex = compat.mutexInit(),
+    mutex: compat.Mutex = .{},
 
     pub fn init(gc: *GC, env: *Env) SharedContext {
         return .{ .gc = gc, .env = env };

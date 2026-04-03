@@ -10,6 +10,7 @@
 //!   (inet-trit net-id)            → trit-sum mod 3 (int)
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
@@ -198,7 +199,7 @@ pub fn inetFromForestFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// Outputs a Graphviz DOT representation of the net.
 pub fn inetDotFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const net = try getNet(args);
-    var buf = std.ArrayListUnmanaged(u8){};
+    var buf = compat.emptyList(u8);
     const w = buf.writer(gc.allocator);
 
     try w.writeAll("digraph inet {\n  rankdir=LR;\n  node [shape=circle];\n");

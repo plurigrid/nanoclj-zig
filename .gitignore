@@ -1,8 +1,8 @@
 zig-out/
 zig-cache/
 .zig-cache/
+.zig-toolchains/
 *.o
 *.swp
 *.bak
 test_stdout
-.topos/

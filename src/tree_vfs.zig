@@ -15,6 +15,7 @@
 //!   (tree-chain "horse-0001")     → longest transclusion chain from this node
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
@@ -82,7 +83,7 @@ fn extractTitle(content: []const u8) ?[]const u8 {
 
 /// Extract all \transclude{ID} targets from content
 fn extractTranscludes(allocator: std.mem.Allocator, content: []const u8) !std.ArrayListUnmanaged([]const u8) {
-    var result = std.ArrayListUnmanaged([]const u8){};
+    var result = compat.emptyList([]const u8);
     const marker = "\\transclude{";
     var pos: usize = 0;
     while (std.mem.indexOfPos(u8, content, pos, marker)) |start| {
@@ -100,12 +101,12 @@ fn scanDir(allocator: std.mem.Allocator, dir_path: []const u8, entries: *std.Str
     defer dir.close();
 
     // Collect all entries first to avoid iterator invalidation
-    var subdirs = std.ArrayListUnmanaged([]const u8){};
+    var subdirs = compat.emptyList([]const u8);
     defer {
         for (subdirs.items) |s| allocator.free(s);
         subdirs.deinit(allocator);
     }
-    var files = std.ArrayListUnmanaged(struct { id: []const u8, path: []const u8 }){};
+    var files = compat.emptyList(struct { id: []const u8, path: []const u8 });
     defer {
         // Only free entries not consumed
         files.deinit(allocator);
@@ -184,7 +185,7 @@ fn loadForest(allocator: std.mem.Allocator) !*Forest {
         for (e.value_ptr.transcludes.items) |target| {
             const gop = try f.transcluders.getOrPut(target);
             if (!gop.found_existing) {
-                gop.value_ptr.* = std.ArrayListUnmanaged([]const u8){};
+                gop.value_ptr.* = compat.emptyList([]const u8);
             }
             try gop.value_ptr.append(allocator, e.value_ptr.id);
         }
@@ -319,8 +320,8 @@ pub fn treeChainFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const f = try loadForest(gc.allocator);
 
     // DFS to find longest path
-    var best = std.ArrayListUnmanaged([]const u8){};
-    var current = std.ArrayListUnmanaged([]const u8){};
+    var best = compat.emptyList([]const u8);
+    var current = compat.emptyList([]const u8);
     defer best.deinit(gc.allocator);
     defer current.deinit(gc.allocator);
 

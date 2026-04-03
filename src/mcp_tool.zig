@@ -114,7 +114,7 @@ fn evalWithBuiltins(form: Value, env: *Env, gc: *GC) !Value {
         if (items.len > 0 and items[0].isSymbol()) {
             const name = gc.getString(items[0].asSymbolId());
             if (core.lookupBuiltin(name)) |builtin| {
-                var args = std.ArrayListUnmanaged(Value){};
+                var args = @import("compat.zig").emptyList(Value);
                 defer args.deinit(gc.allocator);
                 for (items[1..]) |arg| {
                     const v = try evalWithBuiltins(arg, env, gc);

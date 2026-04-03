@@ -9,6 +9,7 @@
 //! into which all expressions are "transcluded" (given meaning).
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const value = @import("value.zig");
 const Value = value.Value;
 const Obj = value.Obj;
@@ -367,7 +368,7 @@ pub fn boundedRead(src: []const u8, gc: *GC, res: *Resources) !Value {
 
 pub const Adversarial = struct {
     pub fn deepNesting(allocator: std.mem.Allocator, depth: usize) ![]u8 {
-        var buf = std.ArrayListUnmanaged(u8){};
+        var buf = compat.emptyList(u8);
         for (0..depth) |_| try buf.append(allocator, '(');
         try buf.appendSlice(allocator, "nil");
         for (0..depth) |_| try buf.append(allocator, ')');
@@ -375,7 +376,7 @@ pub const Adversarial = struct {
     }
 
     pub fn longString(allocator: std.mem.Allocator, len: usize) ![]u8 {
-        var buf = std.ArrayListUnmanaged(u8){};
+        var buf = compat.emptyList(u8);
         try buf.append(allocator, '"');
         for (0..len) |_| try buf.append(allocator, 'a');
         try buf.append(allocator, '"');
@@ -383,7 +384,7 @@ pub const Adversarial = struct {
     }
 
     pub fn manySymbols(allocator: std.mem.Allocator, n: usize) ![]u8 {
-        var buf = std.ArrayListUnmanaged(u8){};
+        var buf = compat.emptyList(u8);
         try buf.append(allocator, '(');
         for (0..n) |i| {
             if (i > 0) try buf.append(allocator, ' ');

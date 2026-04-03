@@ -24,6 +24,7 @@
 //!   Patches: 1
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const Allocator = std.mem.Allocator;
 const value = @import("value.zig");
 const Value = value.Value;
@@ -82,7 +83,7 @@ fn versionIdToHex(id: VersionId) [32]u8 {
 // ============================================================================
 
 pub const VersionLog = struct {
-    versions: std.ArrayListUnmanaged(Version) = .{},
+    versions: std.ArrayListUnmanaged(Version) = compat.emptyList(Version),
     current: ?VersionId = null,
     trit_sum: i32 = 0,
     allocator: Allocator,
@@ -264,7 +265,7 @@ pub fn parseRequest(buf: []const u8) BraidRequest {
 
 pub const BraidRepl = struct {
     log: VersionLog,
-    subscribers: std.ArrayListUnmanaged(BraidWriter) = .{},
+    subscribers: std.ArrayListUnmanaged(BraidWriter) = compat.emptyList(BraidWriter),
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) BraidRepl {

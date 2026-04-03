@@ -56,7 +56,7 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         const sym_name = gc.getString(items[0].asSymbolId());
         const core = @import("core.zig");
         if (core.lookupBuiltin(sym_name)) |builtin| {
-            var args = std.ArrayListUnmanaged(Value){};
+            var args = @import("compat.zig").emptyList(Value);
             defer args.deinit(gc.allocator);
             for (items[1..]) |arg| {
                 const v = try eval(arg, env, gc);
@@ -68,7 +68,7 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
 
     // Function application
     const func = try eval(items[0], env, gc);
-    var args = std.ArrayListUnmanaged(Value){};
+    var args = @import("compat.zig").emptyList(Value);
     defer args.deinit(gc.allocator);
     for (items[1..]) |arg| {
         const v = try eval(arg, env, gc);
