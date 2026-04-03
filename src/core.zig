@@ -99,6 +99,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "inet-from-forest", &inet_builtins.inetFromForestFn },
         .{ "inet-dot", &inet_builtins.inetDotFn },
         .{ "inet-compile", &inet_compile.inetCompileFn },
+        .{ "inet-readback", &inet_compile.inetReadbackFn },
+        .{ "inet-eval", &inet_compile.inetEvalFn },
     };
 
     inline for (builtins) |b| {

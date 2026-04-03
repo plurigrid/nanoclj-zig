@@ -278,7 +278,7 @@ pub const Net = struct {
     // INTERNAL WIRE HELPERS
     // ========================================================================
 
-    fn findConnected(self: *const Net, port: Port) ?Port {
+    pub fn findConnected(self: *const Net, port: Port) ?Port {
         for (self.wires.items) |w| {
             if (w.a.eql(port)) return w.b;
             if (w.b.eql(port)) return w.a;

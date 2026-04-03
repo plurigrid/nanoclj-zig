@@ -223,6 +223,77 @@ pub fn inetCompileFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 // ============================================================================
+// READBACK: Interaction net → Value
+// ============================================================================
+
+/// Read back a Value from a cell in a reduced net.
+/// Walks the net from the given cell, reconstructing nanoclj values.
+///   γ(arity=0, payload=v)   → v (literal)
+///   γ(arity=N, payload=nil) → vector of readback(aux children)
+///   ε / dead cell           → nil
+pub fn readback(net: *const Net, cell_idx: u16, gc: *GC) !Value {
+    if (cell_idx >= net.cells.items.len) return Value.makeNil();
+    const cell = net.cells.items[cell_idx];
+    if (!cell.alive) return Value.makeNil();
+
+    // Literal: arity 0, payload carries the value
+    if (cell.arity == 0) {
+        return cell.payload;
+    }
+
+    // Eraser: return nil
+    if (cell.kind == .epsilon) return Value.makeNil();
+
+    // Compound: collect children from aux ports into a vector
+    const vec = try gc.allocObj(.vector);
+    for (1..@as(usize, cell.arity) + 1) |port_n| {
+        const port = Port{ .cell = cell_idx, .port = @intCast(port_n) };
+        const connected = net.findConnected(port);
+        if (connected) |cp| {
+            const child_val = try readback(net, cp.cell, gc);
+            try vec.data.vector.items.append(gc.allocator, child_val);
+        } else {
+            try vec.data.vector.items.append(gc.allocator, Value.makeNil());
+        }
+    }
+    return Value.makeObj(vec);
+}
+
+/// (inet-readback net-id cell-idx) → Value
+pub fn inetReadbackFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.InvalidArgument;
+    const ib = @import("inet_builtins.zig");
+    const net = try ib.getNetPub(args[0]);
+    if (!args[1].isInt()) return error.InvalidArgument;
+    const cell_idx: u16 = @intCast(args[1].asInt());
+    return readback(net, cell_idx, gc);
+}
+
+/// (inet-eval quoted-expr) → Value
+/// The full pipeline: compile → reduce → readback in one call.
+pub fn inetEvalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return error.InvalidArgument;
+
+    // Create a fresh net
+    const alloc = gc.allocator;
+    var net = Net.init(alloc);
+    defer net.deinit();
+
+    // Compile
+    var scope = Scope.init(alloc, null);
+    defer scope.deinit();
+    const root = try compile(&net, args[0], gc, &scope);
+
+    // Reduce
+    const transitivity = @import("transitivity.zig");
+    var res = transitivity.Resources.initDefault();
+    _ = try net.reduceAll(&res);
+
+    // Readback
+    return readback(&net, root.cell, gc);
+}
+
+// ============================================================================
 // TESTS
 // ============================================================================
 
@@ -307,4 +378,56 @@ test "compile vector" {
     // Container γ(arity 3) + 3 literal γ cells = 4
     try std.testing.expectEqual(@as(usize, 4), net.liveCells());
     try std.testing.expectEqual(@as(u8, 3), net.cells.items[root.cell].arity);
+}
+
+test "readback literal roundtrip" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var net = Net.init(std.testing.allocator);
+    defer net.deinit();
+    var scope = Scope.init(std.testing.allocator, null);
+    defer scope.deinit();
+
+    // Compile 42, readback should give 42
+    const root = try compile(&net, Value.makeInt(42), &gc, &scope);
+    const result = try readback(&net, root.cell, &gc);
+    try std.testing.expect(result.isInt());
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "readback vector roundtrip" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var net = Net.init(std.testing.allocator);
+    defer net.deinit();
+    var scope = Scope.init(std.testing.allocator, null);
+    defer scope.deinit();
+
+    // Compile [1 2], readback
+    const vec = try gc.allocObj(.vector);
+    try vec.data.vector.items.append(gc.allocator, Value.makeInt(1));
+    try vec.data.vector.items.append(gc.allocator, Value.makeInt(2));
+
+    const root = try compile(&net, Value.makeObj(vec), &gc, &scope);
+    const result = try readback(&net, root.cell, &gc);
+    // Should be a vector [1 2]
+    try std.testing.expect(result.isObj());
+    const robj = result.asObj();
+    try std.testing.expectEqual(ObjKind.vector, robj.kind);
+    try std.testing.expectEqual(@as(usize, 2), robj.data.vector.items.items.len);
+    try std.testing.expectEqual(@as(i48, 1), robj.data.vector.items.items[0].asInt());
+    try std.testing.expectEqual(@as(i48, 2), robj.data.vector.items.items[1].asInt());
+}
+
+test "inet-eval end-to-end" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(gc.allocator, null);
+    defer env.deinit();
+
+    // (inet-eval '42) → 42
+    var args = [_]Value{Value.makeInt(42)};
+    const result = try inetEvalFn(&args, &gc, &env);
+    try std.testing.expect(result.isInt());
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
 }
