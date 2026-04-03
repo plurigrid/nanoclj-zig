@@ -1,0 +1,10 @@
+.{
+    .name = .nanoclj_zig,
+    .version = "0.1.0",
+    .fingerprint = 0x7161ab6f965ce106,
+    .paths = .{
+        "src",
+        "build015.zig",
+        "build015.zig.zon",
+    },
+}
