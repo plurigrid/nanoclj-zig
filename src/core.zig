@@ -11,6 +11,7 @@ const substrate = @import("substrate.zig");
 const gay_skills = @import("gay_skills.zig");
 const tree_vfs = @import("tree_vfs.zig");
 const inet_builtins = @import("inet_builtins.zig");
+const inet_compile = @import("inet_compile.zig");
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
@@ -97,6 +98,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "inet-trit", &inet_builtins.inetTritFn },
         .{ "inet-from-forest", &inet_builtins.inetFromForestFn },
         .{ "inet-dot", &inet_builtins.inetDotFn },
+        .{ "inet-compile", &inet_compile.inetCompileFn },
     };
 
     inline for (builtins) |b| {

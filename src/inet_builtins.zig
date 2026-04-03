@@ -63,6 +63,14 @@ pub fn inetNewFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeInt(@intCast(slot));
 }
 
+/// Public accessor for other modules (inet_compile)
+pub fn getNetPub(id_val: Value) !*Net {
+    if (!id_val.isInt()) return error.InvalidArgument;
+    const id: usize = @intCast(id_val.asInt());
+    if (id >= 64) return error.InvalidArgument;
+    return &(nets[id] orelse return error.InvalidArgument);
+}
+
 fn getNet(args: []Value) !*Net {
     if (args.len < 1) return error.InvalidArgument;
     if (!args[0].isInt()) return error.InvalidArgument;

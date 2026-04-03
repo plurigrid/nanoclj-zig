@@ -175,4 +175,5 @@ test {
     _ = @import("tree_vfs.zig");
     _ = @import("inet.zig");
     _ = @import("inet_builtins.zig");
+    _ = @import("inet_compile.zig");
 }
