@@ -171,4 +171,5 @@ test {
     _ = @import("gc.zig");
     _ = @import("semantics.zig");
     _ = @import("tree_vfs.zig");
+    _ = @import("inet.zig");
 }
