@@ -87,6 +87,7 @@ Thermodynamic floor: kT·ln(3) per trit, kT·ln(2) per bit (Landauer).
 - `minimally-dissipative-multi-bit-operations.md` — arxiv 2506.24021
 - `reversible-computing-beat-landauer.md` — Ideasthesia
 - `gas-fueled-languages-compiler-correctness.md` — Zhirkov
+- `thermodynamic-cost-recurrent-erasure.md` — Nature Comms Physics 2025. **KEY**: recurrent erasure cost depends on inter-step correlation; interaction nets minimize this by construction
 
 ### Face 13: Categorical Semantics of Interaction
 - `rosetta-stone-interactive-quantitative-semantics.md` — Clairambault (CSL 2026)

@@ -111,6 +111,47 @@ pub const Resources = struct {
     pub fn fuelRemaining(self: *const Resources) u64 {
         return self.fuel;
     }
+
+    /// Fork: split resources into n independent children for parallel eval.
+    /// Fuel is divided equally (adiabatic — no overhead).
+    /// Each child inherits depth/limits but gets independent trit_balance.
+    pub fn fork(self: *Resources, n: usize) [64]Resources {
+        var children: [64]Resources = undefined;
+        if (n == 0) return children;
+        const fuel_each = self.fuel / @max(n, 1);
+        for (0..@min(n, 64)) |i| {
+            children[i] = .{
+                .fuel = fuel_each,
+                .depth = self.depth,
+                .read_depth = self.read_depth,
+                .steps_taken = 0,
+                .max_depth_seen = self.depth,
+                .limits = self.limits,
+                .trit_balance = 0,
+            };
+        }
+        // Remainder fuel stays with parent (Landauer: join will cost kT·ln(n))
+        self.fuel -= fuel_each * @min(n, 64);
+        return children;
+    }
+
+    /// Join: merge n child resources back into parent.
+    /// Accumulates steps, trit_balance, tracks max_depth.
+    /// Join cost = 1 fuel unit per child (approximates kT·ln(n)).
+    pub fn join(self: *Resources, children: []Resources, n: usize) void {
+        for (0..@min(n, 64)) |i| {
+            self.steps_taken += children[i].steps_taken;
+            self.fuel += children[i].fuel; // return unused fuel
+            if (children[i].max_depth_seen > self.max_depth_seen) {
+                self.max_depth_seen = children[i].max_depth_seen;
+            }
+            // Accumulate trit balance from each child
+            self.accumulateTrit(children[i].trit_balance);
+        }
+        // Join overhead: 1 fuel per child merged (measurement cost)
+        const join_cost = @min(n, self.fuel);
+        self.fuel -= join_cost;
+    }
 };
 
 // ============================================================================
@@ -355,6 +396,44 @@ test "value trit assignment" {
     try std.testing.expectEqual(@as(i8, 0), valueTrit(Value.makeInt(0)));
     try std.testing.expectEqual(@as(i8, 1), valueTrit(Value.makeInt(42)));
     try std.testing.expectEqual(@as(i8, -1), valueTrit(Value.makeInt(-7)));
+}
+
+test "fork/join: fuel conservation" {
+    var res = Resources.init(.{ .max_fuel = 1000 });
+    const initial_fuel = res.fuel;
+
+    var children = res.fork(4);
+    // Each child gets 250 fuel
+    try std.testing.expectEqual(@as(u64, 250), children[0].fuel);
+    try std.testing.expectEqual(@as(u64, 250), children[1].fuel);
+
+    // Simulate work: child 0 uses 100, child 1 uses 50
+    children[0].fuel -= 100;
+    children[0].steps_taken = 10;
+    children[1].fuel -= 50;
+    children[1].steps_taken = 5;
+
+    res.join(&children, 4);
+    // Total fuel used = 100 + 50 = 150, plus join cost of 4
+    // Returned fuel = (250-100) + (250-50) + 250 + 250 = 850
+    // Parent fuel after join = remaining + 850 - 4 (join cost)
+    try std.testing.expectEqual(@as(u64, 15), res.steps_taken);
+    // Conservation: no fuel created from nothing
+    try std.testing.expect(res.fuel <= initial_fuel);
+}
+
+test "fork/join: trit conservation" {
+    var res = Resources.init(.{ .max_fuel = 1000 });
+    var children = res.fork(3);
+
+    // Each child accumulates trits
+    children[0].trit_balance = 1;
+    children[1].trit_balance = 1;
+    children[2].trit_balance = 1;
+
+    res.join(&children, 3);
+    // 1 + 1 + 1 = 3 ≡ 0 (mod 3) → conserved
+    try std.testing.expect(res.isConserved());
 }
 
 test "soundness: literal" {

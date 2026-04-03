@@ -59,6 +59,7 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         if (std.mem.eql(u8, name, "if")) return evalBoundedIf(items, env, gc, res);
         if (std.mem.eql(u8, name, "do")) return evalBoundedDo(items, env, gc, res);
         if (std.mem.eql(u8, name, "fn*")) return evalBoundedFnStar(items, env, gc, res);
+        if (std.mem.eql(u8, name, "peval")) return evalBoundedPeval(items, env, gc, res);
 
         const core = @import("core.zig");
         if (core.lookupBuiltin(name)) |builtin| {
@@ -76,15 +77,22 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         }
     }
 
+    // Fork fuel across args (Level 1: parallel arg eval)
+    const raw_args = items[1..];
+    var child_res = res.fork(raw_args.len);
     var args_buf: [64]Value = undefined;
     var args_count: usize = 0;
-    for (items[1..]) |arg| {
+    for (raw_args, 0..) |arg, i| {
         if (args_count >= 64) return Domain.fail(.collection_too_large);
-        const d = evalBounded(arg, env, gc, res);
-        if (!d.isValue()) return d;
+        const d = evalBounded(arg, env, gc, &child_res[i]);
+        if (!d.isValue()) {
+            res.join(&child_res, args_count);
+            return d;
+        }
         args_buf[args_count] = d.value;
         args_count += 1;
     }
+    res.join(&child_res, args_count);
     return applyBounded(func_d.value, args_buf[0..args_count], env, gc, res);
 }
 
@@ -95,15 +103,25 @@ fn evalBoundedBuiltin(
     gc: *GC,
     res: *Resources,
 ) Domain {
+    // Fork fuel across args (Level 1: adiabatic expansion)
+    // Currently sequential but resource-tracked as if parallel.
+    // When Zig async lands, each child_res eval becomes a frame.
+    var child_res = res.fork(raw_args.len);
     var args_buf: [64]Value = undefined;
     var args_count: usize = 0;
-    for (raw_args) |arg| {
+    for (raw_args, 0..) |arg, i| {
         if (args_count >= 64) return Domain.fail(.collection_too_large);
-        const d = evalBounded(arg, env, gc, res);
-        if (!d.isValue()) return d;
+        const d = evalBounded(arg, env, gc, &child_res[i]);
+        if (!d.isValue()) {
+            // Join partial results back before returning error
+            res.join(&child_res, args_count);
+            return d;
+        }
         args_buf[args_count] = d.value;
         args_count += 1;
     }
+    // Join: merge child resources back (measurement cost = kT·ln(n))
+    res.join(&child_res, args_count);
     const result = builtin(args_buf[0..args_count], gc, env) catch
         return Domain.fail(.type_error);
     return Domain.pure(result);
@@ -227,6 +245,36 @@ fn evalBoundedFnStar(items: []Value, env: *Env, gc: *GC, _: *Resources) Domain {
     return Domain.pure(Value.makeObj(fn_obj));
 }
 
+/// (peval expr1 expr2 ...) — evaluate all exprs with forked fuel, return vector of results.
+/// Level 1 parallelism primitive: each expr gets independent fuel budget.
+fn evalBoundedPeval(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+    const exprs = items[1..];
+    if (exprs.len == 0) return Domain.pure(Value.makeNil());
+
+    var child_res = res.fork(exprs.len);
+    var results_buf: [64]Value = undefined;
+    var count: usize = 0;
+    for (exprs, 0..) |expr, i| {
+        if (count >= 64) return Domain.fail(.collection_too_large);
+        const d = evalBounded(expr, env, gc, &child_res[i]);
+        if (!d.isValue()) {
+            res.join(&child_res, count);
+            return d;
+        }
+        results_buf[count] = d.value;
+        count += 1;
+    }
+    res.join(&child_res, count);
+
+    // Return as vector
+    const vec = gc.allocObj(.vector) catch return Domain.fail(.type_error);
+    for (results_buf[0..count]) |v| {
+        vec.data.vector.items.append(gc.allocator, v) catch
+            return Domain.fail(.type_error);
+    }
+    return Domain.pure(Value.makeObj(vec));
+}
+
 fn applyBounded(func: Value, args: []Value, _: *Env, gc: *GC, res: *Resources) Domain {
     if (!func.isObj()) return Domain.fail(.not_a_function);
     const obj = func.asObj();
@@ -272,6 +320,63 @@ fn applyBounded(func: Value, args: []Value, _: *Env, gc: *GC, res: *Resources) D
 // ============================================================================
 // TESTS
 // ============================================================================
+
+test "fuel fork/join: conservation" {
+    var res = Resources.initDefault();
+    const initial_fuel = res.fuel;
+    var children = res.fork(3);
+    // Parent keeps remainder (initial_fuel mod 3), children get the rest
+    const share = initial_fuel / 3;
+    const total_child: u64 = children[0].fuel + children[1].fuel + children[2].fuel;
+    try std.testing.expectEqual(share * 3, total_child);
+    try std.testing.expectEqual(initial_fuel - share * 3, res.fuel);
+
+    children[0].fuel -= 100;
+    children[0].steps_taken = 100;
+    res.join(children[0..3], 3);
+    // Reclaimed = (share-100) + share + share - 3 join cost + remainder
+    try std.testing.expectEqual(initial_fuel - 100 - 3, res.fuel);
+    try std.testing.expectEqual(@as(u64, 100), res.steps_taken);
+}
+
+test "fuel fork/join: GF(3) trit merge" {
+    var res = Resources.initDefault();
+    var children = res.fork(3);
+    children[0].trit_balance = 1;
+    children[1].trit_balance = 1;
+    children[2].trit_balance = 1;
+    res.join(children[0..3], 3);
+    try std.testing.expect(res.isConserved());
+}
+
+test "peval: parallel literals" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(gc.allocator, null);
+    defer env.deinit();
+
+    const peval_sym = try gc.internString("peval");
+    const list = try gc.allocObj(.list);
+    try list.data.list.items.append(gc.allocator, Value.makeSymbol(peval_sym));
+    try list.data.list.items.append(gc.allocator, Value.makeInt(1));
+    try list.data.list.items.append(gc.allocator, Value.makeInt(2));
+    try list.data.list.items.append(gc.allocator, Value.makeInt(3));
+
+    var res = Resources.initDefault();
+    const d = evalBounded(Value.makeObj(list), &env, &gc, &res);
+    try std.testing.expect(d.isValue());
+    // Debug: check what type we got
+    try std.testing.expect(!d.value.isInt()); // should NOT be an int
+    try std.testing.expect(!d.value.isNil()); // should NOT be nil
+    try std.testing.expect(d.value.isObj());
+    const obj = d.value.asObj();
+    try std.testing.expectEqual(ObjKind.vector, obj.kind);
+    const items = obj.data.vector.items.items;
+    try std.testing.expectEqual(@as(usize, 3), items.len);
+    try std.testing.expectEqual(@as(i48, 1), items[0].asInt());
+    try std.testing.expectEqual(@as(i48, 2), items[1].asInt());
+    try std.testing.expectEqual(@as(i48, 3), items[2].asInt());
+}
 
 test "fuel-bounded eval: literal" {
     var gc = GC.init(std.testing.allocator);

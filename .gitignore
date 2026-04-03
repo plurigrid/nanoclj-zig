@@ -3,3 +3,6 @@ zig-cache/
 .zig-cache/
 *.o
 *.swp
+*.bak
+test_stdout
+.topos/

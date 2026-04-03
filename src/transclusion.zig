@@ -129,11 +129,173 @@ pub fn denote(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         if (std.mem.eql(u8, name, "quote")) {
             return if (items.len == 2) Domain.pure(items[1]) else Domain.fail(.arity_error);
         }
+        if (std.mem.eql(u8, name, "def")) return denoteDef(items, env, gc, res);
+        if (std.mem.eql(u8, name, "let*")) return denoteLet(items, env, gc, res);
         if (std.mem.eql(u8, name, "if")) return denoteIf(items, env, gc, res);
         if (std.mem.eql(u8, name, "do")) return denoteDo(items, env, gc, res);
+        if (std.mem.eql(u8, name, "fn*")) return denoteFnStar(items, env, gc, res);
+
+        const core = @import("core.zig");
+        if (core.lookupBuiltin(name)) |builtin| {
+            return denoteBuiltin(builtin, items[1..], env, gc, res);
+        }
     }
 
-    return Domain.pure(val);
+    // General application: evaluate head, then apply
+    const func_d = denote(items[0], env, gc, res);
+    if (!func_d.isValue()) return func_d;
+
+    const core = @import("core.zig");
+    if (core.isBuiltinSentinel(func_d.value, gc)) |name| {
+        if (core.lookupBuiltin(name)) |builtin| {
+            return denoteBuiltin(builtin, items[1..], env, gc, res);
+        }
+    }
+
+    var args_buf: [64]Value = undefined;
+    var args_count: usize = 0;
+    for (items[1..]) |arg| {
+        if (args_count >= 64) return Domain.fail(.collection_too_large);
+        const d = denote(arg, env, gc, res);
+        if (!d.isValue()) return d;
+        args_buf[args_count] = d.value;
+        args_count += 1;
+    }
+    return applyDenote(func_d.value, args_buf[0..args_count], env, gc, res);
+}
+
+fn denoteDef(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+    if (items.len != 3) return Domain.fail(.arity_error);
+    if (!items[1].isSymbol()) return Domain.fail(.type_error);
+    const name = gc.getString(items[1].asSymbolId());
+    const d = denote(items[2], env, gc, res);
+    if (!d.isValue()) return d;
+    env.set(name, d.value) catch return Domain.fail(.type_error);
+    return d;
+}
+
+fn denoteLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+    if (items.len < 3) return Domain.fail(.arity_error);
+    if (!items[1].isObj()) return Domain.fail(.type_error);
+    const bindings_obj = items[1].asObj();
+    const bindings = if (bindings_obj.kind == .vector)
+        bindings_obj.data.vector.items.items
+    else if (bindings_obj.kind == .list)
+        bindings_obj.data.list.items.items
+    else
+        return Domain.fail(.type_error);
+    if (bindings.len % 2 != 0) return Domain.fail(.arity_error);
+
+    const child = env.createChild() catch return Domain.fail(.type_error);
+    gc.trackEnv(child) catch return Domain.fail(.type_error);
+    var i: usize = 0;
+    while (i < bindings.len) : (i += 2) {
+        if (!bindings[i].isSymbol()) return Domain.fail(.type_error);
+        const name = gc.getString(bindings[i].asSymbolId());
+        const d = denote(bindings[i + 1], child, gc, res);
+        if (!d.isValue()) return d;
+        child.set(name, d.value) catch return Domain.fail(.type_error);
+    }
+
+    var result = Domain.pure(Value.makeNil());
+    for (items[2..]) |form| {
+        result = denote(form, child, gc, res);
+        if (!result.isValue()) return result;
+    }
+    return result;
+}
+
+fn denoteFnStar(items: []Value, env: *Env, gc: *GC, _: *Resources) Domain {
+    if (items.len < 3) return Domain.fail(.arity_error);
+    if (!items[1].isObj()) return Domain.fail(.type_error);
+    const params_obj = items[1].asObj();
+    const params = if (params_obj.kind == .vector)
+        params_obj.data.vector.items.items
+    else if (params_obj.kind == .list)
+        params_obj.data.list.items.items
+    else
+        return Domain.fail(.type_error);
+
+    const fn_obj = gc.allocObj(.function) catch return Domain.fail(.type_error);
+    var is_variadic = false;
+    for (params) |p| {
+        if (p.isSymbol() and std.mem.eql(u8, gc.getString(p.asSymbolId()), "&")) {
+            is_variadic = true;
+            continue;
+        }
+        fn_obj.data.function.params.append(gc.allocator, p) catch
+            return Domain.fail(.type_error);
+    }
+    fn_obj.data.function.is_variadic = is_variadic;
+    fn_obj.data.function.env = env;
+    for (items[2..]) |body_form| {
+        fn_obj.data.function.body.append(gc.allocator, body_form) catch
+            return Domain.fail(.type_error);
+    }
+    return Domain.pure(Value.makeObj(fn_obj));
+}
+
+fn denoteBuiltin(
+    builtin: *const fn ([]Value, *GC, *Env) anyerror!Value,
+    raw_args: []Value,
+    env: *Env,
+    gc: *GC,
+    res: *Resources,
+) Domain {
+    var args_buf: [64]Value = undefined;
+    var args_count: usize = 0;
+    for (raw_args) |arg| {
+        if (args_count >= 64) return Domain.fail(.collection_too_large);
+        const d = denote(arg, env, gc, res);
+        if (!d.isValue()) return d;
+        args_buf[args_count] = d.value;
+        args_count += 1;
+    }
+    const result = builtin(args_buf[0..args_count], gc, env) catch
+        return Domain.fail(.type_error);
+    return Domain.pure(result);
+}
+
+fn applyDenote(func: Value, args: []Value, _: *Env, gc: *GC, res: *Resources) Domain {
+    if (!func.isObj()) return Domain.fail(.not_a_function);
+    const obj = func.asObj();
+    if (obj.kind != .function and obj.kind != .macro_fn) return Domain.fail(.not_a_function);
+
+    const fn_data = if (obj.kind == .function) &obj.data.function else &obj.data.macro_fn;
+    const fn_env = fn_data.env orelse return Domain.fail(.not_a_function);
+    const child = fn_env.createChild() catch return Domain.fail(.type_error);
+    gc.trackEnv(child) catch return Domain.fail(.type_error);
+
+    const fn_params = fn_data.params.items;
+    if (fn_data.is_variadic) {
+        if (fn_params.len == 0) return Domain.fail(.arity_error);
+        const required = fn_params.len - 1;
+        if (args.len < required) return Domain.fail(.arity_error);
+        for (fn_params[0..required], 0..) |p, i| {
+            const name = gc.getString(p.asSymbolId());
+            child.set(name, args[i]) catch return Domain.fail(.type_error);
+        }
+        const rest_obj = gc.allocObj(.list) catch return Domain.fail(.type_error);
+        for (args[required..]) |a| {
+            rest_obj.data.list.items.append(gc.allocator, a) catch
+                return Domain.fail(.type_error);
+        }
+        const rest_name = gc.getString(fn_params[required].asSymbolId());
+        child.set(rest_name, Value.makeObj(rest_obj)) catch return Domain.fail(.type_error);
+    } else {
+        if (args.len != fn_params.len) return Domain.fail(.arity_error);
+        for (fn_params, 0..) |p, i| {
+            const name = gc.getString(p.asSymbolId());
+            child.set(name, args[i]) catch return Domain.fail(.type_error);
+        }
+    }
+
+    var result = Domain.pure(Value.makeNil());
+    for (fn_data.body.items) |form| {
+        result = denote(form, child, gc, res);
+        if (!result.isValue()) return result;
+    }
+    return result;
 }
 
 fn denoteIf(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
