@@ -2,9 +2,10 @@ const std = @import("std");
 const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
+const compat = @import("compat.zig");
 
 pub fn prStr(val: Value, gc: *GC, readably: bool) ![]const u8 {
-    var buf = std.ArrayListUnmanaged(u8){};
+    var buf = compat.emptyList(u8);
     try prStrInto(&buf, val, gc, readably);
     return buf.toOwnedSlice(gc.allocator);
 }

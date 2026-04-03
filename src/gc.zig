@@ -4,13 +4,14 @@ const Value = value.Value;
 const Obj = value.Obj;
 const ObjKind = value.ObjKind;
 const Env = @import("env.zig").Env;
+const compat = @import("compat.zig");
 
 pub const GC = struct {
     allocator: std.mem.Allocator,
-    objects: std.ArrayListUnmanaged(*Obj) = .{},
-    roots: std.ArrayListUnmanaged(*Value) = .{},
-    strings: std.ArrayListUnmanaged([]const u8) = .{},
-    envs: std.ArrayListUnmanaged(*Env) = .{},
+    objects: std.ArrayListUnmanaged(*Obj) = compat.emptyList(*Obj),
+    roots: std.ArrayListUnmanaged(*Value) = compat.emptyList(*Value),
+    strings: std.ArrayListUnmanaged([]const u8) = compat.emptyList([]const u8),
+    envs: std.ArrayListUnmanaged(*Env) = compat.emptyList(*Env),
     bytes_allocated: usize = 0,
     next_gc: usize = 1024 * 1024,
 
@@ -63,21 +64,21 @@ pub const GC = struct {
             .kind = kind,
             .marked = false,
             .data = switch (kind) {
-                .list => .{ .list = .{ .items = .{} } },
-                .vector => .{ .vector = .{ .items = .{} } },
+                .list => .{ .list = .{ .items = compat.emptyList(Value) } },
+                .vector => .{ .vector = .{ .items = compat.emptyList(Value) } },
                 .map => .{ .map = .{
-                    .keys = .{},
-                    .vals = .{},
+                    .keys = compat.emptyList(Value),
+                    .vals = compat.emptyList(Value),
                 } },
-                .set => .{ .set = .{ .items = .{} } },
+                .set => .{ .set = .{ .items = compat.emptyList(Value) } },
                 .function => .{ .function = .{
-                    .params = .{},
-                    .body = .{},
+                    .params = compat.emptyList(Value),
+                    .body = compat.emptyList(Value),
                     .env = null,
                 } },
                 .macro_fn => .{ .macro_fn = .{
-                    .params = .{},
-                    .body = .{},
+                    .params = compat.emptyList(Value),
+                    .body = compat.emptyList(Value),
                     .env = null,
                 } },
                 .atom => .{ .atom = .{ .val = Value.makeNil() } },

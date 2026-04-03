@@ -16,6 +16,7 @@ const Resources = transitivity.Resources;
 const transclusion = @import("transclusion.zig");
 const Domain = transclusion.Domain;
 const transduction = @import("transduction.zig");
+const compat = @import("compat.zig");
 
 // ============================================================================
 // SHARED CONTEXT: Mutex-protected GC + Env
@@ -24,7 +25,7 @@ const transduction = @import("transduction.zig");
 pub const SharedContext = struct {
     gc: *GC,
     env: *Env,
-    mutex: std.Thread.Mutex = .{},
+    mutex: compat.Mutex = compat.mutexInit(),
 
     pub fn init(gc: *GC, env: *Env) SharedContext {
         return .{ .gc = gc, .env = env };

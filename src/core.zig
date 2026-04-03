@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat.zig");
 const value = @import("value.zig");
 const Value = value.Value;
 const ObjKind = value.ObjKind;
@@ -466,7 +467,7 @@ fn printlnFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 fn prStrFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
-    var buf = std.ArrayListUnmanaged(u8){};
+    var buf = compat.emptyList(u8);
     for (args, 0..) |a, i| {
         if (i > 0) try buf.append(gc.allocator, ' ');
         try printer.prStrInto(&buf, a, gc, true);
@@ -484,7 +485,7 @@ fn readStringFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 fn strFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
-    var buf = std.ArrayListUnmanaged(u8){};
+    var buf = compat.emptyList(u8);
     for (args) |a| {
         try printer.prStrInto(&buf, a, gc, false);
     }
@@ -513,7 +514,7 @@ fn applyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     const func = args[0];
     const last = args[args.len - 1];
-    var real_args = std.ArrayListUnmanaged(Value){};
+    var real_args = compat.emptyList(Value);
     defer real_args.deinit(gc.allocator);
     for (args[1 .. args.len - 1]) |a| try real_args.append(gc.allocator, a);
     if (last.isObj()) {

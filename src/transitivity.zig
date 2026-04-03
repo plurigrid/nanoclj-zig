@@ -27,7 +27,7 @@ pub const Limits = struct {
     /// Maximum reader nesting depth (prevents parser stack overflow)
     max_read_depth: u32 = 256,
     /// Fuel: total eval steps before forced termination
-    max_fuel: u64 = 1_000_000,
+    max_fuel: u64 = 10_000_000_000,
     /// Maximum string length in bytes
     max_string_len: u32 = 1024 * 1024, // 1MB
     /// Maximum collection size (items in one list/vector/map)

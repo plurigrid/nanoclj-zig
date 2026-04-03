@@ -17,6 +17,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const transitivity = @import("transitivity.zig");
 const Resources = transitivity.Resources;
+const compat = @import("compat.zig");
 
 // ============================================================================
 // CELL & WIRE TYPES
@@ -88,8 +89,8 @@ pub const Net = struct {
 
     pub fn init(allocator: std.mem.Allocator) Net {
         return .{
-            .cells = .{},
-            .wires = .{},
+            .cells = compat.emptyList(Cell),
+            .wires = compat.emptyList(Wire),
             .allocator = allocator,
         };
     }
@@ -117,7 +118,7 @@ pub const Net = struct {
 
     /// Find all active pairs: wires connecting two principal ports (port 0).
     pub fn findActivePairs(self: *const Net) std.ArrayListUnmanaged(Wire) {
-        var pairs = std.ArrayListUnmanaged(Wire){};
+        var pairs = compat.emptyList(Wire);
         for (self.wires.items) |w| {
             if (w.a.port == 0 and w.b.port == 0) {
                 const ca = self.cells.items[w.a.cell];

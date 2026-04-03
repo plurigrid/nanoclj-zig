@@ -3,6 +3,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const gc_mod = @import("gc.zig");
 const GC = gc_mod.GC;
+const compat = @import("compat.zig");
 
 pub const ReadError = error{
     UnexpectedEOF,
@@ -117,7 +118,7 @@ pub const Reader = struct {
 
     fn readString(self: *Reader) ReadError!Value {
         self.pos += 1; // skip opening "
-        var buf = std.ArrayListUnmanaged(u8){};
+        var buf = compat.emptyList(u8);
         defer buf.deinit(self.gc.allocator);
         while (self.pos < self.src.len) {
             const c = self.src[self.pos];

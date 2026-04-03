@@ -115,7 +115,7 @@ pub fn main() !void {
         const prompt = std.fmt.bufPrint(&prompt_buf, "\x1b[36m{s}\x1b[0m=> ", .{world_name}) catch "world=> ";
         stdout.writeAll(prompt) catch {};
 
-        var line_buf = std.ArrayListUnmanaged(u8){};
+        var line_buf = @import("compat.zig").emptyList(u8);
         defer line_buf.deinit(allocator);
         while (true) {
             var byte: [1]u8 = undefined;
