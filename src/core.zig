@@ -10,6 +10,7 @@ const eval_mod = @import("eval.zig");
 const substrate = @import("substrate.zig");
 const gay_skills = @import("gay_skills.zig");
 const tree_vfs = @import("tree_vfs.zig");
+const inet_builtins = @import("inet_builtins.zig");
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
@@ -86,6 +87,14 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "tree-ids", &tree_vfs.treeIdsFn },
         .{ "tree-isolated", &tree_vfs.treeIsolatedFn },
         .{ "tree-chain", &tree_vfs.treeChainFn },
+        // Interaction net builtins
+        .{ "inet-new", &inet_builtins.inetNewFn },
+        .{ "inet-cell", &inet_builtins.inetCellFn },
+        .{ "inet-wire", &inet_builtins.inetWireFn },
+        .{ "inet-reduce", &inet_builtins.inetReduceFn },
+        .{ "inet-live", &inet_builtins.inetLiveFn },
+        .{ "inet-pairs", &inet_builtins.inetPairsFn },
+        .{ "inet-trit", &inet_builtins.inetTritFn },
     };
 
     inline for (builtins) |b| {

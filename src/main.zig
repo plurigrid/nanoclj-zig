@@ -72,6 +72,8 @@ pub fn main() !void {
     defer core.deinitCore();
     const tree_vfs = @import("tree_vfs.zig");
     defer tree_vfs.deinitForest();
+    const inet_builtins = @import("inet_builtins.zig");
+    defer inet_builtins.deinitNets();
 
     const stdout = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
     const stdin_file = std.fs.File{ .handle = std.posix.STDIN_FILENO };
@@ -172,4 +174,5 @@ test {
     _ = @import("semantics.zig");
     _ = @import("tree_vfs.zig");
     _ = @import("inet.zig");
+    _ = @import("inet_builtins.zig");
 }
