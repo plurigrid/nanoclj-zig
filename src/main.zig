@@ -622,4 +622,5 @@ test {
     _ = @import("sector.zig");
     // sector_boot.zig: x86 real-mode only, skip on ARM/macOS
     _ = @import("regex.zig");
+    _ = @import("pluralism.zig");
 }

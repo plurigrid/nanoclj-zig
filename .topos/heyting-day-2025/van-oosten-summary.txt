@@ -1,0 +1,36 @@
+Jaap van Oosten — Heyting Lecture: "PCAs and Oracles"
+Heyting Day 2025, KNAW Amsterdam, 14 March 2025
+Duration: 1h18m. Video: https://youtube.com/watch?v=_RQY17CmyNA
+(No auto-captions available; summary from Exa extraction + NAW report)
+
+Description (by van Oosten):
+"Categories and Computability" — Every logical theory gives rise to a
+Lindenbaum-Tarski algebra of truth values. For classical first-order logic
+these are all Boolean algebras; for intuitionistic first-order logic, all
+Heyting algebras. Moving to higher-order: classically still all Boolean
+algebras, but intuitionistically we do not know which Heyting algebras arise.
+
+Key topics covered:
+1. Turing's computing machines and oracles as synthetic mathematics
+2. The effective topos where everything is computable
+3. Hyland's embedding of Turing degrees into Lawvere-Tierney topologies
+   (order-reversing, far from bijective)
+4. Scott's graph model P(omega)
+5. Adjunction of non-representable functions to PCAs
+6. Effective operations (type-2 functionals)
+7. Recent work by Takuku Kihara using game-theoretic characterization of
+   oracle computation: Merlin-Arthur-Diane three-player games with bilayer
+   reducibility equivalent to Lawvere-Tierney topology preorder
+
+Q&A topics:
+- Infima/suprema of Turing degrees in the topology embedding
+- Comparing computational strength of different PCAs via applicative morphisms
+- Universality of adjoining type-N objects
+
+Introduction by Benno van den Berg:
+- Born 1957 Klundert, started in Dutch Literature, switched to math 1981
+- PhD under Troelstra 1987-1991 at Amsterdam
+- Permanent Utrecht position 2000
+- Book: "Realizability: an Introduction to its Categorical Side" (Elsevier 2008)
+- Invited plenary at Logic Colloquium (3x) and CT 2014
+- 40+ MSc students, PhD students: Hofstra, Stekelenburg, Zoethout

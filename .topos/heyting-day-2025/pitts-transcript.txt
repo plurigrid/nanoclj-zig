@@ -1,0 +1,1699 @@
+[Music]
+Okay,
+everybody, welcome to uh this year's
+heighting day. Uh the event today is
+organized in honor of uh Yapan O's
+retirement. So you usually the heighting
+day is dedicated to 50 years or 100
+years of uh the anniversary of an
+important paper in logic. So uh in 2019
+it was Fragus the Aadanka and in 2022 it
+was
+Vitsteinatus. So this year we uh diverge
+from this pattern. So well everybody
+knows that L lutter or go or B or
+Margaret
+said the consequence
+to so uh but on the other hand maybe we
+can we can construct a connection with a
+great paper namely Ken's great paper the
+interpretation of intuitionistic number
+theory of 1945.
+Okay, that's 80 years and not 50 or 100,
+but it's still a worthy
+number. Okay, so now after two
+philosophical hiding days, so this is a
+more logic logic day. So the real stuff.
+So uh even
+even if there's still a philosophical
+component. So these lecture today's
+lectures as everybody has seen are uh
+center on themes in Yab's work. So first
+we will have Andy Pittz and he will tell
+us a extremely gripping story
+namely how a puzzle concerning the truth
+value object of higher order
+intuitionistic logic led to a completely
+surprising discovery in intuitionistic
+propositional logic. Then Andre Bower
+will explain to us about the uh
+effective topos. So that's the world in
+which computability is built in into the
+very fabric of the universe. And uh he
+will explain that this topos is indeed a
+good place to uh do recursion theory.
+Uh yeah. So, so that seems to be
+completely self-evident. Of course, you
+designed it for it and then it does what
+it is supposed to does. But my
+experience is that most of the time that
+isn't true. So, uh so uh so uh yeah, so
+it's it it we are going to hear good
+news from
+Andre. So then then we have Bast who
+will uh explain the effective topos. So
+that's sorry that's not right.
+who will explain partial combinatory
+algebbras. So they are the fundamental
+objects that also play an important role
+in the construction of toposes. And then
+of course yapan o. Yeah. So in Dutch we
+have the word faced far and uh but but
+it's a translatable. It would be the the
+festive pig but that's that doesn't feel
+right. uh uh he will give this year's
+hating lecture and he will explain to us
+how the information flow is not just
+from categories to logic but also uh in
+the other direction. So you will hear
+more about Yap's work uh uh uh and and
+about Yap himself uh in Beno's
+introduction uh to YAP. Okay, before
+giving the floor to the first speaker, I
+I want to share some heighting news with
+you. That's surprising. Most of the
+years we do not have specific heighting
+news, but this year we have in 55. It
+turns out that uh uh before he uh
+published his famous book intuitionism
+and introduction, he wrote an article in
+French leiut philosophic. So that's
+about uh uh intuitionistic logic
+explained to philosophers and it has the
+title la conception intuitionist de
+loic. So that paper
+uh starts with the opposition between lo
+and
+loav and so uh their intuitionistic
+logic is presented as the logic of
+knowing. So that's interesting because
+it differs really from what Heiding is
+saying later in in his his famous book.
+And so the news is that a group of four
+logicians Philip Albiani, Dick Dong, and
+Hans Fondetmar and Yangying Wang are
+preparing a translation of this French
+paper in in English and in Chinese. And
+very soon this will be out. So ta stay
+tuned stay tuned to see that uh that uh
+translation come out. Okay, that's all I
+wanted to say. And so now without
+further ado, we move to the first
+lecture which will be chaired by Rosie.
+Thank you. So it's my great pleasure to
+introduce our first speaker, Andrew
+Pittz. Now, I don't think he needs an
+introduction, but I'm going to give it
+anyway because I like that. So, uh yes,
+I know,
+but I'm in
+charge. No. So, uh Andrew Pittz started
+out as a PhD student under Peter Johnson
+to work on, uh the applications of
+category theory in logic and the
+foundations of mathematics. And then
+later with a shift of departments in the
+late
+1980s he um uh started to work again on
+c applications of category theory but
+then in the field of um the semantics of
+programing in languages and as someone
+puts it very nicely I read it somewhere
+that he changed from being surrounded by
+mathematicians to being surrounded by
+computer
+scientists and with a wealth of
+publications supervision of PhD students
+and other students. He has been a great
+is and has been a great influence in the
+field. But I want to take the
+opportunity to also on a personal note
+say something because uh Albert alluded
+to that already that in
+1992 pitch published a paper that he's
+also going to talk about
+uh and something happened that sometimes
+happens in research and that is that
+this paper besides the expected impact
+on the field where it was meant for also
+So suddenly uh it occurred that it had
+consequences in other fields in logic
+and uh in fact many people in the
+Netherlands have worked on this property
+that so to say emerged from this
+paper and for many years and also very
+recently in the last years uh some
+colleagues who are present here and I
+have worked on the development of a
+certain yeah technique improve theory
+where pitch paper was really
+instrumental. So, I'm very grateful for
+that. And with this word of uh personal
+thanks, I want to give the floor to you.
+Thank you. Very good. Oh, thank you very
+much. I'm just going to before I start
+do a sound check. So, if I stand around
+here, are you you're hearing me? Okay. I
+I know there's one member of the
+audience who can hear me because of
+this, but but okay. So, I'll try not to
+wander too much, but if I do, shout at
+me. Okay. So um well first of all thank
+you very much uh to Albert and Beno for
+first of all giving me the opportunity
+to be in this place this august uh
+institution that I've not been in
+before. So it's fascinating uh to to be
+here uh and uh to speak at a a heighting
+day is is a great honor for me because
+um heighting in one way or another um
+has been quite an influence uh on things
+I've done. Um uh
+uh I don't know whether it's true. Did
+Brower say that he thought that
+Heiting's formalization was sterile? Um
+well, I'm a kind of person who likes
+syntax and rules and and formalism. So
+my grip on intuitionism is very much
+coming uh from the point of view of
+formal systems rather than any
+philosophical um um point of view.
+And um the thesis of this talk is not a
+very controversial one. The thesis is
+that uh um if we're going to study
+models of intuitionism and
+computability, so that's the subtitle of
+of this day as it were. Uh then um the
+mathematical theory of categories is a
+crucial technological tool for for doing
+that. So um
+uh you know that's uh we'll we'll see a
+bit of that in this talk, but it's sort
+of evident in in the title of Yab's uh
+book. for example on realizability which
+has the word categorical in it. Uh and I
+must say it's it's very nice to be here
+to to um
+celebrate this young
+man not so young man and his career.
+Yes. So um what I I am uh aiming to do
+uh so I I want to sort of basically make
+some observations about the role of
+category theory in logic and and also
+the influence of logic on category
+theory. Um and the other thing I want to
+do is uh as Rosalie um intimated is that
+um I want to recall for you uh uh what's
+a an open problem to do with um higher
+order intuitionistic logic and and um
+and the bit of category theory that has
+to do with things called
+toposes.
+Uh I haven't actually I was thinking
+about this. It's it's funny. Uh since
+doing uh the work I'll tell you a little
+bit about of in the middle of this talk
+which was sort of in the early 90s. I
+don't think I've actually in fact ever
+given a talk since then um about this
+particular topic. So it's it's uh quite
+a pleasure to be able to do that. But I
+do have a an ulterior motive which is
+that um I really would like to have the
+open question that I'll tell you about
+settled. I don't think at the moment we
+know what the answer to it is. It's
+maybe not the world's most important
+question, but it's kind of embarrassing
+that we don't know what the answer is.
+And I'm sort of hoping that uh some
+young person in the audience will will
+either come to me at the end of the talk
+and say, "Surely it's just x y and zed."
+Um or at least go away and solve it very
+quickly because I think it's probably
+quite solvable. It's just that that I
+and a few other people have managed to
+actually do that. Uh the other thing
+I'll aim to do is to I was told not to
+be too technical. So I'm not going to be
+too technical in this talk and I I so I
+apologize to the people I can see in the
+audience who know far more about most of
+the things that I'm talking about. Uh
+but I've learned over the years that you
+can never be too simple that that even
+you know you gratify the people who
+think that they know what what what the
+stuff is anyway and the people who don't
+appreciate uh not being told things that
+they don't understand too much. Of
+course my idea of what being not too
+technical is might not correspond to
+yours but we'll we'll see. Um so let's
+begin at the beginning. Right. So I I
+can't as it were really um I'm not going
+to to assume that you know very much
+category theory and I'm not really going
+to even tell you what it is but we
+should have some at least some attempt
+to say what kind of thing it is. And and
+maybe you know a good way of thinking
+about it is in terms of what the bathe
+mathematician in the street uh would use
+in the way of foundations or or language
+when describing structures that they
+were interested in studying. and they
+would probably use some sort of set
+theoretic language. So a mathematical
+structure of some kind would be
+described in terms of what kind of
+elements it has and the relations and
+the functions between the elements that
+that are relevant to that kind of
+structure. So, so category theory uh
+approaches mathematical structures in in
+a apparently quite abstract way that the
+only way that you can really talk about
+a structure is by by saying things about
+how structures transform between
+themselves. So, category theorists call
+the transformations morphisms rather
+than
+transformations. Um and uh to know a
+structure you have to know what kind of
+morphisms uh go into that structure or
+what come out of them and how the the
+morphisms compose and at base that's the
+only means of expression that you have
+in terms of of of of those simple uh
+concepts. So it seems on the face of it
+that you wouldn't be able to really say
+anything very much or very interesting
+at at that level level of abstraction.
+But it turns out as as we know that that
+category theory is uh um uh amazingly
+expressive in in in in some ways
+starting with that that base language
+which is transform theoretic rather than
+element theoretic as it
+were and I I'm going to look at two
+places where it's been uh uh useful uh
+to take that kind of category theoretic
+point of view. So one is the use of of
+the cate theoretic notion of a junction
+uh in proof theory and the other will be
+uh to look at particular uh sorts of
+categories called tocoses in relation to
+models of intuitionistic higher order
+logic. So let let's start with with um
+adjunctions and and and prove theory. So
+uh adjointness and adjunctions uh I
+think I'm right in saying that the
+original paper on category theory so by
+Mlan 1945 I guess it appeared didn't
+mention the notion of adjint if I
+remember correctly I think it's probably
+its first appearance in print was 10 or
+so years later Daniel K had a paper in
+1958 about adjunctions but um roll on to
+now and and I think most People would
+agree that the notion of a junction is
+the key concept in category theory. So
+the notion of category and funer and
+natural transformation exists so that
+you can explain what an adjunction is uh
+because they occur everywhere and uh and
+explain lots of disperate different
+apparently different things in terms of
+the of this single notion. So again, I I
+I I'm not going to attempt to define
+what an adjunction is in generality, but
+I thought at least we could see the the
+definition in the simple special case
+where we're just looking at categories
+which have at most one um morphism
+between any two things. So so partially
+ordered sets. So if I if I have a uh two
+post sets P and Q and a monotone so an
+order preserving function between them
+okay then I I would say that um oops
+um I'm getting my buttons mixed up now
+we are so I'd say that that um if you've
+got some element of of the second post Q
+that that the monotone function uh has a
+right adjint at that element Y if you
+can find some element back in P. So
+let's call it G of Y. Okay, with this
+this property so that f ofx is less than
+or equal in Q to Y if and only if X is
+less than or equal to this element G
+Y. Okay. So if that happens for for all
+uh for all X, then I'd say that that
+this element gy was the value of the
+right adjint to the monotone function f
+uh at Y. And if that exists for every y
+then we say that f has has a writer
+joint. So some function g going back
+from q to p. And um this property here
+uniquely determines g of y for a given
+y. And so if you've got one for each y
+then you get a uniquely determined
+function uh extens uh uh extensionally.
+Uh so the right adjint if it exists is
+is is uniquely determined by f and it's
+again a monotone
+function. That's a right adjint. So why
+why write because um uh you see that f
+appears on the left of the left and less
+than or equal and g on the right of it.
+So g is the right adjint to f and the
+dual concept of a left joint would be
+where you just use opposite uh for
+orderings. Okay. So it's a just duly you
+can have left a
+joint. So
+um Bill Lvier and Jim Lambbeck uh sadly
+neither of them still with us uh I guess
+in the late 60s and early 70s observed
+that very many logical constructs can
+actually be characterized by being
+either left or right adjoin to some
+other uh construct that you already
+have. you usually maybe with some extra
+condition. I'm going to in most of this
+talk gloss over that aspect but you want
+sort of the adjoint to not it just
+exists but to be stable under various
+kinds of substitution for it to to work
+out properly. But the point is that um
+uh and what's good about this adjoint
+characterization of logical constructs
+is is this uniqueness aspect. If you
+know that a construct is characterized
+as an adjoin then you know that there's
+that it's uniquely determined. Okay. So,
+so if you're in some kind of of logic
+and you're looking for a a duda that you
+know is supposed to be a right adjint to
+something, then there's only going to
+be, you know, it either exists or it
+doesn't. It's there won't be two
+different choices of such a thing. And
+that's a um philosophically and
+practically quite a useful uh thing to
+know. And um you know, the prime
+non-example of that would be um most
+modal operators are not characterizable
+as our joints. So that I at least to my
+mind gives modal logic a somewhat why it
+feels different to
+me say somewhat distasteful to me even
+if you were to press me. Um but but but
+um I don't really mean that of course
+but uh uh but it but that that is a good
+an important example of something that
+doesn't fall in into this this orbit.
+But many basic logical constructs are
+are characterizable maybe maybe a
+surprisingly large uh number of them and
+and this was the observation that that
+that these guys made back then. So one
+example right I mean if you if we take
+the notion of universal quantification
+right in various different situations
+but let's look at it in height's
+intuitionistic predicate logic okay so
+one way of characterizing what the
+universal oops uh quantifier is right is
+that that so suppose I've got two
+formulas in intuutionistic predicate
+logic and the left hand one doesn't
+involve the variable x okay and so I'll
+use a turntile star symbol for for
+entailment in in this logic. So if pi
+entails s okay and um uh it's the case
+that that um this thing doesn't involve
+x then it's going to be the case that pi
+entails for all xi and vice versa. So we
+we get this this um if and only if
+characterization of of
+um of universal quantification. So this
+is an example of an adjunction right. So
+what's what's the f what's the monotone
+function? It's kind of invisible, right?
+So so in this case it's just the
+weakening operation. So if you take all
+the formulas in some variables y um
+quotient by by intuitionistic
+entailment, those are included in all
+the formulas in y and an extra variable
+x. Uh and that's what so on the that's f
+is being applied there. That weakening
+function is being applied to this
+formula. It's just that uh it's a no op
+as it was as far as the notation goes.
+So you don't see the F on that side. And
+the G is this for all X that is
+restricting formulas to to things that
+don't don't involve X. And G is on the
+right of the turn style and F is on the
+left of the turn style. And you've got
+this if and only if. And then monotone
+uh weakening is obviously monotone for
+entailment. And so we get for all
+cropping up as an instance of a right
+joint in this case to to the to the
+weakening
+operation. Okay. So let's look at that
+now not in in um predicate logic where
+where these fs and size are formulas
+built up from the usual propositional
+connectives and uh quantifiers okay but
+let's look at that now uh uh in the case
+of um of propositional logic okay so now
+I want to um uh take formulas which are
+are built up from um variables that
+stand for unknown propositions things of
+of sort omega as I as I'll say later,
+okay, using just true and false and
+conjunction and disjunction and
+implication, but there are no
+quantifiers or anything like that. Okay,
+so they're just first order
+propositional formula uh in the usual
+log logical connectives and I'm I'm
+looking at the modulo um entailment in
+intuitionistic logic.
+Okay. So, um, we could ask, um, you
+know, if I've got an entailment like
+this, so phi implies pi where where phi
+involves some some variables q and s
+involves the same things and one other
+extra thing p. Could I find a formula to
+replace uh the question mark by um so
+that you get an if and only if like
+this it I would say in you know up until
+1991 the answer if you'd asked anybody
+that they would say no of course not I
+mean you know it's entirely unlikely
+because you have very limited means of
+expression you've just you know the
+formulas have to be built up
+propositionally right there are no
+quantifiers or anything so how on earth
+could it be that you could have
+something like that. So the surprising
+thing was uh that the the do exist first
+order uh propositional formula. So I'll
+call them uh a subp for for all and
+there's a dual e subp for for exist. So
+that would be the left a joint to
+weakening. The a subp would be giving
+the right a joint. But the A is there is
+a formula that fills in the question
+mark for all possible choices of S and
+and and P and and the extra variables Q
+that makes the this um uh this this true
+and I would emphasize this thing is is
+constructed from the variables using
+true and false and and or implies but
+nothing else. So that's um
+uh quite a surprising fact actually. uh
+why why is it surprising? Well, first of
+all, if you think if we were doing
+classical logic, so so boolean logic not
+not heighting logic. Okay, then uh it's
+not this is not a a very tricky problem.
+That's because in classical logic, you
+know, uh
+uh a variable P can't be, you know, you
+can't tell P from uh P equals true or P
+equals false. Now that the formula P if
+and only if true or P if and only if
+false is is is the same thing as P up to
+provability. So so everything internally
+is either true or false. And so we can
+get the quantifiers just by taking our
+formula p and and substituting for for
+the um variable p first true and then
+false and taking the disjunction and
+that would give us something which
+classically fits the the um in here and
+for the exist would be the same thing
+but with a conjunction. So in classical
+logic certainly these things exist but
+intuitionistic logic is far more
+complicated than than than classical
+logic. I mean we don't know um I would
+say in general a huge amount about what
+this thing looks like as as an algebra
+or as as a as a a latis the formulas of
+of first order formulas in propositional
+logic modulo intuitionistic provability
+I mean what do we do know we know that
+you know up to entailment there are
+infinitely many different formula uh uh
+um as long as you've got at least one
+variable around and for two or
+variables, we don't have a very great
+hold over what the explicit structure of
+of the latis of of formula modulo
+provability is. And in particular, right
+here, we're asking with this if and only
+if um there are going to be infinitely
+many uh different Q. If I if I just go
+back a slide here, we're asking with
+this property here.
+Um, this a subp has got to be the
+biggest thing, right? The biggest thing
+with the property that it doesn't
+involve the letter P and is entailed by
+Q. So there will be infinitely many
+different formula in general that that
+um that are don't involve the letter P
+and and lie above Q in the entailment
+relation. And
+um you know we uh the biggest one would
+be like the disjunction of all of them
+but that that's an infinite disjunction.
+So that's not going to be a formula in
+the logic anymore. So, it's not at all
+clear uh why
+um why these things should exist, but
+they do. They do. Um I proved it um
+uh using uh proof theory. Um and it's
+actually quite a good um sort of
+substory about how that happened.
+Um you'll see in a moment why I was
+trying to prove this. I I wasn't
+particularly interested in proving this
+result. I was interested in disproving
+it. I'll tell you why in a moment. And I
+I tried to disprove it. I tried to come
+up with a particular first order
+propositional formula that for which the
+a subp doesn't exist. Okay. and uh
+couldn't and uh um it was only later
+probably about 1991 or something I was
+sitting in a seminar that that the late
+Roy Deoff was giving where he was um
+telling me and the audience about a
+particular presentation of um Gensson
+sequence calculus for uh initialistic
+logic where you expand the number of
+rules for implication so that you get a
+presentation of the sequent calculus
+with the pretty property that that
+there's a a wellfounded measure of size
+on the on the sequence which goes
+strictly down from conclusion to
+hypothesis
+uh which is isn't the case for for the
+usual presentation. So this is this is
+something that Roy Deoff um discovered
+independently. Huddle discovered it but
+it turns out both of them had uh you
+know were were inner ear of the um
+Russian proof theory school of of some
+decades before. So, so uh uh but just
+they didn't know about it but Borf have
+had basically the same system. So it's a
+very nice presentation of of of um
+sequence calculus for for intuitionistic
+propositional logic. So immediately
+shows you that the thing's decidable
+because uh you can't grow your proof
+trees up more than finitely because of
+this wellfounded ordering. But the cool
+cool thing for me was that I I I
+realized actually during the seminar it
+suddenly struck me uh that probably the
+work I'd done on on on trying to work
+out what on earth these things could be
+with a view to seeing that they couldn't
+be uh actually could be proved to exist
+by by doing a kind of rather boring um
+enumeration of possibilities using this
+proof system to to make sure that the
+algorithm terminates. So there is indeed
+a a you know a constructive proof of the
+existence of these things. So that
+they're computable. If you give me a
+formula in uh in propositional logic, we
+can compute its a subp as it were. Um at
+least in principle we can. So I just
+flash up what what the algorithm looks
+like. It's pretty disgusting. And yeah,
+I mean don't even sort of look at it.
+But I I just it's basically one what one
+is going through is that you're you're
+looking at the sequence. you're looking
+at the formulas in them and you're uh
+depending on their structure throwing in
+instances of the thing that you're
+constructing uh at previous stages and
+you're doing this using the wellfounded
+ordering on on the on the multis sets of
+formula. So, so you know that the
+process is eventually going to terminate
+and the thing that you're interested in
+then comes out basically the the the A
+is a big but finite disjunction of
+things you've already constructed and
+the E is a big but finite uh disjun uh
+con conjunction of of
+things. So um there's actually been some
+recent work by Sam Vanul and
+uh Fere um so they they uh they've
+improved the algorithm. Uh I mean it's
+still pro I don't know what the
+complexity of the algorithm is. I'm sure
+it's super bad um in general, but they
+they've um they've done some work um
+oops kind of optimizing it uh a bit and
+also um checking that I was right which
+is always reassuring. So they formalized
+the the algorithm and and the proof of
+correctness. I think if I remember I
+think they did it in um but uh but
+it's good it's really good to to to have
+that and in the process of doing that
+all this the sort of working with
+theorem proving systems it's not just
+checking that the thing that you thought
+was true is true you generally in the
+process of formalization come up with
+better things as well and they've
+certainly come up with a better
+algorithm but another very interesting
+development that took place a few years
+after I published that results as about
+95 or so is that um I mean in a sense
+you don't get a feel really for it's
+just that this process happens to work
+and it's kind of amazing that it does
+but you don't come out of that knowing
+why it works really whereas um uh uh
+Sylvia Galardi and and the late Mar
+Zavadoski they produced a model
+theoretic proof so it's not a
+constructive proof so that's bad but but
+but it's it gives you um you know
+through infinary means a deeper insight
+I think into into what's going on uh
+with this this result. So they they um
+they prove this theorem about the
+existence of these formula basically
+using a duality between so that I'll
+come back to heighting algebbras in in
+in a moment but heighting algebra is
+sort of the algebraic version of of
+intuitionistic propositional logic and
+they developed a duality between
+heighting algebbras and certain kinds of
+sheav with a kind of game theoretic
+structure attached to them and we're
+able to use that to get a model
+theoretic proof of of uh of of this uh
+of this result. A bit later uh San
+Vangul and Reio have a I think a
+slightly cleaner uh version. So they use
+the known duality between heighting
+algebbras and certain uh ordered
+topological spaces that are called
+asakia spaces now and the duality is
+these days called asakia duality. uh and
+it's probably slightly um um uh kind of
+um oversimplifying things but roughly
+speaking why my result is true is
+because if you start with a with a a an
+extension of heighting algebra so a
+morphism of heighting algebra is where
+you can see that the top thing is
+finitely presented over over the bottom
+thing and you flip it over the isakia
+duality you can show that that actually
+becomes an open continuous map and so
+the existence of the left and right
+adjints then follows from from the
+openness. Uh so that's I think is sort
+of the the most conceptual way of of of
+seeing it. I mean of course it doesn't
+explain as it were why it happens. It's
+just a marvelous thing that it does
+happen and you still have to do some
+work uh even if you're working with this
+duality theory in order to to to see
+that that it works.
+um another way of of of um thinking
+about this is in terms of of
+interpolation. So I mention that because
+it sort of um turned out to be uh
+probably you know in some ways the
+better way of thinking about it. So you
+probably know you know Craig
+interpolation if we were looking at the
+Craig interpolation theorem for this
+intuitionistic propositional logic it
+would say that you know if you've got
+one formula entailing another and the
+first one involves some variables and
+this involves some other variables and
+there's a variable in common then Craig
+interpolation says that we can find a
+formula that just involves the common
+variable that sits between the two uh
+with the intelment relation okay so
+that's that's a you know an old theory
+theorem that's true in many systems
+certainly true in in this kind of of
+logic. So you can see that that
+um the result that I proved is actually
+showing you that amongst all the
+possible interpolence that you have
+there's actually a smallest one which is
+given by existential quantification
+interpreted in intuitionistic
+proposition and a biggest one given by
+this uh interpretation of universal. So
+uh not I but others attached the name
+uniform interpolation to this property
+of having least and greatest
+interpolence. And um since uh 1992 many
+people obly among them have looked at
+whether this uniform interpolation holds
+in in other kinds of of logic. You could
+say that many modal logics do satisfy
+univer uniform interpolation but but
+some don't. I mean so S4 for example uh
+uh Galardian Zodosski in 95 they proved
+that S4 doesn't have this property. So
+some do some don't.
+Okay. Well back in n in the early
+90s I certainly hope that intuitionistic
+propositional logic didn't have the
+uniform interpolation property as it's
+now called. Okay. And I want to spend
+the rest of of of this lecture
+explaining to you uh why it was that I
+thought you why it would have served my
+purpose to show that this this property
+does not hold of
+IPL. So to do so we're going to talk
+about toposes and models of
+intuitionistic higher order logic. Okay.
+So let's first of all let me just say
+what I mean by intuitionistic higher
+order logic. Okay. So now we're going to
+do not not first order predicate
+calculus. We're not going to do
+propositional logic. We're going to do
+the higher order version of of predicate
+calculus. Okay. So um we'll have
+variables. Each variable will have a
+flavor a sort. Okay. And in first order
+logic you might just have some basic
+sorts like your variables might be
+ranging over things that you thought
+were numbers or something like that. So
+in higher order logic we we actually
+have a structure on the sorts as well as
+some ground sorts we have. um so are
+formulated in terms of being able to
+take the power sort of of of a of a
+finite sequence of sorts. So you should
+think of a variable of this sort as
+somehow denoting something which is
+going to be a subset of the cartesian
+product of the uh things denoted by by
+x1 through
+xn. So we have that structure on sorts
+and then um for formulas we can just
+very simply just use implication and
+universal quantification over over v
+sorted variables. Okay, built up
+formulas built up using those two
+constructs just from atomic formulas
+that are asserting membership relations.
+So our atomic says that you know that
+this sequence of variables which has
+sorts x1 through xn belongs to to the
+variable that denotes an element of this
+power sort p of x1 through xn. So those
+are the atomic formula and then we'll
+build up implications and universal
+quantifications and you know rather
+marvelously but somewhat impredatively
+uh you don't need to put in uh true or
+false or and or or if and only if or
+exist or even equality. Those are all
+definable uh from implication and for
+all uh uh starting with membership in in
+this in this higher order
+logic. Uh I mean of course you do have
+to have something that says something
+about power sorts. So we'd have a um say
+a comprehension axiom that's asserting
+the existence of of uh elements of power
+sorts for for for you know comprehending
+on some formula fi uh and looking at all
+those things.
+Um so so y collects together those those
+things uh x's that satisfy the formula
+fine. And of course if you've got a
+grand sort with say trying to do natural
+numbers or something you'd throw in some
+some axioms for that some infinity
+axioms but it um it's a very simple but
+expressive system right and I I
+purposely I there are different ways you
+can formulate higher order logic and
+I've chosen the one that's furthest away
+from the category theoretic uh modeling.
+Okay. So, so on the category theoretic
+side, we now know, you know, through
+decades of of interesting work that
+there's a very close correspondence
+between um models of that kind of
+intuitionistic higher order logic and
+certain kinds of of category. So again,
+I can't really give you the precise
+definition, but I kind of sketch what it
+is. So we a category consists of objects
+and morphisms and you can compose the
+morphisms together and you have
+identities and then you can express
+various adjintess conditions using those
+those means of expression. So a topos is
+a category where where you have things
+called finite limits and you have power
+objects. So the finite limits are just
+adoid characterizations of things like
+cartesian product functions being
+injective um inverse image of a subset
+along a function. So these are all
+things that are expressed in terms of
+so-called finite limits and and are
+indeed things that are characterized by
+by um by being adjoint to various things
+that you already have. And then uh a
+little bit more especially we have power
+objects. So again I won't give you the
+definition but it's roughly speaking an
+adjoint characterization of the notion
+of power set and comprehension uh and um
+in terms of a of a an adjointness
+property. So it's also a very um simple
+uh notion uh at base uh somewhat
+different looking from from um from what
+we had uh here. Okay. But but obviously
+there's some connection because of the
+power power objects will obviously be to
+do with um interpreting power source but
+but where do we get the interpretation
+of implication and for all and things
+like that? Well, it turns out that the
+combination of these two things give you
+a lot more than you you you thought you
+might have
+had. So, um the history of this is uh
+you know the prehistory is sort of from
+the second world war up until the
+mid70s. the the work on using various
+kinds of sheath theory in order to get
+results in algebraic topology, algebraic
+geometry, number theory, uh you know,
+culminating in in oops in Alexander
+Growth's notion of a what we would now
+call a growth and topoff. So it's a
+sheet set value sheaves on a very
+generalized notion of a topological
+space.
+in the uh sort of second half of the 70s
+uh Bill Levier and Miles Tierney and
+many other people as well uh realized
+that you could give a um you know an
+elementary in the sense of a finite kind
+of essentially algebraic description of
+of categories that that uh uh you know
+uh should be called toposes. So that
+groven's toposes are examples but rather
+special uh ones that have some good but
+inflammatory properties and the
+definition here I've given you of topos
+is really I should have said elementary
+topos because that's that's what I'm
+defining and the it's these guys who
+discovered the connection with
+intuitionistic logic and higher order
+logic and other things besides then at
+the end of the 70s um uh Martin
+Highlander I should say by the way that
+he he was also my PhD supervisor as well
+as Peter Johnson. So I I I I had much
+richness in the sense of having two
+supervisors. Don't know how that works
+out exactly but lucky me. Um uh so
+Martin um was you know building on
+previous work by Kryle and by his
+supervisor Robin Gandhi and came up with
+the notion of of uh realizability
+toposes which was at the time extremely
+surprising because um whilst it's the
+case that that we had examples of
+elementary toposes that weren't growth
+league toposes they
+were you know kind of not terribly
+interesting. Well, I don't know. I mean,
+that's probably not right to say, but
+but uh the thing is that realizability
+toposes are definitely elementary
+toposes that are not of the kind that
+that growth and dee was was using.
+They're not growth and toposes and uh uh
+and connected to to computability
+through various notions of of
+realizability expressed in terms of
+commentary algebra. So, these are all
+things that in the talks in the rest of
+this day that we're going to hear far
+more about. So I'm not going to say any
+more about them here really except that
+um I want to just
+uh give you a flavor of what the range
+of these kind of different toposes is
+like just in terms of what the the
+different notions of of truth are that
+you get. So let's start with with
+classical truth. So that's usually you
+would think of that as a sort of two
+valued yes no boolean type of truth.
+Right? Well, if we take the let's take
+the two values to be um let's have a one
+element set. So it's one element is
+star. So there are two subsets. There's
+nothing and there's the whole thing.
+Okay. So there are two truth values. And
+um you know we could give we could
+explain the meaning of implication by
+saying you know that star realizes that
+implication if either star realizes the
+the the conclusion or it doesn't realize
+the antecedent. So that would be you
+know the classical explanation of of
+implication in terms
+of not fi or s and the corresponding
+topos is the classical you know is the
+topos of sets and functions in in
+classical say zlo Frank set theory with
+enough
+um universes.
+So contrast that say with what you might
+call continuous truth, right? So that's
+where now the the truth values are open
+subsets of the real line. Okay. Um and
+uh so a real number realizes an
+implication uh by definition if there's
+some small number absylon. So that if
+you're within obsylon of x then y has
+the property that whenever it realizes
+spy then it realizes sigh. Okay. So
+that's a different notion of of um of
+why an implication should be true. And
+uh the the corresponding topos is is uh
+the one you get by taking the real line
+with its usual metric topology and
+looking at set valued sheav on it if you
+know what those are. Don't worry if you
+don't. uh and um in that that's a growth
+topos and uh and the uh the kind of
+truth that that that you've got in there
+is is as far as implication goes is is
+exactly this kind of
+thing. Then uh there's what you might
+call cleanly realizable truth. Okay. So
+now our truth values are going to be
+arbitrary sets of numbers, right? And um
+uh a number realizes an implication if
+uh whenever you have a number that
+realizes the antecedent phi, it should
+be the case that the nth uh partial
+recursive function in some standard
+enumeration of the partial recursive
+functions is defined at m and takes its
+value uh realizing s. So, so to realize
+this implication, you have to be a a
+partial recursive function that maps
+realizers of fi to realizers of sigh. So
+that's really you know one in concrete
+embodiment of the sort of um uh
+heighting comor explanation of of the
+meaning of implication in terms of of
+functionality and the topos uh that's
+overlying this kind of truth is exactly
+Martin Highland's effective topos that
+first appeared in print in in the Brower
+Centenary Symposium volume in
+1982 and well here in talks later today
+more about uh the nature of the
+effective topos and what you can do in
+it. So I won't say anymore
+here but
+um you can see those three notions of
+truth are all somewhat different looking
+things. So what what do they have in
+common? So they're they're all things
+that arise from toposes elementary
+toposes various kinds. So what what kind
+of notion of truth value does a topos
+have in general? Okay. Well, I can't
+answer it. That's not really a very well
+formulated question. But we can kind of
+try and pin that down in a somewhat
+boring way in terms of heighting
+algebbras. Okay. So, aing algebra, you
+know, is to intuitionistic logic as a
+boolean algebra is to classical logic.
+So, it's it's um the algebra as it were
+of of truth values in general. Uh uh you
+know, in terms of order theory, it's
+it's a distributive latis. So you've got
+meetats and joins and the meats
+distribute over the joins. It's bounded.
+So you have a a top element and a bottom
+element and you've got um you know what
+some people will call relative pseudo
+complements or you know better called
+heighting implications I think right
+which are just the the heightings
+explanation in terms of orderetic stuff
+of of what implication in intuitionistic
+logic means.
+So um if you take some theory in
+intuitionistic higher order logic so
+some constants and some axioms over the
+basic stuff of intuitionistic higher
+order logic quotient by provability you
+you get a heighting algebra of of of
+sentences. So the closed formula with no
+variables modulo provability uh is going
+to have the structure of a heighting
+algebra and equivalently the same thing
+you know is true uh for toposes. So if
+you take a topos E and you look at the
+um uh the power object of of of of no
+the list of no things. So that's like
+the the the object of truth values
+subobject classifier as topos theorists
+call it. And if you look at the the the
+the equivalent of the sentences would be
+the global elements of that object in in
+the topos. So this is the set of
+morphisms from the terminal object into
+the subobject classifier. Okay. So that
+carries naturally the structure of a
+heighting algebra coming from the fact
+that E models intuitionistic higher
+order
+logic. So um the answer one answer to to
+this question here is well heighting
+algebbras that they're all heighting
+algebbras. Okay. And I suppose a very
+natural question right then is um uh
+which heighting algebbras all of them.
+Well, the embarrassing thing is as far
+as I know, we don't know the answer to
+this question, right? And so this this
+is the open question I referred to at
+the
+beginning. I is every algebra does every
+heighting algebra crop up in this way as
+as the truth values of some elementary
+topos. So um just one first an easy
+first observation is if you're going to
+answer this question you don't have to
+consider all heighting algebraas you can
+just consider free heighting algebbras
+because um you know every heighting
+algebra is a quotient by filter of of of
+a free heighting algebra and in the
+world of toposes there's something
+called a filter power construction. So
+if you have a filter of truth values,
+you can form a new topos and its truth
+values will be the quotient of the truth
+values in the previous one by the
+filter. So, so it's enough to answer
+this question just for for freeing
+algebbras and um I very much at the time
+I I you know I don't actually know
+whether the answer to this question is
+yes or no now I beyond caring although I
+care but I just don't know but certainly
+in the 1980s I I I I thought that
+probably it would be the case that the
+free heighting algebra countibly many
+generators to be very specific is not
+the not the heighting algebra of some
+topos and that it should be possible to
+prove this and my strategy for proving
+it is quite straightforward right so I
+mean were the free hiding algebra on on
+on x so x might just be the natural
+numbers let's say were it of the form of
+the truth values of some topos the fact
+that that topos models higher order
+logic means that the topos is able
+inside itself to do universal and
+existential quantification over things
+and that has an effect on what you get
+in the truth vales and it's it's not
+hard to see that that um if this
+freehighting algebra is of this form
+then actually intutionistic
+propositional logic has to satisfy the
+what's now called the universal uh
+uniform interpolation property and at
+the time it seemed highly unlikely that
+that property would would be true and so
+I searched and failed to find examples
+of formula in intuitionistic
+propositional logic for which one of
+these A or
+formula couldn't possibly exist and I
+wasn't able to roll on to 1992 and then
+I was able to prove actually they always
+do exist so that's nice right but it
+doesn't answer the question all it does
+is to show that this is a failed
+strategy for resolving the question okay
+so it doesn't resolve the question it
+just shows you that you can't prove it
+one way or another this way okay even
+though it's a interesting result it's
+nevertheless from this point of view
+somewhat
+disappointing what else has happened
+since then to try and resolve this
+question. And I think the main thing is
+to do with somebody called Dto Pateraya
+um who unfortunately died in 2011. So
+he's no longer with us. But in
+2007 he um came up with um a claim of
+resolving this question in the positive.
+In other words, give I give him a
+heighting algebra. He constructs an
+elementary topos whose truth values is
+that heighting algebra. That's actually
+the more interesting answer to the
+question. I mean, we want to resolve the
+question either way, and no is okay if
+it's true, right? But it'd be better if
+the answer were yes, because then we
+would get a whole slew of maybe
+interesting, maybe not interesting, but
+certainly probably new toposes that we
+didn't know about for for given
+heighting algebra. So, so it would be
+nice if the answer were yes. DTO claimed
+the answer was yes, and it his strategy
+is it kind of came in two parts. So the
+first part is that he
+formulated not exactly the the notion of
+what um Peter Johnston and Martin
+Highland and I called tripos a slightly
+different notion but it's sort of one
+situated in in algebraic logic. So
+cylindric algebbras and things like
+that. Uh so he formulated notion of a
+higher order cylindric heighting algebra
+or hotcher uh as he called it. um uh and
+every hotcher has a height algebra of
+truth values. Okay? And every hotcher
+generates a topos in a way that's not
+dissimilar to the way that every tripos
+generates a topos if you happen to know
+that kind of stuff. So all of this is
+absolutely fine and okay and um not not
+the same as as as as tryost to topos but
+but but but not disconnected from it. Um
+then the second step which is the
+difficult one is that that he was
+claimed that he could use Stephan uh
+Stephano Gillard's construction of free
+heighting algebra. So Stephano has a
+paper uh in uh here in 1992 that that
+presents free heighting algebbras as a a
+filtered co-limit of distributive
+latises basically filtering on the
+implication or complexity of of of the
+things in in the free heighting algebra
+and DTO claimed that that he could use
+that to construct a hotcher um whose um
+truth values were the given free
+heighting algebra but he never published
+the details. And as far as I know,
+people who have looked at it to try and
+reconstruct what those details were
+haven't been able to do it. So, as far
+as I'm concerned, this is, you know, I
+don't know quite how he intended to do
+it, and I can't see exactly how to do
+it. But that doesn't mean to say that
+there isn't some way of doing it this
+way. It's just that we haven't thought
+of it. But maybe there's some other
+completely different approach. Uh, who
+knows? Uh, I'm afraid it's, as far as I
+know, still open.
+So um nearly the end of the talk. So I
+would my only purpose in giving this
+talk really apart from from sort of you
+know socializing category theory um was
+in the hope that somebody might be
+sufficiently interested to resolve this
+question for me. But I uh but over and
+above that I'd say that you know what
+what's the moral of my talk? Well
+category theory you know uber ales as
+they say. No, no. Well, um, it's
+certainly a, you know, a sinqua non for
+understanding how to link logic to
+geometry in the sense of sheath toposes
+and link it to computation uh, through
+notions of of
+realizability. And, you know, we've
+known that for, you know, and and built
+up on it over some decades in the modern
+era. So, sort of, you know, post 2010 or
+whatever. Um there's a a somewhat
+different but related kind of thing
+going on and that's that's that um
+people are in you know from growth and
+deonwoods have been interested in trying
+to to to get a better grip on homotopy
+theory of spaces maybe not all
+topological spaces maybe some kind of
+tame uh space and higher dimensional
+category theory uh is is uh has long
+been known to to to provide a sort of
+combinatorial uh uh setting in which you
+you can you can get to grooves with
+that. But high dimensional category
+theory, at least as far as I'm
+concerned, is really a tough subject. So
+I I I've got a a misquote here. The DS
+here is Dana Scott. Okay? And I'm
+misquing him because actually what he
+said that sucked is just two category
+theory. I remember being in a in a a
+conference where where some Australian
+category theorists were telling him
+about some stuff and he just said, "Oh,
+this sucks." Um, so if two category
+theory sucks, then infinity category
+theory clearly, you know, sucks to the
+to to to
+to the power n for any
+n. I mean, some people live and breathe
+it. I find it quite hard. I just kind of
+have
+a a kind of black spot when it comes to
+things like simplicial sets and so on.
+But that's just my failing. But what we
+can say is actually logic and in
+particular various brands of Martin Left
+type theory are terribly useful kind of
+going back the other way. It's not not
+so much explaining logic in terms of
+category theory but using the logic as a
+as a language an internal language to
+make it easier to talk about
+highdimensional categories and and the
+and the relation to to homotopy theory
+and also to to to get an account of
+things like univerence and so on where
+where there's computational content. So
+I'm thinking here of the work that Terry
+Khan and his collaborators have done on
+so-called cubicle type
+theory. So this is a very interesting
+thing but it's a story for another time.
+And so um for the moment that's it.
+Thank you very much for your
+attention. Thank you. Thank you. Maybe
+let's try to Q&amp;A without the microphone.
+So speak out loud. You have to say
+something. Are there questions or
+commands?
+I was um sort of confused in the
+beginning. It seems to me that in
+classical propositional logic if
+something is true for all
+propositions that is true for true and
+yes. Yes. So that's that's this maybe it
+whizzed by a bit too quickly. That's
+what I was trying to indicate just on
+the bottom line. Where's it gone? It'll
+come. Sorry. Be there in a moment. Yeah,
+here we are. This bottom line here. So
+in classical logic that that there's no
+problem with with defined quantifiers
+because you just instantiate a true and
+false and take a conjunction or a
+disjunction. Exactly.
+Oh, did I? Sorry. Did I do it the wrong
+way around? It's always good to have a
+typo in your slides, you know. So,
+sorry. Yeah, perhaps you were confused
+very all quantifiers are in usual
+smaller.
+Um, well, not in my world. Not in my
+world. They're
+not in my world. There's no relationship
+between the two really because you don't
+have you have possibly empty domains. So
+true. Yeah.
+Most most domains are not empty. Well,
+how do you
+know? No, I'm being facitious. I mean,
+my attitude to things like that is a
+kind of utilitarian or pragmatic one.
+So, so I care about say, you know,
+indigenistic logic more because it's um
+the appropriate logic for doing things
+in certain categories. So, so in those
+categories it's not the case that you
+know that objects are inhabited uh in
+the sense of knowing that they have
+global elements generally. So you do
+have to work with with with that. Yeah.
+Yeah. Other questions. I mean just on
+the disjunction conjunction thing though
+I mean but it is the case right that
+that
+um you look here that that the what what
+I'm when I was talking about disjunction
+conjunction it's the the the the for all
+thing is built up as a disjun
+disjunction of of things that you've
+built up so you're building up to this
+biggest thing from below and the exist
+is a big conjunction of things that
+you're getting coming down from above so
+that that's that's that's it.
+Yeah. Yeah.
+Yeah. I just wanted to remark
+that last September I was visiting
+conference in
+there I discussed with
+Oh yeah. Who is in possession of the
+mysterious last
+Yes. But I don't think he's ever gone
+around analyzing what meant to say.
+Yeah. Yeah. Yeah. We we I had a we Peter
+and I had a meeting with with DTO in
+whenever it was 2007 and so I have notes
+of the talk that he gave and it's very
+frustrating because it reaches a certain
+point where you think yes right right so
+now we're going to do it this way. What
+do you do? And I think he ran out of
+time or something. So we didn't we
+didn't really nail him down in the way
+that we should have done. Uh yeah,
+you're right though. Amoka probably does
+have material that you know that could
+be mined. Your conjecture has not been
+forgotten. Yeah. Yeah. But it hasn't
+been resolved unfortunately which is
+kind of I mean I think it's a good
+conjecture because unlike some
+conjectures I don't think actually it's
+probably in the end that hard. I think
+it is resolvable. It's just that that we
+need maybe a new insight or something.
+But but I don't I that's a good thing
+right. The bad thing is that when you do
+resolve, it's not the most
+earthshattering fact to know about, but
+but it would still be a good thing to
+know.
+Do you have any idea?
+So, it's a matter of studying the
+freeing.
+Yeah. And probably on Yeah. Yeah. So,
+what would be the relationship
+between uncountable?
+Oh, I I don't know. Um, but that's
+probably not so important. I think uh
+once you I mean you can if you can
+resolve this for countably many uh
+variables, then you you're good, right?
+Because every formula only involves
+finitely many. So So that's not bad. I
+think the problem is going down the
+other way. So freehing algebraas on
+finitely many generators. Um well,
+they're all infinite apart from the one
+on no generators.
+So, but what
+about finite heighting algebbras? Okay.
+So, so that's a Stephano
+Gillard's character which builds on I've
+forgotten the the the man's name but I
+mean it's not dissimilar to other
+analyses but just rather cleaner. He he
+gets the the infinite free heighting
+algebra as a filter kim finite heighting
+algebbras. They're all finite
+distributive latis. Every finite
+distributive latis is complete. Hence is
+a heighting algebra. The cool thing is
+can you include one in another in a way
+that it preserves any existing
+implications and the answer is you can.
+And so you take the filtered the union
+as it were of these finite distributive
+latises. Each of them have got enough
+implications and their implications that
+exist are all being uh preserved as as
+you go up the inclusions and in the
+limit you get something that is not only
+a distributed latis but pick any two
+things and they're somewhere in the
+finite chain got an implication. So then
+you've got implications everywhere and
+it turns out that that's doesn't you
+know that's completely free and so that
+that's the description of the free
+heighting algebra and you could do it on
+uncountably many generators it would
+just be the the same sort of thing. So
+somehow leveraging that fact. So every
+finite distributive latice is a complete
+distributive latice has a topos because
+every complete heighting algebra. I mean
+we know amongst toposes that complete
+heighting algebra certainly have toposes
+because you can do sheav on a complete
+heighting algebra you get truth values
+of that heighting algebra but the
+filtered co-immit involved isn't a
+filtered co-immit of logical functors
+between toposes. So yeah, so that
+doesn't you can't immediately get the
+answer like that, but maybe something
+like that is going to work. And that's
+what he had in mind. It's just I don't
+quite know how he was going to get the
+uh the thing to work in the end. Yeah.
+So
+other questions? Yes, please.
+Thanks
+very loud.
+I'm wondering
+about what
+happens
+to actually counter examples.
+when you assume smallness.
+Yeah. I don't know. Uh maybe um yeah, on
+the Yeah. So, you're suggesting sort of
+let's go at the negative side a bit a
+bit um more seriously. Uh that would be
+worth doing. I mentioned another sorry,
+not completely unrelated to that. If I
+just flick back to um
+here, here's a negative result. I
+mentioned it. Uh where is it? Oops.
+Sorry, far
+too. Yes, there we are. This is an
+interesting result because um we know
+something about S4 versus toposes,
+right? So uh uh boolean topos with a
+with a distinguished um geometric
+subtopos would give you a model of S4.
+So this is I guess saying that that you
+know amongst the boolean topos is
+equipped with a with a subtopos. You
+look at the truth values there. uh
+they're probably um not going to be all
+possible models of S4 because of this
+reason that because they construct here
+a specific model of S4 which is uh uh
+which doesn't have uniform interpolation
+and yet if it was uh the the truth
+values of of a topos with a given
+subspace then it would so so so that's a
+negative result it's just not the
+negative result that we want in general
+but uh Yeah.
+Um, so thanks a lot for your wonderful
+talk. Uh, so it seems like you're you
+have invitation of second order
+proposition logic into first order
+proposition logic. Intuitionistic. Yes,
+that's right. Yes. And it's a bit
+surprising your second order proposition
+logic is undecidable. First order
+proposition logic is so so I that that's
+why I didn't think it could possibly be
+true. Yeah. How can I match that up?
+Well, yeah. I mean, uh I mean, the fact
+that you have the interpretation doesn't
+doesn't help you decide things in in
+second door logic at all, right? Because
+it's it's you know, it's an incredibly
+collapsing interpretation. is a very
+special I mean in the I mean from the um
+duality point of view you you get that
+the opposite of the category of finitely
+presented heighting algebbras is
+basically a a model of of first order
+intuitionistic logic so it's it's is you
+know the theory of heighting algebraas
+has a model companion and and that
+theory is a very special one so so in
+that theory uh for all commutes with
+disjunction right so and that's true
+here with these quantifiers, right? When
+you do an AP over a disjunction, it's
+the disjunction of the for all. So
+that's a very, you know, special
+property. So, so it's it's a very it's a
+very special interpretation. It's not at
+all general. Yeah.
+Yeah. So, I just wanted to make a
+historical remark. So,
+uh uniform interpolation was uh
+independently discovered by
+who worked on uh the problem of
+embedding recursively innumerable
+Margari algebbras into the Mari
+algebra of piano
+arithmetic. So um the so the point was
+if I remember so he proved it for L's
+logic. Uhhuh. So the
+uh proof is very difficult to follow. He
+in his paper he describes it as a fist
+fight. And so it's really you take
+crypty models and then you do something
+then it work doesn't quite work and then
+you use something else and that that
+iterated five six times. So I I never
+really completely understood blood proof
+and I think Later
+um Dominico
+Zambella made a simpler version of FA's
+proof in which the need for uniform
+interpolation was not present but that
+was because he just considered finitely
+many generators and I think so FA needed
+the uniform interpolation to do the
+proof I see
+for recursively
+innumerable algebra on infinitely many
+generators
+and so later I had to adapt proof to
+prove the result for IPC
+and were you able to
+using that but I couldn't because the
+fist fight was too much for me and so
+only when I completely said let's start
+a new so I discovered
+the proof that of which I found out
+later that on Zavagski already have it.
+Yeah. I mean, there's always a fist
+fight. It seems improving, but I would
+say that the the least fisty cuffs are
+probably in in Sam and and
+Reio's account of of the subject. You
+still still have to get your sleeves
+rolled up a bit, but uh yeah. Uh yeah.
+Yeah.
+Apparently,
+yes. I mean I'll probably put them on my
+web page at some point as well but yeah.
+Yeah. Yes.
+I just want to ask the question
+about going in the positive direction.
+Yeah. Do you know so some hiking algebra
+are known to appear as you mentioned
+like complete ones. Complete ones. Yeah.
+Well obviously finite ones are complete.
+And from what I know also all boolean
+algebra. Yes. Certainly. Yes. Do you
+know any other nice class?
+Uh
+um not really. Not off the top of my
+head. Um I probably did. I may have
+forgotten, but um yeah, I mean we don't
+we don't really have a great means of
+construction of different really
+different sorts of writing algebas.
+That's the problem. the the um yeah uh
+so my my my sort of straight answer is
+no I don't but uh um yeah uh
+yeah I mean it's kind of irritating it's
+you feel like I mean the boolean algebra
+is one it works because you can um you
+know you're
+you every boolean algebra is a filter co
+of finite boolean algebbras and and
+every finite boolean algebra you can you
+know is complete and you can form
+sheav's
+on it and uh so it's you know you get a
+topos but the problem is that that that
+filtered system of toposes in that case
+a logical functions and so when you take
+the co limit you you get a topos again
+but but with heighting algebra it
+wouldn't be uh logical functions and so
+you wouldn't you know it's not that
+simple precisely because of that so
+would that be true for any locally
+finite hygiene algebra so for instance
+any algebra I don't think so probably uh
+yeah you don't think I don't know well
+I my mind has been corrupted by thinking
+about unalance and and homotopy tai
+theory for the last few years. So I've
+forgotten a lot. I used to know quite a
+lot about hiding algebraas because I got
+so frustrated with trying to prove this
+result and I think I probably forgotten
+most of it. But uh yeah, I think the
+problem with the literature is it's
+actually kind of quite a bit scattered
+and it's very hard to to uh nobody's
+really as it were written the the uh the
+the compendious account of part partly
+because it's somehow slightly
+unsatisfying in in what we don't know
+what we do know but yeah
+I think we should leave it at this and
+move to the break so where you can ask
+further questions let's take our Thank
+you very much.

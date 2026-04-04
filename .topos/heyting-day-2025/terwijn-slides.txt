@@ -1,0 +1,258 @@
+Embeddings and Completions in Partial
+Combinatory Algebra
+Sebastiaan Terwijn
+Radboud University Nijmegen
+Heytingdag
+KNAW
+March 14, 2025
+
+Theories of computation
+• Combinatory algebra (1924 Sch¨onﬁnkel, 1930 Curry)
+• λ-calculus (1936 Church)
+• Computability theory (1930s G¨odel, Church, Turing, Kleene)
+▶recursive functions
+▶Turing machines
+▶...
+
+Provable versus computable
+• G¨odel 1931, uses recursive functions to prove result about
+provability.
+• Constructive mathematics, Brouwer etc.
+• Heyting 1930, intuitionistic logic.
+• What is relation between provability in restricted logic and
+computation?
+• Kleene 1945, realizability.
+• Computability, provability, constructivism, all connected from
+the beginning (and studied by the same people).
+
+Partial combinatory algebra
+A partial applicative structure (pas) is a set A together with a
+partial application operator.
+• a · b
+“a applied to b.”
+• We often simply write ab, and we write ab↓if this is deﬁned.
+• Convention: abc means (ab)c.
+• terms over A are built from elements of A, variables, and
+application.
+• For closed terms t and s, we write t ≃s if either both are
+undeﬁned, or both are deﬁned and equal.
+
+Partial combinatory algebra
+A pas A is combinatory complete if for any term t(x1, . . . , xn, x)
+there exists b ∈A such that for all a1, . . . , an, a ∈A,
+(i) ba1 · · · an ↓,
+(ii) ba1 · · · ana ≃t(a1, . . . , an, a).
+N.B. This is the abstract analogue of the S-m-n-theorem.
+A pas A is a partial combinatory algebra (pca) if it is combinatory
+complete.
+
+Partial combinatory algebra
+A pas A is combinatory complete if for any term t(x1, . . . , xn, x)
+there exists b ∈A such that for all a1, . . . , an, a ∈A,
+(i) ba1 · · · an ↓,
+(ii) ba1 · · · ana ≃t(a1, . . . , an, a).
+N.B. This is the abstract analogue of the S-m-n-theorem.
+A pas A is a partial combinatory algebra (pca) if it is combinatory
+complete.
+Theorem (Feferman 1975) A is combinatory complete iﬀthere
+exist combinators k and s with
+(i) kab↓and kab ≃a,
+(ii) sab↓and sabc ≃ac(bc).
+
+Examples of pcas
+• Kleene’s 1st model K1: n, m ∈ω
+n · m = ϕn(m)
+• Kleene’s 2nd model K2: α, β ∈ωω
+α · β = Φα(β)
+• Scott’s graph model G: X, Y ⊆ω
+X · Y =
+
+n | ∃u(⟨n, u⟩∈X ∧Du ⊆Y )
+	
+Note the relation with enumeration reducibility:
+Z ⩽e Y iﬀZ = X · Y for some c.e. X.
+• any model M of PA gives a pca:
+let ab↓= c if M |= ϕa(b) = c.
+
+Examples of pca’s
+Many more examples in the books by
+Beeson, Troelstra–van Dalen, Odifreddi,
+van Oosten, Longley–Normann, ...
+
+Logic Colloquium Leeds 1997
+JvO invited talk:
+Partial combinatory algebras for sequential computation
+
+Inputs as functions
+Note the familiar double role of numbers n ∈ω in computability
+theory: n is both an input and a function ϕn.
+Other examples of this in mathematics:
+• Every continuous f : R →R can be coded by a real, so every
+x ∈R is both input and a partial continuous function. This
+gives Kleene’s model K2.
+• In algebra, if G is a group and a ∈G, then a gives a function
+on G deﬁned by x 7→ax. This observation gives Cayley’s
+theorem that G is isomorphic to a subgroup of the group
+Sym(G) of permutations of G. However, this example does
+not give a pca: No nontrivial group is a pca because no pca is
+associative. (Also, no pca is ever commutative.)
+
+Embeddings of pcas
+An embedding of pcas is an injection f : A →B that preserves the
+structure of application. Various possibilities:
+• Consider the combinators k and s as part of the signature.
+• Do not consider the combinators k and s as part of the
+signature.
+The diﬀerence between these is huge. Both are used in the
+literature. Here we will take the second option.
+• An even weaker notion: applicative morphism (Longley).
+
+Embeddings and completions
+An injection f : A →B is a weak embedding if for all a, b ∈A
+A |= ab↓=⇒B |= f(a)f(b)↓= f(ab).
+Notation: A ,→B.
+If in addition for a speciﬁc choice of combinators k and s of A,
+f(k) and f(s) serve as combinators for B, we call f a strong
+embedding.
+If B is total we call it a weak/strong completion of A.
+
+Strong completions
+Example K1 is strongly completable.
+Question (Barendregt, Mitschke, and Scott 1974)
+Does every pca have a strong completion?
+Theorem (Klop 1982, Bethke 1987, Bethke, Klop, De Vrijer
+1999) No.
+
+Weak completions
+What about weak completions? Since every pca has combinators k
+and s, one would expect a similar answer. However:
+Theorem (Engeler 1981/2021) Every pca has a weak completion.
+The proof is purely syntactic.
+
+Weak completions
+Theorem (Golov-T 2023) Every countable pca weakly embeds
+into K2.
+Theorem (Golov-T 2023) K2 ,→G.
+Corollary Every countable pca is weakly completable.
+Klop’s counterexample is countable, so we have:
+Corollary There exists a pca that is weakly completable, but not
+strongly completable.
+
+K2 generalized
+K2 is a pca on ωω. It was introduced in Kleene-Vesley 1965.
+Kκ
+2 is a pca on κκ, for cardinals κ with κ<κ = κ.
+To guarantee existence of such κ > ω we need some extra
+set-theoretic assumptions.
+
+Unique head normal forms
+Given a choice of combinators s and k, the head normal forms
+(hnfs) are all elements of the form s, k, ka, sa, and sab. Each of
+these ﬁve types of hnf is called dissimilar from the other four.
+A has unique hnfs if
+• no two dissimilar hnfs can be equal in A,
+• Barendregt’s axiom holds in A: for all a, a′, b, b′ ∈A,
+sab = sa′b′ =⇒a = a′ ∧b = b′.
+Theorem (Bethke, Klop, De Vrijer 1996) Every pca with unique
+hnfs is strongly completable.
+Theorem (T 2023) Kκ
+2 has unique head normal forms, hence is
+strongly completable.
+
+Large embeddings
+Theorem (T 2023) Assuming GCH, for every pca A there exists a
+cardinal κ such that A weakly embeds into Kκ
+2.
+Since Kκ
+2 has a strong completion, A has a weak completion.
+We can get rid of the assumption GCH by switching to a binary
+variant of Kκ
+2.
+
+The complexity of completions
+Since K1 has unique hnfs, it has a completion. The resulting term
+model is not decidable. Indeed, computable (total) combinatorial
+algebras do not exist.
+∅′ denotes the Halting Problem, and
+X′ denotes the Halting Problem relative to a set X.
+X is called low if X′ ⩽T ∅′.
+Theorem (T 2023) There exists a strong completion A of K1 of
+low Turing degree.
+
+Complete extensions of PA
+Theorem (T 2023) The following are equivalent for any set A:
+• A computes a weak completion of K1,
+• A computes a strong completion of K1,
+• A computes a complete extension of PA.
+In the case of PA degrees more is known, namely that they are
+closed upwards (Solovay). We do not know whether the degrees of
+(weak or strong) completions of K1 are also upwards closed.
+
+Embeddings
+Let B denote the van Oosten model. (Essentially this is K2 for
+partial functions.) We have the following sequence of weak
+embeddings (from Shafer-T and Golov-T):
+K1 ,−→K2 ,−→B ,−→G
+Question B ̸,→K2 ? G ̸,→B ?
+
+Embeddings
+Let B denote the van Oosten model. (Essentially this is K2 for
+partial functions.) We have the following sequence of weak
+embeddings (from Shafer-T and Golov-T):
+K1 ,−→K2 ,−→B ,−→G
+Question B ̸,→K2 ? G ̸,→B ?
+For the eﬀective versions of these we have
+K1 ,−→Keﬀ
+2
+,−→Beﬀ,−→E = Geﬀ
+Nonembeddings: Keﬀ
+2
+̸,→K1, Beﬀ̸,→Keﬀ
+2 , E ̸,→Keﬀ
+2 .
+Question E ̸,→Beﬀ?
+
+Extensionality in pcas
+A pca A is called extensional if
+∀a ∈A(fa ≃ga) =⇒f = g
+for all f, g ∈A.
+
+Extensionality in pcas
+A pca A is called extensional if
+∀a ∈A(fa ≃ga) =⇒f = g
+for all f, g ∈A.
+Friedberg famously proved that the class of partial computable
+functions is c.e. without repetitions. In Odifreddi it is stated that
+the existence of an extensional pca follows from Friedberg’s result,
+with a reference to Kreisel 1971. Indeed, Kreisel suggested this,
+but he explicitly says that he did not verify this result:
+“...there are two ways of treating extensionality. [The ﬁrst is proof-theoretic]
+Another is to appeal to an enumeration without repetition; but I have not
+stopped to verify the obvious essential point whether the axioms of BRFT are
+in fact satisﬁed for such an enumeration without repetition...”
+
+Extensionality in pcas
+Suppose that ψe, e ∈ω, is a Friedberg enumeration of all unary
+p.c. functions. It seems plausible that one could make this into an
+extensional pca, with the intended application operator
+n · m = ψn(m).
+To prove that this yields a pca one has to show that there exist
+combinators k and s. The statement of Friedberg’s theorem itself
+is not suﬃcient to prove this. Namely, for every a there is a code
+ka of the constant a function in the enumeration, but we cannot
+ﬁnd such codes uniformly in a. Hence we cannot prove that we
+have a combinator k satisfying kab = a for every a and b. This
+obstacle, however, can be overcome by an adaptation of the proof
+of Friedberg’s result. However, for the combinator s no such
+adaptation is possible.
+
+Extensionality in pcas
+Theorem (T 2020)
+(i) There exists an extensional pas on the set of all partial
+computable unary functions, containing a combinator k.
+(ii) There exists no such a pas with the combinator s.
+(iii) There does not exist an extensional pca on the set of all p.c.
+functions (with application the intended one)
+Despite the failure of this, extensional pcas do exist, as was proven
+by Bethke and Klop 1996. This existence gives another proof that
+there exist pcas without a total extension.

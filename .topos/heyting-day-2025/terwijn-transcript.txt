@@ -1,0 +1,284 @@
+[Music]
+okay we have some time for
+questions
+please yeah thank you for your
+interesting talk I have a small
+technical question about the beginning
+when you introduced fre ferment system
+you have this
+equality only for close terms why only
+for close terms why not for all terms
+well what would it mean for one variable
+to be equal to another
+variable you could universally quantify
+them if you
+like but you may have terms which
+contains constants and variables but to
+fully exclude them if I have a variable
+X and a variable y why when would I say
+they are
+equal I don't know what that means I
+mean you could say they are
+equal what yeah I don't know well you do
+so in equational logic you also have
+Expressions xals
+y yeah but so then they can be true or
+false depending on how you instantiate
+the variables yeah but I want to say
+that terms are equal or not if they are
+variables it depends yeah so that's why
+I had only for close terms because then
+I have a definite answer whether they
+are equal or not I see I mean you're
+right I can still have equations with
+terms with variables but uh but did fman
+do it already that way uh I think so
+yeah yes uh yeah well I think so yeah
+I've
+oh
+yeah yes
+I I always found the partiality aspects
+of partial Com or algebra is to be a
+real pain in the backside but but
+leaving that aside uh has anybody I mean
+a natural thing to consider when you're
+looking at morphisms would be partial
+functions between pcas rather than total
+ones that would somehow fit more in the
+picture does has anybody sort of studied
+partial embeddings or
+um no not that I'm aware of um I like
+the partiality because it includes more
+examples so it increases our stock of
+examp and like clean's first model is
+certainly much more natural with a
+partial application than with a total
+one so that's one reason for me you know
+I'm I'm I'm computability theorist so
+you will understand this first model is
+did to my heart because I work in it
+daily um yeah it's a good question I
+don't know if that has been looked at I
+don't know any refence for
+that
+yeah so so it is known that the that
+comprehension and extensionality lead to
+to problems like Russell's Paradox I'm
+wondering in this result here how does
+that relate to to such an
+observation
+um I don't know um it's interesting you
+mention Russell's Paradox because it
+does play a role also in this context uh
+um maybe people have forgotten but when
+Church introduced the Lambda calculus
+originally he intended it as a
+foundation for mathematics so he
+included logic so it was not only the
+function application for formalism but
+also logic and if you combine the two it
+becomes inconsistent because you get FR
+Paradox
+so this is sort of interesting because
+twice in not too long period Russell's
+Paradox killed a formal system um so
+when this was pointed out to him of
+course he immediately ditched the logic
+part and kept the the LDA calculus part
+which we now all know um yeah I don't
+know of any other
+uh remark to make about that in this
+context but yeah so it sort of hovers
+around
+here other
+questions thanks um thanks for the
+interesting talk so John longly um
+motivates his applicative morphisms
+which I think at some point got renamed
+to simulations which makes a lot of
+sense um uh because he relates them to
+realizability Theory and category Theory
+there is a correspondence between
+simulations and functors between
+relibility
+um
+models are there sort of maybe
+presumably of a different kind reasons
+why you know that the weak and the
+strong embeddings are so to speak the
+correct notion to study yeah that's a
+that's that's a that's a good point I
+mean so there are these various ways to
+look at these mappings and as you say
+thetive morphisms I thought that in the
+book by long and Norman there was still
+called
+applicative but but okay so simulation
+is also a good word because it that's
+exactly what it means it means that the
+PCA B that you map into can simulate the
+original one so that's that's that
+that's it's certainly certainly notion
+and I guess in the categor so y includes
+that in his book because in the
+categorical context it makes sense to
+look at these mappings from an algebraic
+Viewpoint the weak and the strong uh
+embeddings certainly make sense so uh
+and as I said the they existed before in
+the literature I wouldn't claim that any
+of these is the right one uh I think
+they're all interesting for each each
+has their own reasons to be interesting
+so to say it would be interesting to see
+so I've been studying the embeddings at
+the level of the pca's sort of purely as
+algebraic structures of course you can
+ask followup questions what if you have
+an embedding of PCA of each of these
+kinds what kind of consequences does
+that have for the structures that are
+built on top of them um yeah that's I I
+don't know that's a good
+question okay two more well obviously op
+should have a chance to ask a
+question yeah about Al thank you very
+much um I have a maybe a stupid question
+when I think about the completion of a
+PCA right I take uh the diagram of a
+maybe I I I I express the the the
+application relation is a tary relation
+right so it can take the the the diagram
+of a together with the aims for K ands
+which are simple sentences and
+uh uh and and the statement that
+application is
+total now in a case of a non-com
+completable PCA this is an inconsistent
+Theory so there's only there's a finite
+part of it which is
+inconsistent by the competance theorem
+can you can you
+imagine what kind of finite
+parts are
+inconsistent uh yeah I think we have to
+get very syntactical here so this
+counter example of klopp from the 80s
+con struct something horrible uh in a
+purely syntactic way to make sure things
+go wrong uh and the the proof is uh you
+know pages of uh sort of arbitrary
+looking uh uh things with expressions
+with K and S in
+it
+okay so that it's very hard to extract
+any informal idea out of it let's hope
+let's hope it it's not an example of
+long analysis wrong
+analysis uh no well we know that yeah so
+okay um I'm not so we had other examples
+as well like like I say we know if you
+have an extensional PCA you also
+get those certainly exist um but yeah
+that there I don't know what the answer
+to your question is for those examples
+uh that presumably be some different
+argument uh but you're right it should
+go wrong at some finite level I don't
+know it's probably some some very
+complicated expression I don't
+know okay they're not very natural these
+uh these things I I think all the
+natural examples of PC I know they all
+have completions so in that sense they
+are sort of
+unnatural um about these uh about the p
+uh
+about the set of all partial computable
+unary functions uh can you give a
+characterization of what kind of comat
+don't exist other than
+S uh no I only know so K is no problem
+but so s doesn't exist uh I I just to
+show that something that it doesn't give
+a PCA I only have to show s doesn't
+exist so I'm sure other things don't
+also don't exist but I I have no
+particular reason to be interested in
+other combinators so it's enough to have
+one of K ands not exist so
+uh and it's of course the S combinated
+which gives the problem because K is
+just projection so that is
+easy thank you any more
+questions I'll ask one then um have you
+thought about the ordered case so when
+you have ordered yes I I even had some
+slides about that uh so in the part
+which I didn't discuss the computable
+model theory part
+there was an interesting question about
+the the isomorphism problem for pcas so
+what do people do in computable model
+Theory first of all they do model Theory
+but they first restrict their attention
+to computable structures and then they
+ask what the complexity of classical
+things like how difficult is it to see
+that two linear orders are isomorphic or
+two Vector spaces or two other whatever
+spaces you're interested in and
+typically for various basic kind of
+structures this turns out to be very
+hard because the even if you have two
+computable structures the isomorphism
+may be very complicated so this is
+typically gives you things that are at
+the level of Sigma 1 one so higher than
+the arithmetical hierarchy
+um with Kina in Vienna we looked at this
+isomorph impr problem for
+pcas um we didn't do it for computable
+pcas because they don't exist so we went
+one level up we do it for computably
+inumerable
+pcas uh but we couldn't so we had some
+partial results but we couldn't answer
+the final question whether it's really
+so sigma11 is an upper bound but we
+couldn't prove it's complete so what do
+you do in mathematics if you try to
+prove a theorem and you can't do it you
+prove a related theorem that you can
+proove um so we couldn't do it for the
+PCA so we went to this order pcas that
+you mentioned which occurred in the so
+they were introduced by Yap uh that's
+why I also had some slides about them
+here and they were studied in the recent
+thesis by yet who was also here I think
+ear there he is so
+um we could solve the problem for these
+order pcas I think yet of course just
+PCA because this whole thesis is about
+the order P but it's confusing because
+it makes a rather big difference or the
+PC it's a much larger class which is the
+reason that we could prove that it's
+sigma11 complete the isomorphism problem
+because it includes these linear orders
+so we could just import the result
+results the classical results from
+Harrison from the 60s that isor is in
+problem for linear order is Sigma one
+complete so it doesn't really give a
+clue about the isomorphic and problem
+for the real pcas but thank you for
+mentioning the all the pcas because I
+wanted to talk about that a little bit
+but uh time was up so I I had to skip
+that part now you've also discovered
+that they're way
+nicer okay any final last question
+no okay then let's thank boss again and
+let's have a break

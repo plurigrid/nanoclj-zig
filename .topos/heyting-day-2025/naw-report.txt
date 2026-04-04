@@ -1,0 +1,347 @@
+176	
+NAW 5/26  nr. 3  september 2025	
+Heyting Day 2025: Symposium in honour of Jaap van Oosten	
+Van den Berg, De Jong
+Kleene
+It was Kleene who invented realizability 
+in response to Brouwer’s work on intuitio­
+nism, a particular philosophy of mathema­
+tics. In Brouwer’s philosophy every valid 
+proof of an existence statement should be 
+underpinned by a construction of the thing 
+that is claimed to exist. What Brouwer me­
+ant by a construction is not easy to say, 
+but Kleene decided to read this as an al­
+gorithm (a computer program). This made 
+use of the, then very new, area of computa­
+bility theory, which gave a mathematically 
+precise definition of an algorithm and a 
+computable function, developed to a large 
+extent by Kleene himself. Nowadays we are 
+In recognition of his scientific work, Jaap 
+was an invited plenary speaker at the Lo­
+gic Colloquium (three times) and at the CT 
+conference in 2014, the most important 
+scientific venues for Mathematical Logic 
+and Category Theory in the world.
+Scientific work
+To understand the context of Jaap’s scien­
+tific work, we strongly recommend reading 
+his historical essay on realizability, pu­
+blished in 2002 [9]. This paper recognises 
+three milestones in the development of the 
+subject of realizability:
+	
+х
+Kleene’s founding paper from 
+1945 called “On the interpretation 
+of intuitionistic number theory” 
+[4].
+	
+х
+Troelstra’s magnum opus called 
+“Metamathematical Investigation 
+of Intuitionistic Arithmetic and 
+Analysis” from 1973 [7].
+	
+х
+Hyland’s landmark paper called 
+“The effective topos” from 1982 [2].
+Biography
+Jaap was born on 19 December, 1957, in 
+Klundert, the Netherlands. In 1976 he 
+started his studies at the University of Am­
+sterdam; not in mathematics, but in Dutch 
+Language and Literature. He switched 
+to mathematics in 1981 and finished his 
+master in 1986. After that, he did his PhD 
+under the supervision of Anne Troelstra 
+from 1987–1991, also at the University of 
+Amsterdam.
+After his PhD, he did postdocs in Par­
+ma, Århus, Amsterdam and Utrecht, before 
+obtaining a permanent position in Utrecht 
+in 2000. During his time as a postdoc, he 
+married Tine Blankenstein in 1994.
+Throughout his scientific career, Jaap 
+wrote many papers on categorical aspects 
+of realizability, bringing together computa­
+bility and logic.
+This culminated in his book “Realizabili­
+ty: an Introduction to its Categorical Side”, 
+published in 2008 [10]. It has become the 
+standard reference for the treatment of re­
+alizability from a categorical perspective.
+Evenement  Event
+Heyting Day 2025: Models of 
+intuitionism and computability
+Symposium in honour of Jaap van Oosten
+In December of 2024 Jaap van Oosten retired from the University of Utrecht. At the Heyting 
+Day 2025, which was held on 14 March 2025 at the KNAW and organised by the authors to­
+gether with Albert Visser, we celebrated his many contribution to research and teaching. 
+The meeting was entitled “Models of intuitionism and computability” and consisted of 
+three talks by international experts and the Heyting Lecture held by Jaap van Oosten. The 
+meeting was attended by about 100 people and the recordings of the talks can be found 
+on the website of the KNAW11 and YouTube12. In this article we give an overview of Jaap’s 
+life, his scientific work and his other contributions to academic life.
+Benno van den Berg
+Institute for Logic, Language and Computation
+University of Amsterdam
+b.vandenberg3@uva.nl
+Tom de Jong
+Functional Programming Lab
+University of Nottingham
+tom.dejong@nottingham.ac.uk
+
+Van den Berg, De Jong	
+Heyting Day 2025: Symposium in honour of Jaap van Oosten	
+NAW 5/26  nr. 3  september 2025	 177
+Grayson [1] did important work.
+Jaap’s PhD thesis [8] should be under­
+stood against this background. It contri­
+butes to the semantic understanding of 
+various notions of realizability, in the foot­
+steps of the works just mentioned, and fo­
+cusing on Lifschitz realizability in particu­
+lar. Jaap’s PhD thesis contains many more 
+things, some of which he would further de­
+velop in later work. All of this goes under 
+the rather understated title of Exercises in 
+Realizability.
+After his PhD thesis, he analysed, 
+among other things, relative, modified 
+and extensional realizability, always using 
+topos theory as his general framework for 
+effective topos is the prime example. This 
+is a world which is ruled by realizability in 
+that in this world everything is computable 
+by nature: it is truly a computable universe.
+Jaap’s work
+ It turns out that many of the other realiza­
+bility interpretations that can be found in 
+Troelstra’s book can also be understood as 
+being the logical laws in suitable compu­
+table universes. Trying to formulate these 
+proof-theoretic interpretations in a more 
+semantic way, using the notions of topos 
+and tripos in particular, has proven to be 
+an incredibly fruitful endeavour. Pitts star­
+ted doing this in his PhD thesis [6] and also 
+very familiar with this concept and we can 
+say: a function is computable if it can be 
+computed by an (idealised) computer (with 
+unbounded memory).
+Kleene’s realizability can be under­
+stood as a mathematical answer to the 
+question: if you give a constructive proof, 
+what is the implicit algorithm that is hid­
+den in the proof? One of the things realiza­
+bility allows you to prove is the following: 
+if you prove 
+( , )
+x
+y
+x y
+N
+N
+6
+7
+!
+!
+{
+ and your 
+proof is constructive, then you can obtain 
+an algorithm that finds a suitable y as a 
+function of x.
+Troelstra
+After Kleene’s work, it became clear that 
+the way he extracted an algorithm from a 
+constructive proof was not the only one and 
+many more “realizability interpretations” 
+were found. All of these were collected 
+and systematically explained in Troelstra’s 
+magnum opus from 1973. As Jaap empha­
+sises in his book, this systematisation in­
+volved a lot of original work, so Troelstra’s 
+book should be seen as much more than 
+an exposition of known material.
+Hyland
+In Troelstra’s book realizability is always a 
+proof-theoretic interpretation, a syntactic 
+transformation 
+of 
+logical 
+formulas 
+preserving their constructive provability. 
+However, Martin Hyland’s work on the 
+effective topos, and his work on tripos 
+theory together with Johnstone and Pitts 
+[3], started a different semantic tradition. 
+This semantic tradition is crucial for 
+understanding Jaap’s work.
+In this tradition we understand realiza­
+bility as a mathematical structure which 
+is interesting in its own right, irrespective 
+of own’s philosophical convictions. The 
+question, of course, is what kind of struc­
+ture realizability should be, and the ans­
+wer given by Hyland is that it is a topos, or 
+more precisely: an elementary topos. Ele­
+mentary toposes were defined by Lawvere 
+and Tierney in 1969–1970 and axiomatise 
+a categorical object that acts as a world 
+of sets and functions. The main class of 
+examples at the time were the so-called 
+Grothendieck toposes, as invented by Al­
+exandre Grothendieck for the purposes of 
+algebraic geometry.
+The triposes defined by Hyland, Johnstone 
+and Pitts allowed one to construct a new 
+class of elementary toposes, and Hyland’s 
+14 MARCH 2025
+Symposium in honour of Jaap van Oosten
+Location
+Info & Registration
+Attendance is free
+Trippenhuis, Kloveniersburgwal 29, Amsterdam
+https://www.knaw.nl/en/heyting‐day‐2025
+Jaap van Oosten
+UTRECHT UNIVERSITY
+Sebastiaan Terwijn
+RADBOUD UNIVERSITY
+Andrej Bauer 
+UNIVERSITY OF LJUBLJANA
+Andy Pitts
+UNIVERSITY OF CAMBRIDGE
+Models of
+        Intuitionism and
+                Computability
+HEYTING DAY 2025
+Poster of the Heyting Day 2025
+Courtesy of Jacob Neumann
+
+178	
+NAW 5/26  nr. 3  september 2025	
+Heyting Day 2025: Symposium in honour of Jaap van Oosten	
+Van den Berg, De Jong
+One special quality of Jaap is that he 
+wanted students in logic to become 
+acquainted with the full breadth of 
+mathematical logic. In particular, he would 
+often run student seminars on topics 
+like the topology of rewrite systems or 
+o-minimality, which were quite far from his 
+own area of expertise.
+Both authors have very fond memories 
+of Jaap’s lecture notes on Recursion Theory 
+and Nonstandard models of Peano Arith­
+metic. Also his lecture notes on Category 
+Theory & Topos Theory have become a re­
+ference for many generations of students. 
+Characteristic of these notes is that they 
+are always very to the point, stimulating, 
+but also expect the student to do a serious 
+amount of work.
+In short, Jaap has made considerable 
+contributions to mathematical logic in the 
+Netherlands and the Dutch logic communi­
+ty is indebted to him for his many efforts on 
+its behalf.	
+	
+←
+He has also been crucial in keeping mathe­
+matical logic alive in the Mathematics De­
+partment in Utrecht. The course on “Grond­
+slagen van de Wiskunde” (Foundations of 
+Mathematics) has been the first introducti­
+on to logic for a whole generation of math 
+students in Utrecht. The lecture notes for 
+this course have become Jaap’s second 
+book Sets, Models and Proofs [5] (publis­
+hed in 2018, and written together with Ieke 
+Moerdijk).
+Indeed, if you look at the names of 
+Jaap’s PhD, MSc or BSc students, it beco­
+mes a “who is who” for Dutch mathema­
+tical logic. His PhD students were Pieter 
+Hofstra, Wouter Stekelenburg and Jetze 
+Zoethout; and we would also like to menti­
+on Bram Arens and Claire Gentil, who both 
+started, but did not finish for personal re­
+asons.
+Among the many master students Jaap 
+supervised (certainly more than 40), we 
+would like to mention Eric Faber, Sori Lee, 
+Niels Voorneveld and Tingxiang Zou in parti­
+cular, as their work led to joint publications.
+trying to understand the phenomena he 
+observed. He also contributed to the un­
+derstanding of the morphisms of these 
+realizability toposes and the ways realiza­
+bility toposes can be obtained from com­
+putational models known as pcas and their 
+various generalisations. Much of this work 
+was done together with his MSc and PhD 
+students.
+Teaching
+Jaap was also passionate about teaching 
+and raising the next generation of Dutch 
+logicians.
+We already mentioned his book Reali­
+zability: an Introduction to its Categorical 
+Side. The book starts by quoting Martin Hy­
+land saying that the world is not ready for 
+a book on realizability; nevertheless, Jaap 
+decided to write one and explicitly says the 
+main motivation for writing this book was 
+to help MSc and PhD students who wan­
+ted to find their way into this subject, and 
+as such it has been enormously helpful to 
+many students.
+1	
+R. J. Grayson. Modified realisability toposes. 
+Handwritten notes from Münster University, 
+1981.
+2	
+J. M. E. Hyland. The effective topos. In A. S. 
+Troelstra and D. van Dalen, editors, The L. E. 
+J. Brouwer Centenary Symposium, volume 
+110 of Studies in Logic and the Foundations 
+of Mathematics, pages 165–216. Elsevier, 
+1982.
+3	
+J. M. E. Hyland, P. T. Johnstone, and A. M. Pit­
+ts. Tripos theory. Mathematical Proceedings 
+of the Cambridge Philosophical Society, 
+88(2):205–232, 1980.
+4	
+S. C. Kleene. On the interpretation of intu- 
+itionistic number theory. Journal of Symbo­
+lic Logic, 10(4):109–124, 1945.
+5	
+I. Moerdijk and J. van Oosten. Sets, Models 
+and Proofs. Springer Undergraduate Mathe­
+matics Series. Springer, 2018.
+6	
+A. M. Pitts. The Theory of Triposes. PhD the­
+sis, University of Cambridge, 1981.
+7	
+A. S. Troelstra. Metamathematical Investiga­
+tion of Intuitionistic Arithmetic and Analysis, 
+volume 344 of Lecture Notes in Mathema­
+tics. Springer-Verlag, 1973.
+8	
+J. van Oosten. Exercises in realizability. PhD 
+thesis, University of Amsterdam, 1991.
+9	
+J. van Oosten. Realizability: a historical es­
+say. Mathematical Structures in Computer 
+Science, 12(3), 239–263, 2002.
+10	 J. van Oosten. Realizability: An Introduc- 
+tion to its Categorical Side, volume 152 of 
+Studies in Logic and the Foundations of Ma­
+thematics. Elsevier, 2008.
+11	 https://www.knaw.nl/en/heyting-day-2025
+12	 https://www.youtube.com/@DeKNAW/vi­
+deos
+References and notes

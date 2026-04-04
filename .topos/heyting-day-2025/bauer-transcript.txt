@@ -1,0 +1,1564 @@
+[Music]
+um so welcome back everyone um so for
+the uh second talk um of the day um
+maybe one practical announcement so all
+the talks are being
+recorded um and they uh should also
+appear on the website of the um canave
+um hopefully somewhere next week um um
+so if you want to listen to talks again
+look at the slides again uh you'll have
+this
+opportunity um so the second talk of
+today is going to be given by Andre
+Bower whom I'll will introduce um so um
+he's a professor of computational
+mathematics in Liana in
+Slovenia um working on constructive
+logic and Mathematics type Theory theory
+of programming languages and uh and
+proof
+assistance um um so he obtains his PhD
+from car melan in
+2000 who and his supervisor was danis
+Scot I already mentioned earlier
+today um and um he won a prize with his
+desertation from from CMU so it's um
+actually this is one of these PhD Theses
+that was extremely helpful to me when I
+was doing my own
+PhD um so there there were a few like
+also Matas Manny's PhD Theses was
+extremely helpful to me um so it Con
+discusses things related to categ Theory
+um topology computability Theory domain
+Theory uh computable analysis and um
+these are also the areas in which he has
+uh has worked um during his his career
+um so a wide range of interests and also
+someone um also whose talks I always
+look forward to um so um
+actually um he also won I Me Maybe also
+nice to mention that he won a a prize
+for for an uh for the best expository
+paper uh in the notices of the AMS on uh
+the five stages of accepting
+constructive
+mathematics um so um I'll I'll this is a
+paper that I can recommend to to
+everyone everyone in the
+audience um another interesting work
+that he's done has been on uh the real
+being countable also um more recently
+recent work but today he will also talk
+he will talk about um related topics so
+the effective toppos as a world for uh
+for computability Theory uh which is uh
+John work with with Andrew Swan who is
+also here in the audience
+somewhere hiding over
+there um so yeah I'm looking forward to
+this uh so please thank you um thank
+thank you so very much for having me
+here um it's a great pleasure and
+especially it's a great pleasure that I
+can participate and speak at this event
+in honor of Yap Van Austin and
+celebrating his work and I should add
+that we should also celebrate his sense
+of humor as anybody who has been on the
+receiving end of it
+will will certainly agree with this um
+so uh today I would like to um speak
+about synthetic computability and the
+effect of
+topos but uh so as I was thinking of
+this talk and what to say um Albert
+viser said oh but please make sure that
+you explain all the basic concepts to
+which I replied well how do you know
+there will be any in my talk and so but
+then I came to my census and he because
+he said well but there will be a 100
+people I counted you it's not quite a
+100 but it's good enough it's
+84 so uh so I uh I decided okay so I do
+have to give a reasonable talk you know
+not like an unreasonable one that three
+and a half people in the audience will
+understand so I'll try to do that but in
+order to do that I'll spend some time
+explaining what the idea of synthetic
+mathematics is and then we're going to
+uh look more closely at how synthetic
+comp computability is done um and this
+is where yap's work becomes most
+important and uh to add something new
+I'm going to finish with uh the recent
+work that I've been U doing with Andrew
+Swan on touring degrees in synthetic
+computability because that's not
+something that has been done yet and um
+you know any any any kind of synthetic
+mathematics in order to Really Deserve
+its name has to be able to cover at
+least the basic concepts of whatever
+Branch it's supposed to deal with and
+during degrees are certainly a central
+Concept in computability
+theory okay so what is synthetic
+mathematics you you might have heard or
+I'm pretty sure you did about the uh two
+approaches to uh geometry namely
+ukids um synthetic geometry versus the
+cart analytic geometry so what's the
+difference between these two
+um oh so by the way before I go on so
+this of course is
+some form of ukids elements and the
+other one is the cart I don't speak
+French but can somebody tell me does
+this title say that it's about meteors
+and
+geometry so that's like you couldn't
+publish that
+today okay anyhow so uh
+the uh ukids approach is sometimes
+called synthetic and uh it proceeds in a
+certain way that's different from how
+the cart does his geometry which is
+analytic and so what are the two
+characteristics so in one of them you
+take some basic objects as primitive so
+for instance points and lines right uh
+careful in the ukian style synthetic
+geomet
+lines are not sets of
+points there are no sets lines are
+primitive objects there so then we atiz
+their properties and relations and uh to
+be quite Fair both to ukl and to the
+more recent developments in logic one
+should say we also postulate
+constructions because they are like
+operations and construction
+constructions are equally important um
+and then we work strictly within the
+given axiomatic system so we are very
+careful not to use anything that's
+outside from what we postulated and uh
+we prove theorems there the uh analytic
+approach is a little bit different there
+we actually construct our objects of
+interest from some other objects for
+instance we might say that a point is a
+pair of real numbers thinking of the
+coordinates and so then a point would
+not be um A Primitive object a real
+number would be in this case A Primitive
+object and then we don't have to
+postulate any axioms we just use our
+construction to analyze the situation
+therefore analytic and uh we deduce the
+desired properties and
+relations uh this usually then happens
+in some foundational system so today
+this would likely be some sort of set
+theory or if you're young it would be
+type Theory it doesn't really matter but
+it's going to be a foundational system a
+more a wider system within which we want
+to do this so I think ukian geometry can
+serve very well to illustrate this point
+now what is synthetic mathematics it's
+we want to apply the same sort of idea
+but not to a single structure such as
+the ukian plane but to an entire branch
+of mathematics so also an entire branch
+of mathematics can be TX this way why is
+this a little bit maybe a little bit
+strange because you almost exclusively
+see only the analytic approaches to
+branches of mathematics they would you
+know if somebody wants to explain to you
+what is topology they would probably
+start by saying well you know a
+topological space is and they're going
+to explain how a topological space is
+built from some more more basic objects
+whether they are objects in some topos
+or whether they're sets or types
+nevertheless it's going to be analytic
+in nature but we can also think well is
+there a synthetic way and in fact yes
+there is a synthetic way and there have
+been many of these so for instance I
+would say maybe I'm I'm not very good on
+History here but probably non-standard
+analysis would be a very early one um
+with the ultra U ultra power
+constructions um which would be the
+analytic way but then non-standard
+analysis also deals with the axiomatic
+system for non-standard
+analysis um and then of the kind that
+we're going to I'm going to talk about a
+a a more a different one is synthetic
+differential geometry so this one was
+developed by various people um I'm
+almost afraid to try to list them so
+Eduardo dubuk and la and Anders Co and
+there is a very nice book by Ika morik
+Andreas who is here somewhere yes yes I
+can recommend the book I I yeah so it
+was very
+inspiring to me to see how you know what
+what this idea of doing things
+synthetically is um then in the 80s uh
+Dana Scott I think was probably the
+motivated the development of synthetic
+domain Theory uh where the idea was to
+find a an exatic way to do domain Theory
+which would then hopefully also be be
+simpler than some of the domain theory
+that was coming up at the mo at the time
+when there were many kinds of domains
+and some of the constructions were
+getting over the heads of a typical
+computer
+scientist um and then out of the main
+Theory some other variant grew like for
+instance their synthetic topology that
+was promoted and studied by Martin
+escardo and Paul Taylor in various forms
+and also a little bit by myself and my
+student um davor in Lesnik um I'm going
+to say more about synthetic
+computability of course but let me also
+just note that homotopy type Theory the
+new kid on the Block is a kind of
+synthetic mathematics which and it has
+in fact been called synthetic homotopy
+Theory uh if you know how circles and
+spheres are handled in homotopy type
+Theory well that is the kind of
+synthetic way of doing things if you're
+familiar with that and there's even a
+newer kid on the Block there's some
+recent further development in the
+direction of synthetic algebraic
+geometry by T Khan this was started with
+Ingo bmi's um PhD I think is maybe the
+so he he seriously attacked this and
+there has been some exciting progress
+recently so people think about
+this okay so we're going to focus on
+synthetic
+computability but as logicians let's
+explain a little more precisely what I'm
+talking about because it's not that
+complicated one way to see these two
+sides is to Simply say well on the
+synthetic side you have some sort of
+logical Theory and then on the analytic
+side you have a model so if you think
+about for instance let's think about
+non-clean geometry well there will be
+some axioms of non- ucan geometry and
+then there will be models which will be
+these curvy things right so that will be
+the models and there's an interpretation
+that connects them
+now if you want to do this with a whole
+branch of mathematics so not a single
+structure so you don't want the model to
+be just a surface with some stuff in it
+then this is going to go a little bit
+more Grand scale and one way to do it is
+the way that uh Andy in his talk was uh
+indicating is that you use toposes
+because they're rich enough to support
+the things that we want to do that
+namely that we want to have all this we
+want to have richness
+of
+structures and uh the appropriate kind
+of theory in general would be
+intuitionistic high or the logic which
+Andy already talked
+about now you can do a lot in this
+generality but of course in order to
+really grab a particular kind of
+synthetic mathematics by its horns you
+want specific kinds of toposes so so you
+would want to say no no I just don't I
+don't want General toposes I'm going to
+I'm going to narrow it down maybe to
+just a single topos or a certain family
+of toposes that have some very special
+properties now these very special
+properties should be chosen in such a
+way that they make uh reasoning in our
+desired branch of mathematics as nice as
+possible on the synthetic side or that
+is to say on the side of the formalism
+that means that rather than having just
+intuitionistic Hierro the logic uh we
+are going to have some specific axioms
+so for instance these might be like
+countable choice or there might be some
+very specific axioms about Rings or
+whatnot but you find you try to find
+some axioms that will capture the spirit
+of what you're trying to do and in order
+to know that you're not doing something
+insane of course then you want to have
+corresponding specific toposes and
+models because that will both tell you
+that it's consistent but also it'll
+inform your theory and it'll give you
+ideas on what to
+do okay so in synthetic so uh by the way
+so now by choosing different
+toposes you can do various things and
+people have done various things and it's
+very nice because you don't get just one
+paradise for one person everybody gets a
+paradise right so so you uh for instance
+the first one in synthetic differential
+geometry you're going to have statements
+which are classically impossible they're
+not allowed so for instance all maps are
+smooth this is like a physicist Paradise
+because they can just differentiate
+anything they see right which they do
+anyway
+so you know maybe that's not going to be
+the physicist view the physicist might
+say might say oh you you finally came to
+your
+senses um and you know and this goes on
+like for instance in synthetic
+topology for Fairly trivial reasons
+you're going to have the statement all
+maps are continuous and everybody will
+be very happy because you know all maps
+are continuous in
+topology and similarly in synthetic
+computability and more particularly in
+the effective
+topos you're going to it's going to
+validate the statement all maps are
+computable whichever way this is
+precisely stated you should you know
+these are somewhat informal statements
+here I did not explain the details of
+course so this is looking very good you
+know but you know what happens when it's
+too good to be true right so you start
+digging a little further and so you say
+oh but the effective toos it's even
+better right it also shows that all maps
+are continuous that's known as the clean
+the kls theorem chry theom shls shls
+actually it should be kls theorem
+chry the sh sattin
+theorem um and so that for for for a
+different reason than in a typical shift
+topos in this topos also all maps are
+continuous and this is all very nice but
+then you read Russian literature on
+recursive analysis and you realize that
+in this topos there is an unbounded map
+from the closed interval to the
+reals and then if you put the second and
+the third statements to together this is
+becoming a little bit worrisome because
+now we have a continuous unbounded map
+on the closed interval so what's going
+on with our Paradise well this is only
+the beginning actually so for instance
+also there is a set which is neither
+finite nor infinite literally okay and
+uh a certain kind of ordinals you have
+to be a little careful how you define
+ordinals uh because we're in an
+intuitionistic setting but the trotus
+orinal form
+effect so this is strange it's a strange
+world uh
+however these statements all relate to
+known facts about computability Theory
+so for instance well the unbounded stuff
+that's just Russian uh recursive
+analysis it's been long for for for a
+long time but a set which is neither
+finite nor infinite if you calculate
+what that says in the effective topos
+computability theorists will recognize
+that as an immune set and computability
+theorists will say yes we actually do
+think about an immune set something that
+is computably neither finite nor
+infinite this is how the effective topus
+works as the synthetic world of
+computability it's the one in which
+various slightly informal or informal
+intuitions about how things are in
+computability the computability theory
+become rigorous mathematical statements
+in a very naive way like literally there
+is a set which is neither finite nor
+infinite you don't have to say anything
+about computability precisely what it
+says the trotus ordinals if you're a
+computability theory I just have to say
+one thing Omega One Church
+cleaning okay and then you say ah okay
+yes so this the trotus ordinals because
+everything needs to be computable and so
+the trichotomy means that you can their
+order will tell you that computably can
+only go up so far and you're going to
+get a set so that's why that's why this
+is going it's not surprising if you're a
+computability theorist it might be a
+little more surprising if you're not a
+computability
+theorist
+okay so I would like to mention two
+further two further synthetic worlds uh
+that I've worked on especially because
+they're are also relate to uh Yap okay
+so the first one is this
+if you just take the variant of the
+effective topos where you replace uh
+touring machines with Joel hins infinite
+time touring machines you're going to
+get a realizability topus and in that
+realizability
+topus uh the space of sequences n to
+the^ of n so that's the space of all
+integer sequences it embeds into the
+natural
+numbers and I can tell you that I was
+highly motivated to find one such toos
+when Yap visited uh lublana a while ago
+and he spent a semester there because he
+this strongly disbelieve that this is
+possible so thank you Yap for uh giving
+me the motivation I was very motivated
+to prove you wrong um and then uh
+there's some more recent work uh with uh
+James Hansen and me which uh in which we
+found a topos which in uh in which they
+object of the dedic in reals is
+countable and I find that extremely
+surprising uh how does this relate to Ys
+work well the uh word there is
+parametric realizability so this is a
+new kind of variant of realizability
+where your partial combinatory algebra
+is um additionally parameterized by a
+set of
+parameters uh and then uh the notion of
+uh realizability has your notion of
+realizability has to be uniform in those
+parameters and then think things work
+out in a certain way then you can find a
+particular one of that kind in which the
+real numbers are countable so this is a
+specific
+construction um but uh Andrew Swan
+observed and told me and probably nobody
+else that uh every kind of every
+parametric PCA is actually of the kind
+that you can find in yap's book uh where
+he explained
+how to adjoint an oracle to a PCA and so
+up to equivalence all these examples are
+arise from y's construction so this is
+something that we learned after we
+already found all these results and then
+uh it was observed uh that that that
+construction of Ys is is quite important
+here okay so where do we go from
+here let's uh Let's uh speak about
+computability a little more precisely so
+in this case we're going to focus on the
+effective topos and we would like to
+have to interpret the uh intuitionistic
+Hydro logic higher order logic there
+ought to be some specific axioms of
+computability uh that are valid in the
+effective topos and then when we work
+synthetically we would just use those
+axioms and nothing else we would to we
+want to completely forget that there is
+an underlying model and we never want to
+look at it again so I suppose you know I
+should try to define the three pieces in
+this slide but so the first one would be
+the effective topos but I know better
+than to try to define the effective
+topos in a talk I already tried a couple
+of times and I do not recommend it to
+anybody uh nevertheless
+there is this great book where you can
+read about it it's yap's book on
+realizability which I always keep Within
+Reach because I looked at it very often
+and uh um you know even even when I have
+to look up what a tripus is I don't look
+at the paper of the person sitting to
+your next to you I look at your book yes
+yes so um thanks for the book
+it's not very important to know
+precisely what the effective topos is
+for this talk even though everybody
+should uh because I will focus on the
+synthetic side now you know if I if I
+try to explain what nonukan geometry was
+certainly one way would be to uh show
+you a sphere and hyperboloid and stuff
+like that but there is another way I
+would just show you the axioms and then
+I would hope that your mind eventually
+would develop some intuition about about
+what these aims are about and I might
+draw some informal pictures of things to
+help you and that's how you can actually
+approach any synthetic subject I can
+tell you what you would get if you
+interpreted certain statements uh in the
+effective topus but we're not actually
+going to do so because it takes time and
+it's technically complicated but I'll
+help you with that okay so what are the
+axioms of synthetic computability as
+already said several times we're going
+to work in nistic high logic which has a
+bunch of um constructions among other
+things it has the object of truth values
+and the natural numbers and essentially
+you get enough math to do everyday math
+so this is enough to construct the real
+numbers to do like undergraduate
+analysis complex analysis combinatorics
+like all the normal math so what
+abnormal math can you not do well if you
+want to do strange forms like like if
+you want to do huge things or like
+something that requires uh more logical
+strength than what you get out of this
+then of course you cannot do it right so
+vaguely speaking this is like bounded
+zeros set theory
+vaguely
+um okay so that's that what are the
+specific aums so one specific Axiom that
+we need is dependent choice but here I
+should say two things actually in most
+applications we only need countable
+choice so choice for countable families
+of sets in a few places we need slightly
+stronger Choice which is choice or not
+not stable subsets of natural numbers
+this is a technicality that I don't want
+to get into I can just tell you that I
+only used this once which was to prove
+the synthetic version of the kls theorem
+all maps are continuous there I needed
+it I didn't see I didn't see a way
+around it
+a more interesting one well there's one
+that's still not interesting which is
+Mark of principle so Mark of principle
+is valid in the effective topos and it
+comes in handy because it really allows
+us to simplify things in a couple of
+places and uh this is my preferred
+formulation of Mark of principle is you
+know you have to make your axioms sound
+really obvious so here's one if a binary
+sequence is not all zeros then it has to
+contain a one that's markov's principle
+um
+it's deceptively it's deceptively looks
+it looks deceptively true right it looks
+like how could this fail uh if you if
+you're thinking to yourself how could
+this fail you're not yet at stage
+five the central Axiom of um synthetic
+computability is the enumerability Axiom
+and it says that there are countably
+many countable subsets of natural
+numbers now we should take 30 seconds
+seconds to think about this okay so here
+is how you should here is how you should
+probably digest this so your first
+observation should be but isn't every
+subset of the natural numbers
+countable and aren't there uncountably
+subsets of natural numbers okay so of
+those two the first one is false
+intuitionistically and the second one is
+true intuitionistically so yes
+intuitionistically there are uncountably
+many any subsets of natural numbers but
+not every you cannot show
+intuitionistically that they are all
+countable countable because you know
+countable means you can actually
+enumerate them and I can tell you why
+this would be the case in the effective
+topas you cannot enumerate
+computably the complement of the halting
+set that's a co-ce set so you cannot
+right so that would be an example in the
+effective topos of a subset that isn't
+inumerable countably numerable because
+when I say countable inside the topos
+that automatically means that in the
+model it'll have to be computably
+countable and not all sets are
+computably countable why are there
+countably many of them because there
+exists an acceptable
+enumeration of C sets that's all there
+is to it so if you are a computability
+theorist this is totally obvious there
+is a there is a an acceptable
+enumeration of C sets of computably able
+sense this Axiom is wonderful it has
+wonderful
+consequences among others also that
+excluded middle is false so it's an
+anti-classical
+axiom and we have no choice but to throw
+away excluded middle in general I mean
+of course instances of it still hold but
+in general we cannot accept it if we
+want to have this axium and this is a
+general feature of synthetic mathematics
+at least of the kinds that people have
+often
+studied um people like in my bubble
+social bubble and um that that the
+toposes that arise in synthetic
+mathematics tend to be intuitionistic so
+it's more of an empirical observation
+that excluded middle is gone it's not
+it's not something that we should that
+really have a freedom to
+choose the synthetic method goes vaguely
+like this okay you take some classical
+theorem in computability theory you open
+the book you open Rogers or OD Freddy or
+somebody and you like find the theorem
+and then you think about it and say what
+does this say about the effective topos
+and you find some statement about the
+effective topos which is probably a mix
+of category Theory and it talks about
+realizers and you see that somehow it's
+corresponds to the
+theorem now you have to reverse engineer
+this thing and find an internal
+statement who interpret a will hit that
+fact and you're going to find something
+that's not very
+nice but by working further you try to
+you try to abstract and generalize the
+statement it's typ typically going to be
+too specific because you found some
+specific fact about something very
+specific but then you can generalize it
+and it's easier to generalize it in the
+internal language than it would be by
+working directly in the topas
+finally you give a proof that is based
+only on the synthetic Axion that's the
+idea there is a bonus that you can get
+you get bonus points if you can actually
+prove your statement without the axioms
+and you just do it in pure
+intuitionistic hyro the
+logic this has happened a number of
+times and it's become somewhat of a
+method of mine you really I really try
+when I try when I synthesize like when I
+try the synthetic form I really try to
+find the theorem which is just true
+however it becomes it typically then
+becomes difficult to show that it has
+any nontrivial instances and that's
+where the synthetic world comes in the
+synthetic world is full of very strange
+objects that then satisfy some strange
+properties and give you examples of the
+of the theorem which is just true but it
+the theorem for all you know is Trivial
+but you cannot show that it's not
+trivial and if you work hard you can
+find instances
+I will give you one such
+example and this is an improved version
+of Rises theorem in comparison to what
+was known when uh Yap wrote his book and
+it has a section on synthetic
+computability which by the way boosted
+my already big ego way out of proportion
+when I saw that it's in the book so
+thank you for that as well um okay so
+let's recall Rice's theorem so first of
+all I'm going to write f subn as every
+computability theorist does for the ends
+partial computable map where the
+encoding has to be reasonable and um
+this is a standard um notion and then uh
+What uh we usually call an index set is
+a set of natural numbers such that if a
+number is in it so and that number is an
+index of some partial computable map
+then also all the other indices for that
+computable map are in it so it's uh it's
+a set that is closed it's extensional
+with respect to this uh enumeration and
+Rises theorem states that the only
+computably decidable index sets are the
+empty set and the natural numbers and we
+teach this to computer scientists and we
+try to explain that this is important
+for things like implementing optimizers
+and like asking questions like expecting
+the machine to to perform certain kinds
+of program analysis like you say well
+but it is impossible but then you do it
+anyway um by violating one of these
+conditions of course so anyway it's an
+important theorem what is the synthetic
+form of this I'm going to take you
+through several steps and just show you
+the end result but you should be able to
+see that the end result has something to
+do with risis theem okay so say that a
+set a by the way I say set I really mean
+object in the effective topos but just
+by old habit I like to say it's set I
+could just also keep saying space or
+something it's not really important um
+so an object or a set a has a fix has
+the fixed point we say that it has the
+fixed Point property if every endom map
+on the set has a fixed point and the
+synthetic risis theorem says that any
+set if a set a has the fixed Point
+Property then every map from a to the
+set of to the discrete set on two values
+so two here is the set of values where
+each value is either zero or one that
+every such must be
+constant I'm not going to drag you
+through the proof but the complete proof
+of risis synthetic risis theorem fits on
+slide it's easy okay once I show you the
+theorem I send you away is not that
+difficult to prove it when you think
+about what needs to be done it's some
+blah blah blah with fixed points okay uh
+here is the bonus its proof is pure this
+is a pure proof okay so it just holds um
+but if I ask you can you come up with
+any examples well let's classically In
+classical set the that's going to be
+difficult because the only set that has
+a fixed Point property in classical set
+the is the
+Singleton right so the theorem is not
+terribly interesting because it's a
+theorem about the Singleton set
+classically however in the synthetic
+world the enumerability axum implies
+that there are lots of interesting sets
+like this because for instance all Omega
+algebraic pointed Omega cpos whatever
+they are but there certain kinds of
+domains have the fixed Point Property so
+that's nice and now you should also be
+able to see that this relates to the
+classical risis theorem because the the
+the object of partial maps from natural
+numbers to natural numbers where you
+have to use the correct notion of
+partiality is going to be one of these
+Omega cpos
+okay so that's how you want to do
+this now for today I would like to speak
+about touring degrees because that's not
+something that has been done um yet uh
+there have been people working on it but
+uh I think they're not done either um so
+uh first let's uh discuss oracles so
+what is an oracle uh
+it's going to be better to ask what is a
+partial Oracle so I'm going to Define a
+partial Oracle to be a pair a z A1 of
+two disjoint subsets of natural numbers
+so the way you think about this is a z
+is the set where your Oracle says no and
+A1 is the set where your Oracle answers
+yes and of course the numbers on which
+you get the answer no and the numbers in
+which you get the answer yes they should
+be disjointed
+and we do not require that they cover
+all of n so that's why we say that this
+is a partial Oracle so if you ask the
+Oracle a question about some number
+that's in neither of these two sets it
+remains silent you do not get an answer
+it's an
+undefined if you collect all of these
+into a object of partial oracles so
+literally just what it says there pairs
+of subsets of natural numbers that are
+disjointed that's a very nice domain
+it's directed complete directed subsets
+have Supra you just buy component wise
+unions and it's also Omega algebraic
+which means that if you
+calculate uh well well the compact
+elements um form are there are
+accountably many compact elements and
+they form a nice base uh this is
+actually simpler than it sounds because
+all that this says is that if you if you
+have a set it every set is a union is a
+directed Union of its finite subsets
+that's what this comes down to and this
+is intuitionistically completely unpr
+problematic every set is a union of its
+finite subsets so we have a nice base
+this is important because once we have a
+accountable base uh we can start doing
+things with uh countable choice and so
+on so that's that's going to be nice it
+gives us a grip on
+this um okay what about total oracles so
+the oracles that are not partial how
+would you say that an oracle always
+gives an answer and well that just asks
+what are the maximal elements of this
+domain
+o and you can prove that an element is
+maximal so a0 A1 is maximal precisely
+when the sets of answers of positive and
+negative answers are complements of each
+other yes so for the uh for the
+effective topos theorists in the
+audience this is saying that nabla 2 to
+the N is the set of Maximum elements of
+O so the maximum elements of O are nabla
+2 to the
+N here's uh the wrong thing to say if
+you say that the union of the two answer
+sets is all of n you're not going to get
+the maximal elements you are going to
+get the decidable subsets and those
+would be the decidable oracles so those
+would be the oracles that you can
+actually compute already without
+anything and they are terribly boring
+okay so you don't want those that's the
+wrong thing to
+say but here you just trust domain
+Theory you say oh the total oracles they
+will be the maximal elements then you
+calculate the maximum elements and they
+are the thing that they should
+be so we have the oracles how about
+Turing reductions so classically a
+turing reduction is a map that takes
+oracles to oracles or partial oracles to
+partial oracles you feeded an oracle on
+the tape and it's a touring reduction if
+it's realized by a touring machine there
+has to be an actual touring machine that
+performs the
+reduction um so how do we say that
+synthetically uh well it's going to be
+somehow domain theoretic because we have
+a we have a nice domain in you know
+always a is is it's a dcpo so things are
+going to get domain theoretic so let's
+just recall that we have we have if I
+have omega algebraic dcos so countable
+base U of compacts directed complete
+postet if I have a map like that um it's
+said to be Scot continuous if it
+preserves directed Supra and uh let's
+also Define its graph so this this is
+now standard domain Theory so a gra the
+graph of such a function is the set of
+pair d e which need to uh D and E are
+compact such that e is below F of D and
+the way you think about this is the
+graph already holds all the information
+that you need to know about F you can
+reconstruct your F from this set by a
+directed
+supremum um and uh the E is below F of D
+information theoretically says oh if I
+know that D comma e is in the graph what
+this tells me that if I feed F an input
+that information theor ially is at least
+D then I will get an output that is at
+least
+e
+okay so what would be a touring
+reduction so you okay so certainly it's
+not going to be an arbitrary map from o
+to O but also it's it cannot be just a
+continuous map from o to O because
+constant maps are continuous but not
+every constant map is a tuning reduction
+if that were the case I could reduce
+any Oracle to any Oracle by constant map
+so that that doesn't make any sense and
+so the correct definition turns out to
+be this a turing reduction is a Scot
+continuous map which additionally has a
+countable graph that's what we want
+where does this come from well this
+comes from the idea that the function is
+realized by a touring machine because
+it's realized by touring
+machine U there's a classic theorem in
+computability theory saying that a map
+is comp Turing computable if and only if
+its graph is is re is countably
+numerable and that's just that but it's
+now stated synthetically and for
+arbitrary domains so now we have a
+notion of Turing reductions for at least
+Omega algebraic dcpo so also for our uh
+domain of
+Interest so the theorem would like is um
+sometimes called the clinipost theorem
+and namely that there exist incomparable
+oracles what does that mean that there
+exist two oracles such that no reduction
+will map one to the
+other so the classical proof goes a
+little bit like this it's called
+sometimes called the finite extension
+method you start with two empty oracles
+and then you keep extending them so at
+each step so you build the two oracles
+which I'm now writing now as the Oracle
+X and Y so X is a pair of sets and Y is
+also a pair of disjoint sets so you have
+your two oracles X and Y you build them
+like this you start with empty empty and
+then at each step you extend them by
+some finite amount uh making sure that
+as you do that that in the end step you
+make sure that the end steing machine
+possibly cannot possibly reduce X to y
+or vice versa
+but to know how to extend at each step
+you need to
+decide uh a question that has the power
+of the halting set so this is a
+genuinely classical construction and it
+results in oracles that are computable
+in zero Prime so in the halting
+Oracle so we cannot do this purely
+constructively it's impossible to do
+this purely in constructive we really
+are using here some classical
+reasoning um but when you stare at this
+it starts to look a lot like the bare
+category theorem so the bare category
+theorem is a theorem that says it has
+many forms and for the algebraic Omega
+algebraic dcpo it holds and it says a
+accountable intersection of sets with
+dense Interiors is dense now usually
+people say account intersection of open
+dense sets is dense but for us it'll be
+more convenient to say it in this
+equivalent form which just looks at the
+Interiors of arbitrary sets and those
+need to be dense um this proof uses
+dependent choice and so it's valid in
+the effective topos um and no it doesn't
+use any any classical reasoning why am I
+saying that the above argument is
+related to the bare category theorem
+well because
+um this finite extension method where
+you are building ever
+longer segments of the of of the oracles
+really corresponds to starting in some
+open set and then narrowing narrowing
+down down down down down to some limit
+point and that's how the bare category
+theorem works it also works by an
+iterative method where in the end step
+you make sure that you forever stay
+inside the end set and so your limit
+point will be in the intersection of all
+of them so it
+looks like we have to do something of
+this kind and indeed we
+can
+because
+synthetically there are only countably
+many Turing reductions so let's look at
+what we how we would like to do this so
+let's try to use the bare category
+theorem so I'll try to use the bare
+category theorem to actually prove
+the uh the CLE post theorem okay so the
+first observation which is the only
+synthetic observation here is that the
+enumeration there is an enumeration row
+of all touring reductions between
+partial oracles and this uses the
+enumerability
+axum um okay so there are only countably
+many there are only countably many
+conditions to worry
+about so then you write down the sets
+just like in a book on computability
+Theory when you look at how these things
+are proved proved you say okay so what
+are what am I doing so the N set should
+be the set of all pairs of oracles X Y
+such that the
+N
+reduction Maps neither X to Y nor y to
+X and now I would
+like to find something that's in the
+intersection of all of these
+RNs so are the RNs do they have dense
+Interiors for the Scot topology and O
+and the answer is not quite okay but
+they are sufficiently like sets with
+dense Interiors let's quantify how we do
+this so in order to do this we're now
+going to have a short interlude on a
+favorite topic of
+Ys J operators in the effective topos so
+uh why because I will have to speak
+about something being computable up to a
+halting Oracle that's where I'm going so
+now I need a synthetic way of saying
+that so if you take a closure operator
+so that's a influ you that's that's an
+operator that has some nice properties
+so it's a it's monotone inflationary
+preserves finite Supra so J if it's a
+every every such operator it actually
+induces a an operator a model operator
+box on every on all objects and and I'm
+not going to go into details of this and
+during uh and this talk I worried that
+the formula is wrong so please somebody
+put me out of my misery um so what is
+this box a Well the box a the way you
+think of box a is like this um so think
+of a as an object where every element H
+has some computational evidence now box
+a is going to create a slightly larger
+set where this computational evidence
+has been relaxed a little bit well how
+was it relaxed using the J operator um
+now the important observation is and you
+can find this in y's book is that if you
+have any predicate there is going to be
+a least J that forces it so in
+particular there is a least J which
+forces the principle of limited The
+Limited principle of omiss so there is a
+least operator J such that for every
+function from natural numbers to
+01 it it is J the case that the function
+either attains a one or it
+doesn't without the J this is known as
+lpo it is The Logical way to express the
+fact that the halting set is decidable
+or the internal way of saying the
+halting set is decidable so what I want
+is I want the least modal
+operator that forces the fact that the
+halting set is
+decidable and I will just use this one
+but in principle I could use also any
+larger J and all the proofs would still
+go through I would just get weaker
+results
+then so now I can tell you what the
+intuition behind this is this is some
+fairly complicated stuff about model
+operators that I think Andy doesn't like
+did you say you didn't like modal
+operators oh modal logic as a whole I
+see yeah okay so what I find interesting
+what I find very interesting here is
+that um you know rather than what you
+know what logicians
+do yeah well uh logicians really like to
+study model operators and model Logics
+and they come up with all kinds of
+Logics but they never use them but here
+we have uh we have an actual
+mathematical use of model operators um
+which I find I find
+refreshing um that you actually get to
+use them for something so how do you
+think of them so you can think in
+defective topos in general you can think
+as uh elements of a arrow b as maps
+computable maps so they're computable
+with respect to whatever underlying
+realizability representation the A and
+the B have but nevertheless they're the
+computable maps whereas if you look at
+the maps from a to box B for this
+particular particular box from the
+previous paragraph then they will be
+computable relative to the halting
+Oracle and this brings in a way to speak
+about non-computable things in a topos
+where everything is computable and by
+the way this propaganda that everything
+in the effective topos is computable
+it's clearly false because the effective
+topos actually contains classical sets
+as a cat subcategory so yeah it's
+computable but you know in a trivial way
+at least on the sets so you have to be a
+little bit you have to understand what
+that means a little more carefully like
+in what sense are things things
+computable in the effective topos and
+there's a way to speak about computable
+relative to the halting Oracle using
+model
+operators so we can now go back to the
+cin post um so we're of course we're not
+going to do this just for one particular
+domain because it's very easy to just do
+it for any domain so we're going to work
+with some arbitrary domain d uh par so
+more specifically the Omega algebraic
+dcpo and
+uh
+suppose U we have R so let's go back to
+the usual to the usual notion of density
+first okay so suppose you have R and
+this R has dense interior now if it has
+a dense interior that's a kind of a for
+all exist statement and using countable
+choice in this particular case you will
+be able to obtain a witness for density
+and this witness is going to look look
+like this it's going to map compact
+elements to compact elements H will okay
+so this is now a computation that's a
+witness for density of of for the
+density of the interior of R for each
+compact element d h of D is going to
+give you some bigger com compact element
+such that the basic open set determined
+by that compact is contained in
+R once you have this H you know that the
+interior of R is dense
+because you take your element X there's
+some compact below it you find this h of
+D it's it's it's it's immediate okay so
+this is another way to say that you have
+a set with a dense interior that you
+have a map like
+that so once you have so now suppose
+let's prove the cleaning post so once I
+have such Witnesses h0 H1 A2 for some
+sets r0 R1 R2 how do I
+how do I inhabit their intersection I
+inhabit their intersection by starting
+some by with some arbitrary d0o so
+that's going to give me density start
+with some arbitrary compact set and then
+the supremum of the chain DN will be in
+the intersection what's DN well how do
+you get what do you do DN + one is just
+h of n of DN so h of n is making sure
+that we stay inside
+RN and this is how how the proofs work
+like if you look at the proofs of bare
+category theorem or they're going to
+they're going to look like that so the
+question is in our case do we have such
+an h and the answer is for our sets RN
+the ones that we had the ones that were
+defined using using reductions the
+answer
+is well no we don't get the H what we
+get is H with a box stuck in it
+so we can calculate these compact
+elements witnessing density relative to
+the halting Oracle so it's a modal map
+now but we can get out of this
+because every Omega algebraic dcpo is an
+algebra for the box you can go from the
+box D back to D
+so we can do some monadi thingy and have
+a slightly more
+complicated construction which people
+who uh think about computational effects
+and functional programming will
+like that gives us the following
+theorem
+so say that a subset R of D has box
+dense interior not if we have this age
+witnessing the density but H has the box
+so it maps from KD to box KD so it's a
+little too weak to give us the actual
+density okay so that's box dense
+interior okay so here's a statement in
+an Omega algebraic dcpo accountable
+intersection of sets with box dense
+Interiors is
+dense that's the synthetic clean
+post um what happened here I
+replaced Omega cpos so the the the
+original theorem the original be
+category theorem only required suprema
+of chains but now because I have this
+box I require Supra of directed sets so
+a complete enough object and then I can
+recover my bare category
+theorem this theorem is pure examples
+are easy to
+find so how do you get the usual
+synthetic post Clin theorem out of it so
+the the classical one there existing
+comparable Oracles in the synthetic
+computability well we just apply this
+theorem so we need an Omega algebraic
+dcpo and we need some sets which are
+with box dense interiors and then their
+intersection okay so well they are exact
+it's it literally the thing we started
+with so our our Omega algebraic dcpo is
+pairs of oracles so o o cross o the
+model operator is the halting
+modality um and the sets are the ones
+that we uh wrote down namely the ones
+that will guarantee that the so RN
+guarantees that the end reduction does
+not reduce X to y or vice versa and it's
+actually not that hard to verify that
+these do have box dense
+Interiors so we get our clean post
+synthetic clean post this way um well
+this is the particular one I consider
+this to be synthetic one this
+proposition which is about arbitrary
+dcpo and so we have a modal bare
+category theorem so that's the Clin
+poost theorem from computability Theory
+so I'd like to finish up
+by uh telling you that we are not
+stopping here uh with Andrew we're also
+thinking about the synthetic Fred bernik
+theorem which is uh an enh enhancement
+of the of the Clin post because it
+doesn't just say that there exist
+incomparable
+oracles it says there exist incomparable
+incomparable computably innumerable
+oracles which means that the set A1 so
+the set where you get the answer yes
+that one needs to be computably
+enumerable it's a more involved
+Construction Construction that uses a
+method known as the finite injury
+priority method so how do you synthesize
+that it's ongoing work but I can explain
+what the notion the correct notion seems
+to be okay so when you stare at the
+finite injury priority method you come
+up with the following notion which I'm
+not sure how much we will be able to
+optimize it so so say that a subset R of
+D it has fall back dense interior okay
+if a certain thing happens um but before
+you read that let me tell you what the
+intuition is going to be so you're
+somebody asks you to produce a witness
+and you have a candidate for this
+witness unless something goes wrong but
+you don't know if that thing is going to
+go wrong so what you want to do is you
+want to say here's my candidate for the
+witness and then if later on somebody
+comes along and says no no no there's a
+problem you have a fallback you say oh
+what is the problem no okay I can fix
+this so you have a candidate and if it
+ever turns out to be wrong you know how
+to fix the problem okay so now you're
+supposed to say well what's going on
+well okay uh classically this would be
+very easy if I could use excluded middle
+I would say is there a problem if there
+isn't a problem the candidate works if
+there's a problem well then I will use
+one of the fallbacks so classically I'm
+not doing anything but I'm not classical
+so I'm doing something okay so I am
+slightly weakening my notion of uh of of
+density in a constructively sensible way
+in an interesting way that is completely
+invisible visible if you're doing just
+classical logic so let's now read the
+let's now read the notion of density
+here okay so I'm supposed to show you
+why R is dense above
+D and I can find a candidate C okay but
+there is an set an injury set so a set
+that could of problems that could injure
+my C I'm using the terminology of the
+finite injury priority method here so
+you could also say instead of injury set
+you could say obstruction set or
+something like that so such that what
+happens oh I'm very sorry the first
+bullet is wrong the first bullet should
+say the open set above
+C complemented with I not intersection
+it should be complement okay
+complemented with I is inside
+R okay now if I is empty I'm done
+because then there is no problem if I is
+empty okay however maybe I is not is not
+maybe I is not empty and I see that I
+impolitely shadowed One D with another
+one so the second bullet says Whenever
+there is a problem I can find a fallback
+that removes the problem okay
+so here's the definition again and so
+now what you get is the following if you
+have an Omega algebraic Omega CPO so
+careful now it's not a dcpo anymore it's
+an Omega CPO so it will only it will
+only have the Prima of honest chains so
+no monkey business with boxes anymore it
+has to be an actual chain um so in an
+Omega algebraic Omega CPO if you have a
+countable intersection of sets with fall
+back dense interiors and now for the
+loss on topology which I find beautiful
+so that's another topology that's not
+Scot topology but I need the loss on
+topology because reductions involve both
+positive and negative information so for
+the for loss and topology this holds so
+we think we have this theorem okay and
+that's the synthetic frit ber mnik and
+from it it's then very easy to get the
+classical one and many
+others so I'm going to stop here except
+for
+saying what the uh Omega algebraic latis
+where do we apply this one well you have
+to apply it to the space of C oracles
+what are the C oracles well there will
+just be the omeg algebraic latis of
+countable subsets of n because countable
+subsets means C
+sets here's a quote to end with thank
+you
+[Applause]
+okay um um we have a I think we can take
+a bit of time for a few questions um but
+uh launch is waiting so are there any
+questions ah sorry the back uh by the
+way I have to I have yeah I think the
+people who are recording really want you
+to carry the M
+around CU otherwise the questions are
+not
+audiable um thank you for the talk um so
+as an excuse for this question you
+mentioned that it is hard to explain the
+definition of the effective topos um to
+people um would you say that the
+structure of the category of assemblies
+would be uh sufficient or in
+insufficient
+to do synthetic uh
+computability so without um being able
+to take questions all the time okay so
+yes uh that is a very good thought so
+um often when I'm faced with explaining
+what the effective topus is i instead
+explain what assemblies are because it
+is like 10 times easier to explain and
+then I say and the effective topos is
+just slightly more complicated and
+people just believe that
+uh as far as uh doing synthetic
+computability in assemblies goes you
+could do a lot a great deal uh so long
+as you're not using anything essentially
+in predicative because uh the assemblies
+are a predicative model of type Theory
+and intuitionistic logic you don't get
+Omega Omega is not the subobject
+classifier is not an assembly uh so
+these model operators for instance
+you could still Define them but just not
+in the way that refers to Omega in fact
+Andrew has a very nice formulation of
+the halting Oracle modalities in type
+Theory using ideas from homotopy type
+Theory that's his last type stock so you
+can I think you can do a lot probably
+you can do everything I'm not sure um I
+usually phrase things in terms of the
+topos because it's I that you know I
+don't have to worry about the
+predicativity dimension of things I just
+just work but yes I think most of it can
+probably be done in
+assemblies
+okay yes so thanks for your talk so as
+you pointed out the cleany post is just
+a classical forcing construction where
+you can use the B category so for freedb
+musnik in order to phrase it as a
+forcing construction you have to do
+something extra right so um classically
+this was done by jush uh I don't know if
+you're aware of that he introduced this
+notion of e genericity so his way of
+doing it is looking at the space of all
+enumerations and do a foring
+construction over that is what you are
+doing with the fallback dense interior
+does that translate back to doing
+forcing over that space of enumerations
+or I should look at that Andrew and I
+were uh our starting point were the more
+um basic classical uh um formulations of
+finite injury priority method so we just
+like you open source book or one of the
+books that has on page 15 has the Fred
+bernik theorem and then it says it's
+explains the or it explains the uh
+finite injury very
+concretely uh just on one example and so
+that was our starting point I would
+expect that whatever we got
+synthetically is going to correspond to
+something that somebody did in
+computability theory a while ago it's is
+extremely difficult to discover new
+ideas in
+mathematics um up there ah
+yeah uh thanks interesting talk um are
+you aware of the work by uh Bob Harper
+and uh um John Sterling and synthetic
+date
+computability uh synthetic again date ah
+yes parametricity using subtyping so
+that's uh that's a different that that's
+also a kind of synthetic uh
+mathematics with which
+is sort of it's it's it's designed very
+much for things that logicians and
+programming languages people do and type
+tourists we uh uh it's it's a very nice
+piece of work yes I'm I'm aware of it um
+it's um let me say this the Tate uh
+computability has nothing to do with
+computability that that's maybe good to
+know uh but
+yeah right right right so the box is oh
+right so the Box appears there yes yes
+yes yeah but they're logicians you see
+this is this is actual this this is
+topology right yeah yeah yeah yeah it's
+a very it's a very nice piece of work uh
+it's it's really yeah yeah that thank
+you for reminding me yes there are boxes
+there yes thank
+you okay um well let's say I think you
+have to let y speak he wanted to speak
+did
+sorry uh thank you very much I just have
+a question about your uh the way you
+describe the the synthetic analytic
+dichotomy and so when I think think of
+homotopy type Theory what you do is you
+Define basic concepts for example you
+already Define sets and then you prove
+things about them in a in a big
+foundational system which is type Theory
+so that is just what you listed under
+the analytic kind of mathematics right
+yet in your you talk about homotopy type
+theory is something
+synthetic right so um I think the
+touches upon the fact that we're trying
+to do
+synthetically not just the study of a
+single structure such as the ukian plane
+but an entire branch of
+mathematics and like Smooth analysis
+computability Theory homotopy Theory and
+it is in the nature of these branches
+that they already require a very rich
+environment in which they express
+themselves such as type Theory or H the
+logic or set theory so yes you're
+entirely correct it's going to be it's
+going to look like an analytic
+method um maybe what distinguishes the
+approach um is the fact that we do not
+insist on a single unifying
+foundation so we are willing for each
+branch to have its own special axioms in
+addition to some common core which we
+would call the foundational system and
+these Axion are wildly incompatible with
+each other you can't put them together
+so to my mind that is maybe a more
+characteristic a more important
+characteristic of the synthetic approach
+than this theory model thing I agree
+with you um maybe the theory model thing
+I present it more for pedagogical reason
+but I think you have a I think you have
+an important point there so so yeah uh
+in a way as humans I think we would
+naturally um gravitate towards having a
+foundational system um because as a
+mathematician you would like to work in
+an environment that is extremely
+rich but that means that you will want a
+foundational system that is very
+expressive and I system that is very
+expressive but then it will be
+foundational because it's so
+expressive there's no way
+out but there is a way to lunch
+um um I don't know is it it's just
+outside I guess yeah okay so uh and we
+should reconvene at 1 o No 2
+o' thank you

@@ -2,7 +2,7 @@
 
 ## Cobordism: NaN-boxed Clojure interpreter → maximally parallel via Solomonoff compression
 
-14 faces, 154 artifacts. Universal joint: Clairambault's "Rosetta Stone of Interactive & Quantitative Semantics" (CSL 2026).
+15 faces, 160 artifacts. Universal joint: Clairambault's "Rosetta Stone of Interactive & Quantitative Semantics" (CSL 2026).
 
 Solomonoff gradient: K(eval)≈800 LOC → K≈150 LOC, parallelism 0%→95%.
 Thermodynamic floor: kT·ln(3) per trit, kT·ln(2) per bit (Landauer).
@@ -104,6 +104,16 @@ Thermodynamic floor: kT·ln(3) per trit, kT·ln(2) per bit (Landauer).
 ### Face 14: Self-Reference & Fixed Points
 - (covered by edge-cases.clj sections 15-16: quine, Y-combinator, self)
 
+### Face 15: Realizability & Synthetic Computability (Heyting Day 2025)
+- `heyting-day-2025/CONCORDANCE.md` — full concordance with nanoclj-zig/bmorphism/Plurigrid
+- `heyting-day-2025/pitts-transcript.txt` — Pitts: Heyting Algebras and Higher-Order Logic (11,657 words)
+- `heyting-day-2025/bauer-transcript.txt` — Bauer: Turing Degrees in Synthetic Computability (10,715 words)
+- `heyting-day-2025/terwijn-transcript.txt` — Terwijn: Embeddings and Completions in PCAs (1,876 words)
+- `heyting-day-2025/pitts-slides.txt` — Pitts slides (41 pages, extracted)
+- `heyting-day-2025/naw-report.txt` — Nieuw Archief voor Wiskunde report (3 pages)
+- **Open question**: ∀H, ∃? E with H ≅ E(1,Ω) — is every Heyting algebra a topos truth algebra?
+- **Concordance**: kanren.zig = hyperdoctrine (fresh=∃, ==adjoint, conde=∨), computable_sets.zig = arithmetical hierarchy in eff. topos, GF(3) = 3-element Heyting algebra, fuel = non-completable PCA
+
 ---
 
 ## Key People (Accattoli Cluster)
@@ -111,6 +121,14 @@ Thermodynamic floor: kT·ln(3) per trit, kT·ln(2) per bit (Landauer).
 - **Pierre Clairambault** (CNRS/ENS Lyon): face 13. The Rosetta Stone unifying GoI, games, quantitative semantics.
 - **Dale Miller** (INRIA): face 11. Linear logic negative connectives = parallel rule application.
 - **Xavier Leroy** (INRIA/Collège de France): face 10. Lazy concurrent convertibility = parallel β-equivalence.
+
+## Key People (Realizability Cluster — Face 15)
+- **Andrej Bauer** (Ljubljana): synthetic computability, effective topos, countable reals. Oracle modalities = substrate comparison.
+- **Andrew Pitts** (Cambridge): triposes, uniform interpolation Ap/Ep, Heyting algebra open question.
+- **Jaap van Oosten** (Utrecht, ret.): *Realizability* textbook, oracle adjunction to PCAs, categorical realizability.
+- **Sebastiaan Terwijn** (Radboud): PCA embeddings/completions, computable model theory.
+- **Andrew Swan** (various): oracle modalities in HoTT, Turing degrees as subtoposes.
+- **Yannick Forster** (mechanized synthetic computability in Coq, CSL 2025).
 
 ## Action Items (by compression level)
 1. **Level 1** (fuel fork/join): Use ringmpsc for lock-free dispatch. Graded comonad from arxiv 2512.06952 for static fuel partitioning.

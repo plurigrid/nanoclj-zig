@@ -1,0 +1,434 @@
+Heyting Algebras and Higher-Order Logic
+Andrew Pits
+Heyting Day 2025
+1/16
+
+Heyting Day 2025:
+Models of intuitionism and computability
+celebrating Jaap van Oosten
+Category Theory is crucial
+e.g.: J v O, Realizability: An Introduction to its Categorical Side (Elsevier, 2008)
+2/16
+
+Aims
+◮Some observations about the role of category theory in logic.
+◮Recall a long-standing open problem connecting intuitionistic
+higher-order logic and category theory, in the hope that someone
+will setle it.
+◮(Try not to be too technical!)
+3/16
+
+Category Theory
+Set Theory describes mathematical structures in terms of their elements
+(and functions on, and relations between, elements).
+In contrast,
+Category Theory describes mathematical structures entirely in terms of
+structure-preserving transformations: at base, the only way to give a
+kind of structure is to specify its transformations and how they
+compose.
+4/16
+
+Category Theory
+Set Theory describes mathematical structures in terms of their elements
+(and functions on, and relations between, elements).
+In contrast,
+Category Theory describes mathematical structures entirely in terms of
+structure-preserving transformations: at base, the only way to give a
+kind of structure is to specify its transformations and how they
+compose.
+Here:
+◮Adjunctions in proof theory
+◮Topos models of intuitionistic higher-order logic
+4/16
+
+Adjointness in proof theory
+The notion of adjunction [D. Kan, Trans AMS 1958] is the key concept of category theory.
+5/16
+
+Adjointness in proof theory
+The notion of adjunction [D. Kan, Trans AMS 1958] is the key concept of category theory.
+Simple special case for monotone function f : (P, ≤P) →(Q, ≤Q) between posets:
+Given y ∈Q, the right adjoint of f at y ∈Q, if it exists, is the unique gy ∈P with
+for all x ∈P,
+f (x) ≤Q y iﬀx ≤P gy
+If gy exists for all y we get g : Q →P, the right adjoint of f .
+It is uniquely determined by f and monotone.
+[Lef adjoints dually.]
+5/16
+
+Adjointness in proof theory
+The notion of adjunction [D. Kan, Trans AMS 1958] is the key concept of category theory.
+Simple special case for monotone function f : (P, ≤P) →(Q, ≤Q) between posets:
+Given y ∈Q, the right adjoint of f at y ∈Q, if it exists, is the unique gy ∈P with
+for all x ∈P,
+f (x) ≤Q y iﬀx ≤P gy
+If gy exists for all y we get g : Q →P, the right adjoint of f .
+It is uniquely determined by f and monotone.
+[Lef adjoints dually.]
+Lawvere and Lambek observed that many logical constructs can be characterised as
+lef or right adjoints (substitution stable ones), so their existence is a property of models
+not extra structure.
+Non-example: modalities are not usually characterisable as adjoints.
+5/16
+
+Example: ∀is right adjoint to weakening
+In Heyting’s intuitionistic predicate logic
+ϕ(⃗y) ⊢ψ(x,⃗y)
+iﬀ
+ϕ(⃗y) ⊢∀x ψ(x,⃗y)
+[x : X,⃗y : ⃗Y]
+intuitionistic entailment
+variables x, ⃗y stand for unknown
+individuals of some sorts X, ⃗Y
+6/16
+
+Example: ∀is right adjoint to weakening
+In Heyting’s intuitionistic predicate logic
+ϕ(⃗y) ⊢ψ(x,⃗y)
+iﬀ
+ϕ(⃗y) ⊢∀x ψ(x,⃗y)
+[x : X,⃗y : ⃗Y]
+The “f ” in this case is the weakening function
+({formulas in ⃗y}, ⊢) ֒→({formulas in x and ⃗y}, ⊢)
+6/16
+
+Example: ∀is right adjoint to weakening
+In Heyting’s intuitionistic ✘✘✘✘✘✘
+predicate propositional logic
+ϕ(⃗q) ⊢ψ(p,⃗q)
+iﬀ
+ϕ(⃗q) ⊢?
+[p,⃗q : Ω]
+The “f ” in this case is the weakening function
+({formulas in ⃗q}, ⊢) ֒→({formulas in p and ⃗q}, ⊢)
+intuitionistic entailment
+variables p,⃗q stand for
+unknown propositions (sort Ω)
+built up using ⊥, ⊤, ∧, ∨, 
+7/16
+
+Example: ∀is right adjoint to weakening
+In Heyting’s intuitionistic ✘✘✘✘✘✘
+predicate propositional logic
+ϕ(⃗q) ⊢ψ(p,⃗q)
+iﬀ
+ϕ(⃗q) ⊢Apψ(⃗q)
+[p,⃗q : Ω]
+The “f ” in this case is the weakening function
+({formulas in ⃗q}, ⊢) ֒→({formulas in p and ⃗q}, ⊢)
+Surprising fact about intuitionistic propositional logic (IPL):
+there exist IPL formulas Apψ(⃗q) for right adjoints to weakening
+(and dually, formulas Epψ(⃗q) for lef adjoints—existential quantifiers).
+7/16
+
+Example: ∀is right adjoint to weakening
+In Heyting’s intuitionistic ✘✘✘✘✘✘
+predicate propositional logic
+ϕ(⃗q) ⊢ψ(p,⃗q)
+iﬀ
+ϕ(⃗q) ⊢?
+[p,⃗q : Ω]
+The “f ” in this case is the weakening function
+({formulas in ⃗q}, ⊢) ֒→({formulas in p and ⃗q}, ⊢)
+Surprising fact about intuitionistic propositional logic (IPL):
+there exist IPL formulas Apψ(⃗q) for right adjoints to weakening
+(and dually, formulas Epψ(⃗q) for lef adjoints—existential quantifiers).
+(In classical PL, Apψ(⃗q) = ψ(⊤,⃗q) ∧ψ(⊥,⃗q) and Epψ(⃗q) = ψ(⊤,⃗q) ∨ψ(⊥,⃗q))
+7/16
+
+Example: ∀is right adjoint to weakening
+Theorem. Given any formula ψ built up using ⊥, ⊤, ∧, ∨and  from variables
+p, q, . . ., there is another such formula Apψ, not involving p, which is the value at ψ of
+the right adjoint to weakening; and dually for the lef adjoint (existential quantifier)
+Epψ.
+My original proof [JSL 57(1992)] was via proof theory (using the Vorob’ev-Hudelmaier-Dyckhoﬀversion
+of Gentzen sequent calculus) and was constructive—Ap and Ep are computable functions.
+8/16
+
+Epϕ ≜Ep({ϕ})
+Ep(∆) ≜V Ep(∆)
+Apϕ ≜Ap(∅; ϕ)
+Ap(∆; ϕ) ≜W Ap(∆; ϕ)
+9/16
+
+Example: ∀is right adjoint to weakening
+Theorem. Given any formula ψ built up using ⊥, ⊤, ∧, ∨and  from variables
+p, q, . . ., there is another such formula Apψ, not involving p, which is the value at ψ of
+the right adjoint to weakening; and dually for the lef adjoint (existential quantifier)
+Epψ.
+My original proof [JSL 57(1992)] was via proof theory (using the Vorob’ev-Hudelmaier-Dyckhoﬀversion
+of Gentzen sequent calculus) and was constructive—Ap and Ep are computable functions.
+Recent improvement, formalization and verification of algorithms for Ap and Ep by Férée & van Gool
+[ACM Cert. Progs & Proofs Conference (2023)].
+Non-constructive, model-theoretic proof by Ghilardi & Zawadowski [JSL 60(1995)] uses a duality
+between Heyting algebras and sheaves-with-game-theoretic-structure. Later simplified by van Gool &
+Reggio [Canadian Math. Bull. 62(2019)] using topological duality between Heyting algebras and Esakia
+spaces (roughly: finitely presentable extensions in HAs have adjoints because their duals are open
+maps).
+10/16
+
+Example: ∀is right adjoint to weakening
+Theorem. Given any formula ψ built up using ⊥, ⊤, ∧, ∨and  from variables
+p, q, . . ., there is another such formula Apψ, not involving p, which is the value at ψ of
+the right adjoint to weakening; and dually for the lef adjoint (existential quantifier)
+Epψ.
+Craig interpolation property:
+ϕ(p, q)
+⊢
+ψ(q, r)
+10/16
+
+Example: ∀is right adjoint to weakening
+Theorem. Given any formula ψ built up using ⊥, ⊤, ∧, ∨and  from variables
+p, q, . . ., there is another such formula Apψ, not involving p, which is the value at ψ of
+the right adjoint to weakening; and dually for the lef adjoint (existential quantifier)
+Epψ.
+Craig interpolation property:
+ϕ(p, q)
+⊢θ(q) ⊢
+ψ(q, r)
+exists
+10/16
+
+Example: ∀is right adjoint to weakening
+Theorem. Given any formula ψ built up using ⊥, ⊤, ∧, ∨and  from variables
+p, q, . . ., there is another such formula Apψ, not involving p, which is the value at ψ of
+the right adjoint to weakening; and dually for the lef adjoint (existential quantifier)
+Epψ.
+Uniform interpolation property:
+ϕ(p, q) ⊢Epϕ(q) ⊢θ(q) ⊢Arψ(q) ⊢ψ(q, r)
+Many modal logics satisfy uniform interpolation,
+but some do not, e.g. S4 [Ghilardi & Zawadowski, Studia Log. 55(1995)].
+10/16
+
+Example: ∀is right adjoint to weakening
+Theorem. Given any formula ψ built up using ⊥, ⊤, ∧, ∨and  from variables
+p, q, . . ., there is another such formula Apψ, not involving p, which is the value at ψ of
+the right adjoint to weakening; and dually for the lef adjoint (existential quantifier)
+Epψ.
+Uniform interpolation property:
+ϕ(p, q)
+⊢θ(q) ⊢
+ψ(q, r)
+Many modal logics satisfy uniform interpolation,
+but some do not, e.g. S4 [Ghilardi & Zawadowski, Studia Log. 55(1995)].
+Originally I hoped that IPL would not (!), for the following reason...
+10/16
+
+Topos models of intuitionistic higher-order logic
+11/16
+
+Topos models of intuitionistic higher-order logic
+Intuitionistic Higher-Order Logic (IHOL) has
+Sorts
+X ::= N | P(X1, . . . , Xn)
+ground sorts
+(e.g. for numbers)
+power sort, whose varables stand for
+subsets of X1 × · · · × Xn
+(the sort Ωof propositions is P( ), i.e. n = 0)
+11/16
+
+Topos models of intuitionistic higher-order logic
+Intuitionistic Higher-Order Logic (IHOL) has
+Sorts
+X ::= N | P(X1, . . . , Xn)
+Formulas ϕ built up using __ and ∀x : X._ from
+atomic formula for membership
+(x1, . . . , xn) ∈y
+[where x1 : X1 ,..., xn : Xn and y : P(X1, . . ., Xn)]
+⊥,⊤, ∧, ∨, ↔, ∃and = are definable (impredicatively!)
+11/16
+
+Topos models of intuitionistic higher-order logic
+Intuitionistic Higher-Order Logic (IHOL) has
+Sorts
+X ::= N | P(X1, . . . , Xn)
+Formulas ϕ built up using __ and ∀x : X._ from
+atomic formula for membership
+(x1, . . . , xn) ∈y
+[where x1 : X1 ,..., xn : Xn and y : P(X1, . . ., Xn)]
+subject to the usual rules of intuitionistic logic plus
+Comprehension
+∃y : P(⃗X). ∀⃗x : ⃗X. (⃗x ∈y ↔ϕ(⃗x))
+(and Infinity axioms, if we have a ground sort for numbers)
+11/16
+
+Topos models of intuitionistic higher-order logic
+Intuitionistic Higher-Order Logic (IHOL) has
+Sorts
+X ::= N | P(X1, . . . , Xn)
+Formulas ϕ built up using __ and ∀x : X._ from
+atomic formula for membership
+(x1, . . . , xn) ∈y
+[where x1 : X1 ,..., xn : Xn and y : P(X1, . . ., Xn)]
+subject to the usual rules of intuitionistic logic plus
+Comprehension
+∃y : P(⃗X). ∀⃗x : ⃗X. (⃗x ∈y ↔ϕ(⃗x))
+Simple, but expressive
+11/16
+
+Topos models of intuitionistic higher-order logic
+A topos is any category with
+◮finite limits
+◮power objects
+12/16
+
+Topos models of intuitionistic higher-order logic
+A topos is any category with
+◮finite limits
+gives adjoint characterisation of
+cartesian product
+injective functions / subsets
+inverse image of subset along a function
+◮power objects
+gives adjoint characterisation of
+powerset + comprehension
+12/16
+
+Topos models of intuitionistic higher-order logic
+A topos is any category with
+◮finite limits
+◮power objects
+1945-74 [Leray, Cartan, Weil, Serre, Godement ⟩Grothendieck – sheaf toposes
+1974-79 Lawvere & Tierney ⟨Freyd, Joyal, Lambek, Johnstone, ...] – elementary toposes
+connection with IHOL
+1979 [Kreisel, Gandy ⟩Hyland – realizability toposes
+12/16
+
+Three examples
+◮Classical truth: JϕK ⊆{∗} (two subsets)
+∗∈Jϕ  ψK iﬀeither ∗∈JψK, or ∗/∈JϕK
+The topos Set of classical sets and functions
+13/16
+
+Three examples
+◮Classical truth: JϕK ⊆{∗} (two subsets)
+∗∈Jϕ  ψK iﬀeither ∗∈JψK, or ∗/∈JϕK
+The topos Set of classical sets and functions
+◮Continuous truth: JϕK ⊆R (open subsets)
+x ∈Jϕ  ψK iﬀfor some ε > 0, for all y within ε of x, if y ∈JϕK, then y ∈JψK
+The topos of Set-values sheaves on R
+13/16
+
+Three examples
+◮Classical truth: JϕK ⊆{∗} (two subsets)
+∗∈Jϕ  ψK iﬀeither ∗∈JψK, or ∗/∈JϕK
+The topos Set of classical sets and functions
+◮Continuous truth: JϕK ⊆R (open subsets)
+x ∈Jϕ  ψK iﬀfor some ε > 0, for all y within ε of x, if y ∈JϕK, then y ∈JψK
+The topos of Set-values sheaves on R
+◮Kleene-realizable truth: JϕK ⊆N (all subsets)
+n ∈Jϕ  ψK iﬀfor all m ∈JϕK, the value of the n th partial recursive function at
+m is defined and is in JψK
+Hyland’s Eﬀective Topos [Brouwer Cent. Symp., North-Holland (1982)]
+13/16
+
+Three examples
+◮Classical truth: JϕK ⊆{∗} (two subsets)
+∗∈Jϕ  ψK iﬀeither ∗∈JψK, or ∗/∈JϕK
+The topos Set of classical sets and functions
+◮Continuous truth: JϕK ⊆R (open subsets)
+x ∈Jϕ  ψK iﬀfor some ε > 0, for all y within ε of x, if y ∈JϕK, then y ∈JψK
+The topos of Set-values sheaves on R
+◮Kleene-realizable truth: JϕK ⊆N (all subsets)
+n ∈Jϕ  ψK iﬀfor all m ∈JϕK, the value of the n th partial recursive function at
+m is defined and is in JψK
+Hyland’s Eﬀective Topos [Brouwer Cent. Symp., North-Holland (1982)]
+What kind of “truth values” does a topos have in general?
+13/16
+
+Heyting algebras
+are bounded (⊤, ⊥) distributive latices (∧, ∨) with relative pseudocomplements ().
+They relate to Heyting’s “sterile” formalization of Brouwer’s intuitionism as Boolean
+algebras relate to classical logic.
+In particular
+the sentences of an IHOL theory modulo provability
+or equivalently
+the global elements E(1, Ω) of the subobject classifier Ωof a topos E
+has the structure of a Heyting algebra.
+14/16
+
+Heyting algebras
+are bounded (⊤, ⊥) distributive latices (∧, ∨) with relative pseudocomplements ().
+They relate to Heyting’s “sterile” formalization of Brouwer’s intuitionism as Boolean
+algebras relate to classical logic.
+In particular
+the sentences of an IHOL theory modulo provability
+or equivalently
+the global elements E(1, Ω) of the subobject classifier Ωof a topos E
+has the structure of a Heyting algebra.
+Open question: is every Heyting algebra isomorphic to E(1, Ω) for
+some topos E?
+14/16
+
+Open question: ∀H, ∃? E with H ∼= E(1, Ω)
+It suﬀices to resolve the question in the case when H is a free Heyting algebra F[X] on
+a set X, i.e. {sentences of IPL over X} mod ⊢.
+15/16
+
+Open question: ∀H, ∃? E with H ∼= E(1, Ω)
+It suﬀices to resolve the question in the case when H is a free Heyting algebra F[X] on
+a set X, i.e. {sentences of IPL over X} mod ⊢.
+My failed strategy from 1980s for resolving the question in the negative:
+Not hard to prove:
+if F[X] is of the form E(1, Ω), then
+the quantifier structure in E (it’s a modelof IHOL) implies that IPL has uniform interpolants.
+So to prove there is no such E, it suﬀices to find an IPL formula ϕ for which Apϕ or Epϕ
+cannot exist.
+15/16
+
+Open question: ∀H, ∃? E with H ∼= E(1, Ω)
+It suﬀices to resolve the question in the case when H is a free Heyting algebra F[X] on
+a set X, i.e. {sentences of IPL over X} mod ⊢.
+My failed strategy from 1980s for resolving the question in the negative:
+Not hard to prove:
+if F[X] is of the form E(1, Ω), then
+the quantifier structure in E (it’s a modelof IHOL) implies that IPL has uniform interpolants.
+So to prove there is no such E, it suﬀices to find an IPL formula ϕ for which Apϕ or Epϕ
+cannot exist.
+1992: oh no! Apϕ and Epϕ always exist.
+15/16
+
+Open question: ∀H, ∃? E with H ∼= E(1, Ω)
+It suﬀices to resolve the question in the case when H is a free Heyting algebra F[X] on
+a set X, i.e. {sentences of IPL over X} mod ⊢.
+Dito Pataraia (d.2011) strategy from 2007 for resolving the question in the positive:
+1. Formulate IHOL in terms of algebraic logic—notion of a “higher-order cylindric Heyting algebra”
+(hocha).
+Every hocha H has a Heyting algebra of sentences H(1, Ω)
+Every hocha H generates a topos E (like tripos-to-topos construction of Hyland-Johnstone-P)
+with E(1, Ω) ∼= H(1, Ω).
+[all OK]
+2. Somehow use Ghilardi’s construction of free Heyting algebras
+[C.R Math. Acad. Sci. Canada(14)1992] to construct a hocha H with H(1, Ω) ∼= F[X].
+But it’s not clear how DP intended to do that :-(
+15/16
+
+In conclusion
+[Please would someone resolve the open question about Heyting
+algebras and toposes.]
+16/16
+
+In conclusion
+[Please would someone resolve the open question about Heyting
+algebras and toposes.]
+Category theory has been essential for linking logic to
+geometry (sheaf toposes) and computation (realizability toposes).
+In the modern era, logical (type theoretical) account of
+higher-dimensional category theory (“it sucks” , DS) is proving essential for
+obtaining a homotopy theory of spaces that has computational content
+(cf. the cubical type theory of Coquand et al)
+16/16
+
+In conclusion
+[Please would someone resolve the open question about Heyting
+algebras and toposes.]
+Category theory has been essential for linking logic to
+geometry (sheaf toposes) and computation (realizability toposes).
+In the modern era, logical (type theoretical) account of
+higher-dimensional category theory (“it sucks” , DS) is proving essential for
+obtaining a homotopy theory of spaces that has computational content
+(cf. the cubical type theory of Coquand et al)
+Thank you for your atention!
+16/16
