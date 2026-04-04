@@ -1,6 +1,6 @@
 # nanoclj-zig
 
-A Clojure interpreter in ~5,000 lines of Zig with NaN-boxed values, fuel-bounded evaluation, and GF(3) trit-colored deterministic worlds.
+A Clojure interpreter in ~8,000 lines of Zig with NaN-boxed values, fuel-bounded evaluation, interaction nets, and a Forester mathematical forest.
 
 ```
 $ zig build run
@@ -127,31 +127,78 @@ bob=> (gf3-add 1 -1)
 The REPL banner renders a 320-cell color fingerprint unique to your username, verified
 `trit_sum mod 3 = 0`.
 
+## Forester forest integration
+
+Reads `.tree` files from a [Forester](https://www.jonmsterling.com/jms-005P.xml)
+mathematical forest, materializing the transclusion graph at load time:
+
+```clojure
+bob=> (count (tree-ids))
+1755
+
+bob=> (tree-taxon "dct-0001")
+"doctrine"
+
+bob=> (count (tree-by-taxon "doctrine"))
+22
+
+bob=> (tree-meta "ologs-2012")
+{:doi "10.1371/journal.pone.0024274", :arxiv "1102.1889"}
+
+bob=> (tree-imports "dct-0001")
+("macros")
+
+bob=> (tree-chain "hub-doctrines")
+("hub-doctrines" "dct-0001" ... )
+```
+
+12 builtins: `tree-read`, `tree-title`, `tree-taxon`, `tree-author`, `tree-meta`,
+`tree-imports`, `tree-transcluded`, `tree-transcluders`, `tree-ids`, `tree-isolated`,
+`tree-chain`, `tree-by-taxon`.
+
+## Interaction nets & partial evaluation
+
+Lamping/Lafont optimal reduction with four cell kinds (γ/δ/ε/ι) and GF(3) charges:
+
+```clojure
+bob=> (def net (inet-new))
+bob=> (inet-cell net 0 2)   ; γ cell, arity 2
+bob=> (inet-reduce net)     ; reduce active pairs
+```
+
+At startup, a first Futamura projection partially evaluates constant bindings through
+the interaction net, collapsing compile-time-known computation before the REPL starts.
+
 ## Architecture
 
 ```
 src/
-  main.zig            132  REPL entry, banner, color strip
-  value.zig           208  NaN-boxed value representation
+  main.zig            145  REPL entry, banner, color strip, peval boot
+  value.zig           174  NaN-boxed value representation
   reader.zig          247  S-expression reader/parser
   eval.zig            227  Core evaluator (def!, let*, if, do, fn*, quote)
   printer.zig         101  Value → string
-  env.zig              40  Lexical scope chain
-  gc.zig              189  Mark-sweep garbage collector
-  core.zig            508  50+ builtins (arithmetic, collections, color, BCI)
-  gay_skills.zig      446  Tropical semiring, world sim, bisimulation
+  env.zig              63  Lexical scope chain (string + u48 ID lookup)
+  gc.zig              207  Worklist-based mark-sweep garbage collector
+  core.zig            545  80+ builtins (arithmetic, collections, color, BCI)
+  gay_skills.zig      459  Tropical semiring, world sim, bisimulation
   substrate.zig       396  SplitMix64 engine, GF(3) arithmetic, nREPL stub
   semantics.zig        33  Re-exports the three semantic layers:
-    transclusion.zig        Denotational semantics (⟦·⟧), domain type
-    transduction.zig        Fuel-bounded operational eval
-    transitivity.zig        Structural equality, resource limits, GF(3)
-  mcp_tool.zig        523  Model Context Protocol server (JSON-RPC 2.0)
-  braid.zig           395  Braid-HTTP CRDT state sync, Syrup patches
+    transclusion.zig  447    Denotational semantics (⟦·⟧), domain type
+    transduction.zig  457    Fuel-bounded operational eval
+    transitivity.zig  453    Structural equality, resource limits, GF(3)
+  tree_vfs.zig        547  Forester forest VFS (12 builtins)
+  inet.zig            425  Interaction net engine (Lamping/Lafont)
+  inet_compile.zig    433  Lambda → interaction net compiler
+  inet_builtins.zig   278  Clojure-facing inet API
+  peval.zig           258  Partial evaluation (first Futamura projection)
+  mcp_tool.zig        563  Model Context Protocol server (JSON-RPC 2.0)
+  http_fetch.zig      102  HTTP client builtin
+  thread_peval.zig     96  OS-thread parallel eval for peval
+  braid.zig           396  Braid-HTTP CRDT state sync
   vcv_bridge.zig      288  VCV Rack shared-memory CV bridge
-  syrup_bridge.zig     64  Value ↔ Syrup serialization
-  color_strip.zig     116  Terminal truecolor strip renderer
   ─────────────────────────
-  ~5,000 lines total
+  ~8,000 lines across 30 files
 ```
 
 ## Build targets
