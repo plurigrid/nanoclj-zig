@@ -257,6 +257,7 @@ pub const Compiler = struct {
             }
             if (std.mem.eql(u8, name, "if")) return self.compileIf(items, dest);
             if (std.mem.eql(u8, name, "def")) return self.compileDef(items, dest);
+            if (std.mem.eql(u8, name, "defn")) return self.compileDefn(items, dest);
             if (std.mem.eql(u8, name, "let*")) return self.compileLet(items, dest);
             if (std.mem.eql(u8, name, "do")) return self.compileDo(items, dest);
             if (std.mem.eql(u8, name, "fn*")) return self.compileFnStar(items, dest);
