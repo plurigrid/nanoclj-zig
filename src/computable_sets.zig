@@ -1119,3 +1119,228 @@ pub fn rhCheckFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     }
     return Value.makeObj(obj);
 }
+
+// ============================================================================
+// STOPTHROWINGROCKS BLOG — expressed in nanoclj-zig
+//
+// Six posts → six computational concepts:
+//   1. Escaping the Simulation — simulation detection via computational bounds
+//   2. Matrix Derivation — 𝔻(A) = D·A - A·D, tr=0 conservation
+//   3. Random Fields — Gromov product distance matrices on metric spaces
+//   4. Color Sort — GF(3) water sort puzzle, decidable (Δ⁰₁)
+//   5. Teraformr — turn-based state machine (discrete dynamics)
+//   6. We Move As One — clone synchronization (consensus problem)
+// ============================================================================
+
+// --- 1. ESCAPING THE SIMULATION ---
+// Core idea: if we live in a simulation, the simulator has finite compute.
+// Detectable via: fuel exhaustion = hitting the simulator's resource bound.
+// In nanoclj-zig, our fuel-bounded eval IS the simulation boundary.
+// The REPL's fuel limit (semantics.Resources) is literally the simulation wall.
+
+/// (simulation-fuel) → current fuel limit of the evaluator
+pub fn simulationFuelFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    // The default fuel from semantics.Resources.initDefault()
+    // This IS the simulation boundary — computation beyond this diverges
+    return Value.makeInt(1_000_000);
+}
+
+/// (simulation-escape? expr-cost) → true if expression cost exceeds simulator fuel
+/// The philosophical point: you can't escape, but you CAN detect the wall.
+pub fn simulationEscapeFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1 or !args[0].isInt()) return error.ArityError;
+    const cost = args[0].asInt();
+    const fuel: i48 = 1_000_000; // simulator's budget
+    // Can we escape? Only if cost > fuel. But we can never RUN cost > fuel.
+    // This is the diagonal argument: the simulation can always detect escape attempts.
+    return Value.makeBool(cost > fuel);
+}
+
+// --- 2. MATRIX DERIVATION ---
+// 𝔻(A) = D·A - A·D (commutator / Lie bracket)
+// Properties: tr(𝔻(A)) = 0 always, product rule holds
+
+/// (matrix-derivation D A) → 𝔻(A) = D·A - A·D for 2×2 matrices
+/// Each matrix is [[a b] [c d]]
+pub fn matrixDerivationFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    const d = parse2x2(args[0], gc) orelse return error.TypeError;
+    const a = parse2x2(args[1], gc) orelse return error.TypeError;
+    const da = mul2x2(d, a);
+    const ad = mul2x2(a, d);
+    const result = [4]i48{ da[0] - ad[0], da[1] - ad[1], da[2] - ad[2], da[3] - ad[3] };
+    return make2x2(result, gc);
+}
+
+/// (matrix-derivation-trace D A) → tr(𝔻(A)), always 0
+pub fn matrixDerivationTraceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    const d = parse2x2(args[0], gc) orelse return error.TypeError;
+    const a = parse2x2(args[1], gc) orelse return error.TypeError;
+    const da = mul2x2(d, a);
+    const ad = mul2x2(a, d);
+    return Value.makeInt((da[0] - ad[0]) + (da[3] - ad[3]));
+}
+
+fn parse2x2(v: Value, gc: *GC) ?[4]i48 {
+    _ = gc;
+    if (!v.isObj()) return null;
+    const obj = v.asObj();
+    if (obj.kind != .vector) return null;
+    if (obj.data.vector.items.items.len != 2) return null;
+    const r0v = obj.data.vector.items.items[0];
+    const r1v = obj.data.vector.items.items[1];
+    if (!r0v.isObj() or !r1v.isObj()) return null;
+    const r0o = r0v.asObj();
+    const r1o = r1v.asObj();
+    if (r0o.kind != .vector or r1o.kind != .vector) return null;
+    const r0 = r0o.data.vector.items.items;
+    const r1 = r1o.data.vector.items.items;
+    if (r0.len != 2 or r1.len != 2) return null;
+    if (!r0[0].isInt() or !r0[1].isInt() or !r1[0].isInt() or !r1[1].isInt()) return null;
+    return [4]i48{ r0[0].asInt(), r0[1].asInt(), r1[0].asInt(), r1[1].asInt() };
+}
+
+fn mul2x2(a: [4]i48, b: [4]i48) [4]i48 {
+    return [4]i48{
+        a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3],
+        a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3],
+    };
+}
+
+fn make2x2(m: [4]i48, gc: *GC) !Value {
+    const row0 = try gc.allocObj(.vector);
+    try row0.data.vector.items.append(gc.allocator, Value.makeInt(m[0]));
+    try row0.data.vector.items.append(gc.allocator, Value.makeInt(m[1]));
+    const row1 = try gc.allocObj(.vector);
+    try row1.data.vector.items.append(gc.allocator, Value.makeInt(m[2]));
+    try row1.data.vector.items.append(gc.allocator, Value.makeInt(m[3]));
+    const result = try gc.allocObj(.vector);
+    try result.data.vector.items.append(gc.allocator, Value.makeObj(row0));
+    try result.data.vector.items.append(gc.allocator, Value.makeObj(row1));
+    return Value.makeObj(result);
+}
+
+// --- 3. RANDOM FIELDS / GROMOV PRODUCT ---
+// For 3 points on a metric space, the Gromov product (x₁|x₂)_{x₀} =
+// (d(x₀,x₁) + d(x₀,x₂) - d(x₁,x₂)) / 2
+// Positive iff the metric is of negative type (trees are always negative type).
+
+/// (gromov-matrix [d01 d02 d12]) → {:d01 .. :gromov-product-2x .. :trit .. :negative-type? ..}
+pub fn gromovMatrixFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const dists_obj = args[0].asObj();
+    if (dists_obj.kind != .vector) return error.TypeError;
+    const items = dists_obj.data.vector.items.items;
+    if (items.len != 3) return error.ArityError;
+    if (!items[0].isInt() or !items[1].isInt() or !items[2].isInt()) return error.TypeError;
+    const d01 = items[0].asInt();
+    const d02 = items[1].asInt();
+    const d12 = items[2].asInt();
+    const gromov_2 = d01 + d02 - d12; // 2× Gromov product
+    const gp_r = @mod(gromov_2 + 300, 3);
+    const gp_trit: i48 = if (gp_r == 2) -1 else gp_r;
+
+    const obj = try gc.allocObj(.map);
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "d01"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(d01));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "d02"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(d02));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "d12"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(d12));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "gromov-product-2x"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(gromov_2));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(gp_trit));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "negative-type?"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(gromov_2 >= 0));
+    return Value.makeObj(obj);
+}
+
+// --- 4. COLOR SORT ---
+// Water Sort puzzle: tubes of colored segments, pour same-color tops.
+// GF(3) trit sum conserved under pours.
+
+/// (color-sort-trit-sum [[0 1 2] [1 0 2] []]) → GF(3) sum of all tube contents
+pub fn colorSortTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const tubes_obj = args[0].asObj();
+    if (tubes_obj.kind != .vector) return error.TypeError;
+    var sum: i48 = 0;
+    for (tubes_obj.data.vector.items.items) |tube_val| {
+        if (!tube_val.isObj()) continue;
+        const tube_obj = tube_val.asObj();
+        if (tube_obj.kind != .vector) continue;
+        for (tube_obj.data.vector.items.items) |c| {
+            if (c.isInt()) sum += c.asInt();
+        }
+    }
+    return Value.makeInt(@mod(sum + 300, 3));
+}
+
+// --- 5. TERAFORMR (turn-based state machine) ---
+// Discrete dynamics: state × action → state. Undo = history stack.
+// This is a deterministic pushdown automaton (Δ⁰₁, decidable).
+
+/// (turn-state moves) → {:steps n :reversible true :hierarchy "delta-1"}
+pub fn turnStateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1 or !args[0].isInt()) return error.ArityError;
+    const moves = args[0].asInt();
+    const obj = try gc.allocObj(.map);
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "steps"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(moves));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "reversible"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(true));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "hierarchy"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString("delta-1")));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(0)); // Δ = 0
+    return Value.makeObj(obj);
+}
+
+// --- 6. WE MOVE AS ONE (consensus/clone synchronization) ---
+// n clones must synchronize actions. This is the consensus problem:
+// - With reliable channels: decidable (Δ⁰₁)
+// - With crash failures: Σ⁰₁ (FLP impossibility: no deterministic solution)
+// - Byzantine: Π⁰₁ (must verify all honest nodes agree)
+
+/// (consensus-classify n failures) → {:n n :failures f :hierarchy str :trit n}
+pub fn consensusClassifyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
+    const n = args[0].asInt();
+    const f = args[1].asInt();
+    const hierarchy: []const u8 = if (f == 0) "delta-1" else if (f * 3 < n) "sigma-1" else "pi-1";
+    const trit: i48 = if (f == 0) 0 else if (f * 3 < n) 1 else -1;
+
+    const obj = try gc.allocObj(.map);
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "n"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(n));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "failures"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(f));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "hierarchy"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(hierarchy)));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(trit));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "note"));
+    const note: []const u8 = if (f == 0) "reliable: all clones move as one" else if (f * 3 < n) "FLP: probabilistic consensus possible" else "Byzantine: need >2/3 honest";
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(note)));
+    return Value.makeObj(obj);
+}

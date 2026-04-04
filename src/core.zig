@@ -181,6 +181,15 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Gorard ordinal tower
         .{ "gorard-tower", &computable_sets.gorardTowerFn },
         .{ "gorard-trit-sum", &computable_sets.gorardTritSumFn },
+        // stopthrowingrocks blog concepts
+        .{ "simulation-fuel", &computable_sets.simulationFuelFn },
+        .{ "simulation-escape?", &computable_sets.simulationEscapeFn },
+        .{ "matrix-derivation", &computable_sets.matrixDerivationFn },
+        .{ "matrix-derivation-trace", &computable_sets.matrixDerivationTraceFn },
+        .{ "gromov-matrix", &computable_sets.gromovMatrixFn },
+        .{ "color-sort-trit-sum", &computable_sets.colorSortTritSumFn },
+        .{ "turn-state", &computable_sets.turnStateFn },
+        .{ "consensus-classify", &computable_sets.consensusClassifyFn },
         // Diophantine equations
         .{ "pythagorean-triples", &computable_sets.pythagoreanTriplesFn },
         .{ "pell-solve", &computable_sets.pellSolveFn },
