@@ -772,12 +772,7 @@ fn loadFileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
             if (r.pos >= r.src.len) break;
             continue;
         }
-        var res = semantics.Resources.initDefault();
-        const domain = semantics.evalBounded(form, env, gc, &res);
-        last_result = switch (domain) {
-            .value => |v| v,
-            else => Value.makeNil(),
-        };
+        last_result = eval_mod.eval(form, env, gc) catch Value.makeNil();
     }
     return last_result;
 }

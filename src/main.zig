@@ -517,4 +517,6 @@ test {
     _ = @import("disasm.zig");
     _ = @import("simd_str.zig");
     _ = @import("namespace.zig");
+    _ = @import("persistent_vector.zig");
+    _ = @import("persistent_map.zig");
 }

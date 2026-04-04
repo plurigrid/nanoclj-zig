@@ -21,7 +21,7 @@
     (is= 2 (second (list 1 2 3))))
   (testing "vector ops"
     (is= 3 (count [1 2 3]))
-    (is= 2 (nth [10 20 30] 1)))
+    (is= 20 (nth [10 20 30] 1)))
   (testing "map ops"
     (is= 2 (get {:a 1 :b 2} :b))
     (is= {:a 1} (dissoc {:a 1 :b 2} :b))
