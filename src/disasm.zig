@@ -249,7 +249,7 @@ fn disasmExpr(src: []const u8, allocator: std.mem.Allocator) ![]const u8 {
     defer gc.deinit();
     var reader = Reader.init(src, &gc);
     const form = try reader.readForm();
-    var comp = Compiler.init(allocator, &gc, null, null);
+    var comp = Compiler.init(allocator, &gc, null, null, null);
     const dest = try comp.allocReg();
     try comp.compile(form, dest);
     try comp.emit(bc.encode_d(.ret, dest));

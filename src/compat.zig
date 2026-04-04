@@ -6,6 +6,9 @@
 
 const std = @import("std");
 
+/// Type alias for Value lists
+pub const ValList = std.ArrayListUnmanaged(@import("value.zig").Value);
+
 /// Empty ArrayListUnmanaged — works on both 0.15 and 0.16.
 pub fn emptyList(comptime T: type) std.ArrayListUnmanaged(T) {
     const L = std.ArrayListUnmanaged(T);

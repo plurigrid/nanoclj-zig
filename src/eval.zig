@@ -15,6 +15,7 @@ pub const EvalError = error{
     TypeError,
     EvalFailed,
     ThrownException,
+    RecurCalled,
 };
 
 /// Last thrown exception value (set by throw, read by catch).
@@ -60,10 +61,24 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "in-ns")) return evalInNs(items, env, gc);
         if (std.mem.eql(u8, name, "defmacro")) return evalDefmacro(items, env, gc);
         if (std.mem.eql(u8, name, "macroexpand-1")) return evalMacroexpand1(items, env, gc);
-        if (std.mem.eql(u8, name, "defmulti")) return Value.makeNil();
-        if (std.mem.eql(u8, name, "defmethod")) return Value.makeNil();
-        if (std.mem.eql(u8, name, "defprotocol")) return Value.makeNil();
-        if (std.mem.eql(u8, name, "extend-type")) return Value.makeNil();
+        if (std.mem.eql(u8, name, "defmulti")) return evalDefmulti(items, env, gc);
+        if (std.mem.eql(u8, name, "defmethod")) return evalDefmethod(items, env, gc);
+        if (std.mem.eql(u8, name, "defprotocol")) return evalDefprotocol(items, env, gc);
+        if (std.mem.eql(u8, name, "extend-type")) return evalExtendType(items, env, gc);
+        if (std.mem.eql(u8, name, "->")) return evalThreadFirst(items, env, gc);
+        if (std.mem.eql(u8, name, "->>")) return evalThreadLast(items, env, gc);
+        if (std.mem.eql(u8, name, "some->")) return evalSomeThread(items, env, gc, true);
+        if (std.mem.eql(u8, name, "some->>")) return evalSomeThread(items, env, gc, false);
+        if (std.mem.eql(u8, name, "as->")) return evalAsThread(items, env, gc);
+        if (std.mem.eql(u8, name, "doto")) return evalDoto(items, env, gc);
+        if (std.mem.eql(u8, name, "for")) return evalFor(items, env, gc);
+        if (std.mem.eql(u8, name, "doseq")) return evalDoseq(items, env, gc);
+        if (std.mem.eql(u8, name, "dotimes")) return evalDotimes(items, env, gc);
+        if (std.mem.eql(u8, name, "loop")) return evalLoop(items, env, gc);
+        if (std.mem.eql(u8, name, "when-let")) return evalWhenLet(items, env, gc);
+        if (std.mem.eql(u8, name, "if-let")) return evalIfLet(items, env, gc);
+        if (std.mem.eql(u8, name, "when-not")) return evalWhenNot(items, env, gc);
+        if (std.mem.eql(u8, name, "if-not")) return evalIfNot(items, env, gc);
         if (std.mem.eql(u8, name, "colorspace")) return evalColorspace(items, env, gc);
         if (std.mem.eql(u8, name, "blend")) return evalBlend(items, env, gc);
         if (std.mem.eql(u8, name, "try")) return evalTry(items, env, gc);
@@ -71,6 +86,14 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
             if (items.len != 2) return error.ArityError;
             thrown_value = try eval(items[1], env, gc);
             return error.ThrownException;
+        }
+        if (std.mem.eql(u8, name, "recur")) {
+            recur_args.items.len = 0;
+            for (items[1..]) |arg| {
+                const v = try eval(arg, env, gc);
+                recur_args.append(gc.allocator, v) catch return error.OutOfMemory;
+            }
+            return error.RecurCalled;
         }
     }
 
@@ -821,6 +844,274 @@ fn mapTypeName(sym: []const u8) []const u8 {
     if (std.mem.eql(u8, sym, "Object")) return "object"; // catch-all
     // Lowercase pass-through (already a type name)
     return sym;
+}
+
+// ============================================================================
+// THREADING MACROS
+// ============================================================================
+
+/// (-> x (f a) (g b)) => (g (f x a) b)
+fn evalThreadFirst(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    var result = try eval(items[1], env, gc);
+    for (items[2..]) |form| {
+        if (form.isObj() and form.asObj().kind == .list) {
+            // (f a b) => eval (f result a b)
+            const parts = form.asObj().data.list.items.items;
+            const call = gc.allocObj(.list) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, parts[0]) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            for (parts[1..]) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
+            result = try eval(Value.makeObj(call), env, gc);
+        } else {
+            // bare symbol: (f result)
+            const call = gc.allocObj(.list) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, form) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            result = try eval(Value.makeObj(call), env, gc);
+        }
+    }
+    return result;
+}
+
+/// (->> x (f a) (g b)) => (g a (f a x))
+fn evalThreadLast(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    var result = try eval(items[1], env, gc);
+    for (items[2..]) |form| {
+        if (form.isObj() and form.asObj().kind == .list) {
+            const parts = form.asObj().data.list.items.items;
+            const call = gc.allocObj(.list) catch return error.OutOfMemory;
+            for (parts) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            result = try eval(Value.makeObj(call), env, gc);
+        } else {
+            const call = gc.allocObj(.list) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, form) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            result = try eval(Value.makeObj(call), env, gc);
+        }
+    }
+    return result;
+}
+
+/// (some-> x f g) / (some->> x f g) — thread but short-circuit on nil
+fn evalSomeThread(items: []Value, env: *Env, gc: *GC, first: bool) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    var result = try eval(items[1], env, gc);
+    for (items[2..]) |form| {
+        if (result.isNil()) return Value.makeNil();
+        if (form.isObj() and form.asObj().kind == .list) {
+            const parts = form.asObj().data.list.items.items;
+            const call = gc.allocObj(.list) catch return error.OutOfMemory;
+            if (first) {
+                call.data.list.items.append(gc.allocator, parts[0]) catch return error.OutOfMemory;
+                call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+                for (parts[1..]) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
+            } else {
+                for (parts) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
+                call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            }
+            result = try eval(Value.makeObj(call), env, gc);
+        } else {
+            const call = gc.allocObj(.list) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, form) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            result = try eval(Value.makeObj(call), env, gc);
+        }
+    }
+    return result;
+}
+
+/// (as-> expr name form1 form2 ...) — thread through named binding
+fn evalAsThread(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    var result = try eval(items[1], env, gc);
+    if (!items[2].isSymbol()) return error.TypeError;
+    const bind_name = gc.getString(items[2].asSymbolId());
+    for (items[3..]) |form| {
+        env.set(bind_name, result) catch return error.OutOfMemory;
+        result = try eval(form, env, gc);
+    }
+    return result;
+}
+
+/// (doto x (f a) (g b)) => x after calling (f x a), (g x b)
+fn evalDoto(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    const x = try eval(items[1], env, gc);
+    for (items[2..]) |form| {
+        if (form.isObj() and form.asObj().kind == .list) {
+            const parts = form.asObj().data.list.items.items;
+            const call = gc.allocObj(.list) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, parts[0]) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, x) catch return error.OutOfMemory;
+            for (parts[1..]) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
+            _ = try eval(Value.makeObj(call), env, gc);
+        }
+    }
+    return x;
+}
+
+// ============================================================================
+// CONTROL FLOW SPECIAL FORMS
+// ============================================================================
+
+/// (for [x coll] body) — list comprehension (simplified, single binding)
+fn evalFor(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const bindings = items[1].asObj().data.vector.items.items;
+    if (bindings.len < 2) return error.ArityError;
+    if (!bindings[0].isSymbol()) return error.TypeError;
+    const sym_name = gc.getString(bindings[0].asSymbolId());
+    const coll = try eval(bindings[1], env, gc);
+    const coll_items = seqItems(coll, gc) catch return error.TypeError;
+    const result = gc.allocObj(.list) catch return error.OutOfMemory;
+    for (coll_items) |item| {
+        env.set(sym_name, item) catch return error.OutOfMemory;
+        var val = Value.makeNil();
+        for (items[2..]) |body| val = try eval(body, env, gc);
+        result.data.list.items.append(gc.allocator, val) catch return error.OutOfMemory;
+    }
+    return Value.makeObj(result);
+}
+
+/// (doseq [x coll] body) — side-effecting iteration
+fn evalDoseq(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const bindings = items[1].asObj().data.vector.items.items;
+    if (bindings.len < 2) return error.ArityError;
+    if (!bindings[0].isSymbol()) return error.TypeError;
+    const sym_name = gc.getString(bindings[0].asSymbolId());
+    const coll = try eval(bindings[1], env, gc);
+    const coll_items = seqItems(coll, gc) catch return error.TypeError;
+    for (coll_items) |item| {
+        env.set(sym_name, item) catch return error.OutOfMemory;
+        for (items[2..]) |body| _ = try eval(body, env, gc);
+    }
+    return Value.makeNil();
+}
+
+/// (dotimes [i n] body) — iterate i from 0 to n-1
+fn evalDotimes(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const bindings = items[1].asObj().data.vector.items.items;
+    if (bindings.len < 2) return error.ArityError;
+    if (!bindings[0].isSymbol()) return error.TypeError;
+    const sym_name = gc.getString(bindings[0].asSymbolId());
+    const n_val = try eval(bindings[1], env, gc);
+    if (!n_val.isInt()) return error.TypeError;
+    const n = n_val.asInt();
+    var i: i48 = 0;
+    while (i < n) : (i += 1) {
+        env.set(sym_name, Value.makeInt(i)) catch return error.OutOfMemory;
+        for (items[2..]) |body| _ = try eval(body, env, gc);
+    }
+    return Value.makeNil();
+}
+
+/// (loop [bindings] body) — loop with recur support
+fn evalLoop(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const binds = items[1].asObj().data.vector.items.items;
+    if (binds.len % 2 != 0) return error.ArityError;
+    const n_binds = binds.len / 2;
+    // Create child env with bindings
+    const child = env.createChild() catch return error.OutOfMemory;
+    gc.trackEnv(child) catch return error.OutOfMemory;
+    var bind_names: [16][]const u8 = undefined;
+    var i: usize = 0;
+    while (i < n_binds) : (i += 1) {
+        if (!binds[i * 2].isSymbol()) return error.TypeError;
+        bind_names[i] = gc.getString(binds[i * 2].asSymbolId());
+        const val = try eval(binds[i * 2 + 1], child, gc);
+        child.set(bind_names[i], val) catch return error.OutOfMemory;
+    }
+    // Loop: eval body, if recur, rebind and repeat
+    while (true) {
+        var result = Value.makeNil();
+        for (items[2..]) |body| {
+            result = eval(body, child, gc) catch |err| {
+                if (err == error.RecurCalled) {
+                    // Rebind from recur_args
+                    var j: usize = 0;
+                    while (j < n_binds and j < recur_args.items.len) : (j += 1) {
+                        child.set(bind_names[j], recur_args.items[j]) catch return error.OutOfMemory;
+                    }
+                    break; // restart loop
+                }
+                return err;
+            };
+        } else {
+            return result; // no recur, return last value
+        }
+    }
+}
+
+var recur_args: std.ArrayListUnmanaged(Value) = @import("compat.zig").emptyList(Value);
+
+/// (when-let [x expr] body...) — bind and execute if truthy
+fn evalWhenLet(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const binds = items[1].asObj().data.vector.items.items;
+    if (binds.len < 2 or !binds[0].isSymbol()) return error.ArityError;
+    const sym_name = gc.getString(binds[0].asSymbolId());
+    const val = try eval(binds[1], env, gc);
+    if (!val.isTruthy()) return Value.makeNil();
+    env.set(sym_name, val) catch return error.OutOfMemory;
+    var result = Value.makeNil();
+    for (items[2..]) |body| result = try eval(body, env, gc);
+    return result;
+}
+
+/// (if-let [x expr] then else?) — bind and branch
+fn evalIfLet(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const binds = items[1].asObj().data.vector.items.items;
+    if (binds.len < 2 or !binds[0].isSymbol()) return error.ArityError;
+    const sym_name = gc.getString(binds[0].asSymbolId());
+    const val = try eval(binds[1], env, gc);
+    if (val.isTruthy()) {
+        env.set(sym_name, val) catch return error.OutOfMemory;
+        return eval(items[2], env, gc);
+    }
+    return if (items.len > 3) eval(items[3], env, gc) else Value.makeNil();
+}
+
+/// (when-not test body...) — execute body when test is falsy
+fn evalWhenNot(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    const test_val = try eval(items[1], env, gc);
+    if (test_val.isTruthy()) return Value.makeNil();
+    var result = Value.makeNil();
+    for (items[2..]) |body| result = try eval(body, env, gc);
+    return result;
+}
+
+/// (if-not test then else?) — branch when test is falsy
+fn evalIfNot(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    const cond_val = try eval(items[1], env, gc);
+    if (!cond_val.isTruthy()) return eval(items[2], env, gc);
+    return if (items.len > 3) eval(items[3], env, gc) else Value.makeNil();
+}
+
+fn seqItems(val: Value, gc: *GC) ![]Value {
+    _ = gc;
+    if (val.isNil()) return &[_]Value{};
+    if (!val.isObj()) return error.TypeError;
+    return switch (val.asObj().kind) {
+        .list => val.asObj().data.list.items.items,
+        .vector => val.asObj().data.vector.items.items,
+        .set => val.asObj().data.set.items.items,
+        else => error.TypeError,
+    };
 }
 
 /// (macroexpand-1 form) — expand one level of macro without evaluating

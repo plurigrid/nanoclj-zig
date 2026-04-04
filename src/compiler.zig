@@ -52,11 +52,12 @@ pub const Compiler = struct {
     in_tail: bool, // true when compiling in tail position of fn*
     self_name: ?[]const u8, // for self-recursive fn* (set by compileFnStar caller)
     vm_globals: ?*std.StringHashMap(Value), // VM globals — checked before builtins
+    macro_env: ?*@import("env.zig").Env, // tree-walk env for macro expansion
     loop_entry: ?usize = null, // instruction index of loop head (for recur in loop)
     loop_regs: [64]u8 = undefined, // registers holding loop bindings
     loop_arity: u8 = 0, // number of loop bindings
 
-    pub fn init(allocator: std.mem.Allocator, gc: *GC, parent: ?*Compiler, vm_globals: ?*std.StringHashMap(Value)) Compiler {
+    pub fn init(allocator: std.mem.Allocator, gc: *GC, parent: ?*Compiler, vm_globals: ?*std.StringHashMap(Value), macro_env: ?*@import("env.zig").Env) Compiler {
         return .{
             .code = .{ .items = &.{}, .capacity = 0 },
             .constants = .{ .items = &.{}, .capacity = 0 },
@@ -71,6 +72,7 @@ pub const Compiler = struct {
             .in_tail = false,
             .self_name = null,
             .vm_globals = if (parent) |p| p.vm_globals else vm_globals,
+            .macro_env = if (parent) |p| p.macro_env else macro_env,
         };
     }
 
@@ -270,16 +272,27 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, name, "when")) return self.compileWhen(items, dest);
             if (std.mem.eql(u8, name, "cond")) return self.compileCond(items, dest);
 
-            // Compile-time macro expansion: check VM globals for macros
-            if (self.vm_globals) |globals| {
-                if (globals.get(name)) |head_val| {
-                    if (head_val.isObj() and head_val.asObj().kind == .macro_fn) {
-                        const eval_mod = @import("eval.zig");
-                        var dummy_env = @import("env.zig").Env.init(self.allocator, null);
-                        defer dummy_env.deinit();
-                        const expanded = eval_mod.apply(head_val, items[1..], &dummy_env, self.gc) catch return error.InvalidSyntax;
-                        return self.compile(expanded, dest);
+            // Compile-time macro expansion: check VM globals and tree-walk env for macros
+            {
+                var macro_val: ?Value = null;
+                if (self.vm_globals) |globals| {
+                    if (globals.get(name)) |v| {
+                        if (v.isObj() and v.asObj().kind == .macro_fn) macro_val = v;
                     }
+                }
+                if (macro_val == null) {
+                    if (self.macro_env) |menv| {
+                        if (menv.get(name)) |v| {
+                            if (v.isObj() and v.asObj().kind == .macro_fn) macro_val = v;
+                        }
+                    }
+                }
+                if (macro_val) |mv| {
+                    const eval_mod = @import("eval.zig");
+                    var dummy_env = @import("env.zig").Env.init(self.allocator, null);
+                    defer dummy_env.deinit();
+                    const expanded = eval_mod.apply(mv, items[1..], &dummy_env, self.gc) catch return error.InvalidSyntax;
+                    return self.compile(expanded, dest);
                 }
             }
 
@@ -789,7 +802,7 @@ pub const Compiler = struct {
         else
             return error.InvalidSyntax;
 
-        var child = Compiler.init(self.allocator, self.gc, self, null);
+        var child = Compiler.init(self.allocator, self.gc, self, null, null);
 
         // Params become locals in registers 0..n-1
         for (params) |p| {
@@ -1075,7 +1088,7 @@ test "compiler: integer literal" {
     var gc = GC.init(std.testing.allocator);
     defer gc.deinit();
 
-    var c = Compiler.init(std.testing.allocator, &gc, null, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null, null);
     defer c.deinit();
 
     const dest = try c.allocReg();
@@ -1098,7 +1111,7 @@ test "compiler: if expression" {
     try list.data.list.items.append(gc.allocator, Value.makeInt(1));
     try list.data.list.items.append(gc.allocator, Value.makeInt(2));
 
-    var c = Compiler.init(std.testing.allocator, &gc, null, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null, null);
     defer c.deinit();
 
     const dest = try c.allocReg();
@@ -1120,7 +1133,7 @@ test "compiler: add expression -> inline binop" {
     try list.data.list.items.append(gc.allocator, Value.makeInt(10));
     try list.data.list.items.append(gc.allocator, Value.makeInt(20));
 
-    var c = Compiler.init(std.testing.allocator, &gc, null, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null, null);
     defer c.deinit();
 
     const dest = try c.allocReg();
@@ -1146,7 +1159,7 @@ test "compiler: compile + execute roundtrip" {
     try list.data.list.items.append(gc.allocator, Value.makeInt(10));
     try list.data.list.items.append(gc.allocator, Value.makeInt(20));
 
-    var c = Compiler.init(std.testing.allocator, &gc, null, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null, null);
     const dest = try c.allocReg();
     try c.compile(Value.makeObj(list), dest);
     try c.emit(bc.encode_d(.ret, dest));
@@ -1195,7 +1208,7 @@ fn compileAndRunWithBuiltins(src: []const u8, allocator: std.mem.Allocator, init
     const Reader = @import("reader.zig").Reader;
     var reader = Reader.init(src, &gc);
     const form = try reader.readForm();
-    var comp = Compiler.init(allocator, &gc, null, null);
+    var comp = Compiler.init(allocator, &gc, null, null, null);
     const dest = try comp.allocReg();
     try comp.compile(form, dest);
     try comp.emit(bc.encode_d(.ret, dest));
@@ -1264,7 +1277,7 @@ test "compiler: move opcode emitted for local access" {
     const Reader = @import("reader.zig").Reader;
     var reader = Reader.init("(let* [x 42] x)", &gc);
     const form = try reader.readForm();
-    var c = Compiler.init(std.testing.allocator, &gc, null, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null, null);
     defer c.deinit();
     const dest = try c.allocReg();
     try c.compile(form, dest);

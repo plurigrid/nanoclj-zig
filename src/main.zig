@@ -84,11 +84,11 @@ fn rep(input: []const u8, env: *Env, gc: *GC) ![]const u8 {
 }
 
 /// Bytecode REP: parse -> compile -> VM execute (uses persistent VM for globals)
-fn bcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) []const u8 {
+fn bcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM, env: *Env) []const u8 {
     var reader = Reader.init(input, gc);
     const form = reader.readForm() catch return "Error: read failed";
 
-    var comp = Compiler.init(allocator, gc, null, &vm.globals);
+    var comp = Compiler.init(allocator, gc, null, &vm.globals, env);
     defer comp.deinit();
 
     const dest = comp.allocReg() catch return "Error: too many registers";
@@ -120,11 +120,11 @@ fn bcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) [
 }
 
 /// Time bytecode execution only (uses persistent VM with globals)
-fn timeBcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) []const u8 {
+fn timeBcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM, env: *Env) []const u8 {
     var reader = Reader.init(input, gc);
     const form = reader.readForm() catch return "Error: read failed";
 
-    var comp = Compiler.init(allocator, gc, null, &vm.globals);
+    var comp = Compiler.init(allocator, gc, null, &vm.globals, env);
     defer comp.deinit();
     const dest = comp.allocReg() catch return "Error: compile failed";
     comp.compile(form, dest) catch return "Error: compile failed";
@@ -175,7 +175,7 @@ fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator,
     var reader2 = Reader.init(input, gc);
     const form2 = reader2.readForm() catch return "Error: read failed";
 
-    var comp = Compiler.init(allocator, gc, null, &vm.globals);
+    var comp = Compiler.init(allocator, gc, null, &vm.globals, env);
     defer comp.deinit();
     const dest_reg = comp.allocReg() catch return "Error: compile failed";
     comp.compile(form2, dest_reg) catch return "Error: compile failed";
@@ -209,7 +209,7 @@ fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator,
 
 /// Load bytecode prelude: defines core HOFs (map, filter, reduce, reverse, range)
 /// as bytecode globals so they're available to all (bc ...) calls.
-fn loadBcPrelude(gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) void {
+fn loadBcPrelude(gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM, env: *Env) void {
     const forms = [_][]const u8{
         // reverse: accumulator-based O(n)
         \\(def reverse (fn* [xs]
@@ -285,7 +285,7 @@ fn loadBcPrelude(gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) void {
     };
 
     for (forms) |src| {
-        _ = bcRep(src, gc, allocator, vm);
+        _ = bcRep(src, gc, allocator, vm, env);
     }
 }
 
@@ -429,10 +429,10 @@ pub fn main() !void {
     defer vm.deinit();
 
     // ── Bytecode prelude: core higher-order functions ────────────
-    loadBcPrelude(&gc, allocator, &vm);
-
     // ── Macro prelude: standard Clojure macros ────────────────────
     loadMacroPrelude(&env, &gc);
+
+    loadBcPrelude(&gc, allocator, &vm, &env);
 
     // ── REPL: world=> ─────────────────────────────────────────────
     while (true) {
@@ -504,7 +504,7 @@ pub fn main() !void {
         // Bytecode eval: (bc <expr>)
         if (std.mem.startsWith(u8, line, "(bc ") and line[line.len - 1] == ')') {
             const inner = line[4 .. line.len - 1];
-            const bc_result = bcRep(inner, &gc, allocator, &vm);
+            const bc_result = bcRep(inner, &gc, allocator, &vm, &env);
             compat.fileWriteAll(stdout, bc_result);
             compat.fileWriteAll(stdout, "\n");
             continue;
@@ -520,7 +520,7 @@ pub fn main() !void {
         // Time bytecode only: (time-bc <expr>)
         if (std.mem.startsWith(u8, line, "(time-bc ") and line[line.len - 1] == ')') {
             const inner = line[9 .. line.len - 1];
-            const time_result = timeBcRep(inner, &gc, allocator, &vm);
+            const time_result = timeBcRep(inner, &gc, allocator, &vm, &env);
             compat.fileWriteAll(stdout, time_result);
             compat.fileWriteAll(stdout, "\n");
             continue;
@@ -533,7 +533,7 @@ pub fn main() !void {
                 compat.fileWriteAll(stdout, "Error: read failed\n");
                 continue;
             };
-            var comp = Compiler.init(allocator, &gc, null, &vm.globals);
+            var comp = Compiler.init(allocator, &gc, null, &vm.globals, &env);
             defer comp.deinit();
             const dest = comp.allocReg() catch {
                 compat.fileWriteAll(stdout, "Error: compile failed\n");
