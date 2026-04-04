@@ -274,6 +274,9 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, name, "or")) return self.compileOr(items, dest);
             if (std.mem.eql(u8, name, "when")) return self.compileWhen(items, dest);
             if (std.mem.eql(u8, name, "cond")) return self.compileCond(items, dest);
+            // -> and ->> handled by macro expansion below
+            if (std.mem.eql(u8, name, "case")) return self.compileCase(items, dest);
+            if (std.mem.eql(u8, name, "try")) return self.compileTry(items, dest);
 
             // Compile-time macro expansion: check VM globals and tree-walk env for macros
             {
