@@ -430,4 +430,5 @@ test {
     _ = @import("avalon_api_example.zig");
     _ = @import("gorj_mcp.zig");
     _ = @import("disasm.zig");
+    _ = @import("simd_str.zig");
 }

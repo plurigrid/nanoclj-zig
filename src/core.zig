@@ -21,6 +21,7 @@ const church_turing = @import("church_turing.zig");
 const gorj_bridge = @import("gorj_bridge.zig");
 const computable_sets = @import("computable_sets.zig");
 const avalon_api_example = @import("avalon_api_example.zig");
+const simd_str = @import("simd_str.zig");
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
@@ -720,7 +721,7 @@ fn splitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     } else {
         var start: usize = 0;
         while (start <= s.len) {
-            if (std.mem.indexOfPos(u8, s, start, sep)) |idx| {
+            if (simd_str.findSubstringPos(s, sep, start)) |idx| {
                 try obj.data.vector.items.append(gc.allocator, Value.makeString(try gc.internString(s[start..idx])));
                 start = idx + sep.len;
             } else {
@@ -768,12 +769,13 @@ fn replaceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     defer buf.deinit(gc.allocator);
     var pos: usize = 0;
     while (pos < s.len) {
-        if (pos + from.len <= s.len and std.mem.eql(u8, s[pos..][0..from.len], from)) {
+        if (simd_str.findSubstringPos(s, from, pos)) |idx| {
+            try buf.appendSlice(gc.allocator, s[pos..idx]);
             try buf.appendSlice(gc.allocator, to);
-            pos += from.len;
+            pos = idx + from.len;
         } else {
-            try buf.append(gc.allocator, s[pos]);
-            pos += 1;
+            try buf.appendSlice(gc.allocator, s[pos..]);
+            break;
         }
     }
     return Value.makeString(try gc.internString(buf.items));
@@ -788,7 +790,7 @@ fn indexOfFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         std.math.cast(usize, @max(@as(i48, 0), args[2].asInt())) orelse 0
     else
         0;
-    if (std.mem.indexOfPos(u8, s, from, needle)) |idx| {
+    if (simd_str.findSubstringPos(s, needle, from)) |idx| {
         return Value.makeInt(@intCast(idx));
     }
     return Value.makeInt(-1);
