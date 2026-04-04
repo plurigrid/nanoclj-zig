@@ -19,6 +19,24 @@ fn nanoNow() i128 {
 }
 pub const llm = @import("llm.zig");
 
+/// Check if input is only whitespace and/or comments
+fn isCommentOnly(input: []const u8) bool {
+    var i: usize = 0;
+    while (i < input.len) {
+        const c = input[i];
+        if (c == ' ' or c == '\t' or c == '\r' or c == '\n' or c == ',') {
+            i += 1;
+            continue;
+        }
+        if (c == ';') {
+            while (i < input.len and input[i] != '\n') i += 1;
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
 /// Bounded REP: uses fuel-bounded eval from semantics.zig.
 /// Defends against: infinite loops (fuel), deep recursion (depth),
 /// while maintaining denotational/operational agreement.
@@ -324,8 +342,11 @@ pub fn main() !void {
         }
 
         const result = rep(line, &env, &gc) catch "Error: internal error";
-        compat.fileWriteAll(stdout, result);
-        compat.fileWriteAll(stdout, "\n");
+        // Suppress nil output from comment-only lines
+        if (!std.mem.eql(u8, result, "nil") or !isCommentOnly(line)) {
+            compat.fileWriteAll(stdout, result);
+            compat.fileWriteAll(stdout, "\n");
+        }
         if (result.len > 0 and result[0] != 'E') {
             allocator.free(result);
         }

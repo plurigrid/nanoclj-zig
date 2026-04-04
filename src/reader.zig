@@ -54,8 +54,11 @@ pub const Reader = struct {
             '"' => self.readString(),
             ':' => self.readKeyword(),
             ';' => {
-                // skip comment
+                // skip comment to end of line
                 while (self.pos < self.src.len and self.src[self.pos] != '\n') self.pos += 1;
+                // If nothing left after comment, return nil (not EOF error)
+                self.skipWhitespace();
+                if (self.pos >= self.src.len) return Value.makeNil();
                 return self.readForm();
             },
             else => self.readAtom(),
