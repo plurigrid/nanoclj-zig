@@ -846,3 +846,45 @@ fn isSequentialP(args: []Value, _: *GC, _: *Env) anyerror!Value {
     const k = args[0].asObj().kind;
     return Value.makeBool(k == .list or k == .vector);
 }
+
+// ── Trit-tick time quantum builtins ──────────────────────────────
+
+const transitivity = @import("transitivity.zig");
+
+/// (trit-phase n) → -1, 0, or 1 — GF(3) phase of tick count n
+fn tritPhaseFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const n: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    return Value.makeInt(@as(i48, transitivity.tritPhase(n)));
+}
+
+/// (frames->trit-ticks frames fps) → integer trit-ticks
+fn framesToTritTicksFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const frames: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    const fps: u32 = @intCast(@max(@as(i48, 1), args[1].asInt()));
+    return Value.makeInt(@intCast(transitivity.framesToTritTicks(frames, fps)));
+}
+
+/// (samples->trit-ticks samples rate) → integer trit-ticks
+fn samplesToTritTicksFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const samples: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    const rate: u32 = @intCast(@max(@as(i48, 1), args[1].asInt()));
+    return Value.makeInt(@intCast(transitivity.samplesToTritTicks(samples, rate)));
+}
+
+/// (trit-ticks-per-sec) → 2116800000
+fn tritTicksPerSecFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 0) return error.ArityError;
+    return Value.makeInt(@intCast(transitivity.TRIT_TICKS_PER_SEC));
+}
+
+/// (flicks-per-sec) → 705600000
+fn flicksPerSecFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 0) return error.ArityError;
+    return Value.makeInt(@intCast(transitivity.FLICK));
+}

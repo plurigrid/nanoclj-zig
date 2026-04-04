@@ -160,6 +160,119 @@ pub const Resources = struct {
 };
 
 // ============================================================================
+// TRIT-TICK: Post-float integer time quantum with GF(3) phase
+// ============================================================================
+//
+// Flick (Meta): 1/705,600,000 sec — LCM of all media frame/sample rates.
+// Post-float insight: represent time as integers, never floats.
+//
+// Trit-tick: 1/2,116,800,000 sec — Flick × 3.
+// Every tick carries an intrinsic GF(3) phase: tick mod 3 ∈ {0,1,2} maps to
+// Signal(+1) / Mechanism(0) / Act(-1), the 333 SMA triad.
+//
+// Glimpse: 1/1069 of a trit-tick — the cognitive jerk quantum.
+// 1069 is prime: intentionally incommensurate with the trit-tick grid.
+// This creates a Moiré beat pattern against the phase cycle:
+//   glimpse_phase = (glimpse_count * 1069) mod 3
+// Because gcd(1069, 3) = 1 (1069 ≡ 2 mod 3), the glimpse phase
+// rotates through all three states but at a rate that DRIFTS against
+// the trit-tick phase. This drift IS cognitive jerk — the felt
+// acceleration/deceleration of subjective time.
+//
+// Jerk = d³x/dt³. In discrete time:
+//   position = tick count (objective)
+//   velocity = glimpses per tick (attention rate, variable)
+//   acceleration = d(velocity)/dt (engagement change)
+//   jerk = d(acceleration)/dt (the "snap" of phase lock/unlock)
+//
+// When glimpse phase aligns with trit-tick phase: flow state (time vanishes)
+// When they anti-align: friction (time drags)
+// The 1069-prime spacing ensures alignment is rare and aperiodic.
+//
+// Hierarchy:
+//   1 second = 2,116,800,000 trit-ticks
+//   1 trit-tick = 1069 glimpses (cognitive microstructure)
+//   1 trit-cycle = 3 trit-ticks = 3207 glimpses
+//   1 flick = 3 trit-ticks (by construction)
+//
+// Divisibility (inherits from flick, all exact):
+//   24 fps:  88,200,000 trit-ticks/frame
+//   25 fps:  84,672,000 trit-ticks/frame
+//   30 fps:  70,560,000 trit-ticks/frame
+//   48 fps:  44,100,000 trit-ticks/frame
+//   60 fps:  35,280,000 trit-ticks/frame
+//   120 fps: 17,640,000 trit-ticks/frame
+//   44100 Hz:    48,000 trit-ticks/sample
+//   48000 Hz:    44,100 trit-ticks/sample
+//   96000 Hz:    22,050 trit-ticks/sample
+//   All divisible by 3 ✓ (phase-aligned at every boundary)
+
+pub const FLICK: u64 = 705_600_000;
+pub const TRIT_TICK: u64 = FLICK * 3; // 2,116,800,000
+pub const GLIMPSES_PER_TRIT_TICK: u64 = 1069; // prime — cognitive jerk quantum
+pub const TRIT_TICKS_PER_SEC: u64 = TRIT_TICK;
+pub const GLIMPSES_PER_SEC: u64 = TRIT_TICKS_PER_SEC * GLIMPSES_PER_TRIT_TICK;
+
+/// GF(3) phase of a trit-tick count: Signal(+1) / Mechanism(0) / Act(-1)
+pub fn tritPhase(tick_count: u64) i8 {
+    const m = tick_count % 3;
+    if (m == 0) return 0; // Mechanism (neutral)
+    if (m == 1) return 1; // Signal (positive)
+    return -1; // Act (negative)
+}
+
+/// Convert frame count at a given fps to trit-ticks
+pub fn framesToTritTicks(frames: u64, fps: u32) u64 {
+    return frames * (TRIT_TICKS_PER_SEC / @as(u64, fps));
+}
+
+/// Convert audio sample count at a given rate to trit-ticks
+pub fn samplesToTritTicks(samples: u64, sample_rate: u32) u64 {
+    return samples * (TRIT_TICKS_PER_SEC / @as(u64, sample_rate));
+}
+
+/// Trit-tick duration struct for accumulating post-float time
+pub const TritTime = struct {
+    ticks: u64 = 0,
+
+    pub fn addTicks(self: *TritTime, n: u64) void {
+        self.ticks += n;
+    }
+
+    pub fn phase(self: *const TritTime) i8 {
+        return tritPhase(self.ticks);
+    }
+
+    /// Which trit-cycle are we in? (0-indexed)
+    pub fn cycle(self: *const TritTime) u64 {
+        return self.ticks / 3;
+    }
+
+    /// How many flicks have elapsed?
+    pub fn asFlicks(self: *const TritTime) u64 {
+        return self.ticks / 3;
+    }
+
+    /// Seconds as integer + remainder trit-ticks
+    pub fn asSeconds(self: *const TritTime) struct { secs: u64, remainder: u64 } {
+        return .{
+            .secs = self.ticks / TRIT_TICKS_PER_SEC,
+            .remainder = self.ticks % TRIT_TICKS_PER_SEC,
+        };
+    }
+
+    /// Phase-aligned equality: two times are "trit-equal" if same tick AND same phase
+    pub fn tritEql(a: TritTime, b: TritTime) bool {
+        return a.ticks == b.ticks;
+    }
+
+    /// Phase-congruent: same phase but possibly different tick count
+    pub fn phaseCongruent(a: TritTime, b: TritTime) bool {
+        return a.ticks % 3 == b.ticks % 3;
+    }
+};
+
+// ============================================================================
 // STRUCTURAL EQUALITY (denotational requirement)
 // ============================================================================
 
