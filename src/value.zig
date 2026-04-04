@@ -36,6 +36,8 @@ pub const ObjKind = enum(u8) {
     partial_fn, // partial application capture
     multimethod, // defmulti dispatch fn + method table
     protocol, // defprotocol: method sigs + type→impl dispatch table
+    dense_f64, // Neanderthal-compatible: contiguous f64 buffer + stride
+    trace, // Anglican-compatible: weighted execution trace (sample sites + log-weight)
 };
 
 pub const Obj = struct {
@@ -69,6 +71,73 @@ pub const ObjData = union {
     },
     multimethod: MultimethodData,
     protocol: ProtocolData,
+    dense_f64: DenseF64,
+    trace: TraceData,
+};
+
+/// Neanderthal-compatible dense f64 vector.
+/// Zero-copy bridge: raw []f64 buffer, stride for BLAS compatibility.
+/// (fv 1.0 2.0 3.0) creates one; (neanderthal-buf v) extracts the slice.
+pub const DenseF64 = struct {
+    data: []f64,
+    len: usize,
+    stride: usize = 1,
+    owned: bool = true, // false = view into another buffer
+
+    pub fn get(self: *const DenseF64, i: usize) f64 {
+        return self.data[i * self.stride];
+    }
+
+    pub fn set(self: *DenseF64, i: usize, v: f64) void {
+        self.data[i * self.stride] = v;
+    }
+
+    pub fn dot(self: *const DenseF64, other: *const DenseF64) f64 {
+        var sum: f64 = 0;
+        const n = @min(self.len, other.len);
+        for (0..n) |i| {
+            sum += self.get(i) * other.get(i);
+        }
+        return sum;
+    }
+
+    pub fn norm(self: *const DenseF64) f64 {
+        var sum: f64 = 0;
+        for (0..self.len) |i| {
+            const v = self.get(i);
+            sum += v * v;
+        }
+        return @sqrt(sum);
+    }
+
+    pub fn axpy(self: *DenseF64, alpha: f64, other: *const DenseF64) void {
+        const n = @min(self.len, other.len);
+        for (0..n) |i| {
+            self.data[i * self.stride] += alpha * other.get(i);
+        }
+    }
+};
+
+/// Anglican-compatible weighted execution trace.
+/// A trace = sequence of sample sites + cumulative log-weight.
+/// Each site = {name, value, log_prob} stored as parallel arrays.
+/// Isomorphic to monad-bayes TracedT(WtT(m)).
+pub const TraceData = struct {
+    site_names: std.ArrayListUnmanaged(u32), // interned string IDs
+    site_values: std.ArrayListUnmanaged(Value),
+    site_log_probs: std.ArrayListUnmanaged(f64),
+    log_weight: f64 = 0,
+    /// Number of sample sites
+    pub fn len(self: *const TraceData) usize {
+        return self.site_names.items.len;
+    }
+    /// Accumulate a sample site
+    pub fn observe(self: *TraceData, allocator: std.mem.Allocator, name_id: u32, val: Value, log_prob: f64) !void {
+        try self.site_names.append(allocator, name_id);
+        try self.site_values.append(allocator, val);
+        try self.site_log_probs.append(allocator, log_prob);
+        self.log_weight += log_prob;
+    }
 };
 
 pub const MultimethodData = struct {

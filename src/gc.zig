@@ -89,6 +89,8 @@ pub const GC = struct {
                 .partial_fn => .{ .partial_fn = .{ .func = Value.makeNil(), .bound_args = compat.emptyList(Value) } },
                 .multimethod => .{ .multimethod = .{ .name = "", .dispatch_fn = Value.makeNil(), .methods = compat.emptyList(value.MethodEntry), .default_method = null } },
                 .protocol => .{ .protocol = .{ .name = "", .method_names = compat.emptyList([]const u8), .impls = compat.emptyList(value.TypeImpl) } },
+                .dense_f64 => .{ .dense_f64 = .{ .data = &.{}, .len = 0 } },
+                .trace => .{ .trace = .{ .site_names = compat.emptyList(u32), .site_values = compat.emptyList(Value), .site_log_probs = compat.emptyList(f64) } },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -202,6 +204,10 @@ pub const GC = struct {
                         }
                     }
                 },
+                .dense_f64 => {}, // no Value refs
+                .trace => {
+                    for (cur.data.trace.site_values.items) |v| self.enqueueVal(v, &worklist);
+                },
             }
         }
     }
@@ -266,6 +272,16 @@ pub const GC = struct {
                     impl.methods.deinit(self.allocator);
                 }
                 obj.data.protocol.impls.deinit(self.allocator);
+            },
+            .dense_f64 => {
+                if (obj.data.dense_f64.owned and obj.data.dense_f64.data.len > 0) {
+                    self.allocator.free(obj.data.dense_f64.data);
+                }
+            },
+            .trace => {
+                obj.data.trace.site_names.deinit(self.allocator);
+                obj.data.trace.site_values.deinit(self.allocator);
+                obj.data.trace.site_log_probs.deinit(self.allocator);
             },
         }
         self.allocator.destroy(obj);

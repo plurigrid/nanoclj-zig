@@ -110,6 +110,24 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
                 try buf.appendSlice(gc.allocator, obj.data.protocol.name);
                 try buf.appendSlice(gc.allocator, ">");
             },
+            .dense_f64 => {
+                try buf.appendSlice(gc.allocator, "#<dense-f64 [");
+                for (0..@min(obj.data.dense_f64.len, 5)) |i| {
+                    if (i > 0) try buf.append(gc.allocator, ' ');
+                    var tmp: [32]u8 = undefined;
+                    const s = std.fmt.bufPrint(&tmp, "{d}", .{obj.data.dense_f64.get(i)}) catch "?";
+                    try buf.appendSlice(gc.allocator, s);
+                }
+                if (obj.data.dense_f64.len > 5) try buf.appendSlice(gc.allocator, " ...");
+                try buf.appendSlice(gc.allocator, "]>");
+            },
+            .trace => {
+                try buf.appendSlice(gc.allocator, "#<trace ");
+                var tmp: [32]u8 = undefined;
+                const s = std.fmt.bufPrint(&tmp, "sites={d} w={d}", .{obj.data.trace.len(), obj.data.trace.log_weight}) catch "?";
+                try buf.appendSlice(gc.allocator, s);
+                try buf.append(gc.allocator, '>');
+            },
         }
     } else {
         // float

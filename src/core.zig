@@ -496,6 +496,19 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "force", &forceFn },
         .{ "add-watch", &addWatchFn },
         .{ "remove-watch", &removeWatchFn },
+        // Dense f64 (Neanderthal-compatible)
+        .{ "fv", &fvFn },
+        .{ "fv-get", &fvGetFn },
+        .{ "fv-set!", &fvSetBangFn },
+        .{ "fv-dot", &fvDotFn },
+        .{ "fv-norm", &fvNormFn },
+        .{ "fv-axpy!", &fvAxpyBangFn },
+        .{ "fv-count", &fvCountFn },
+        // Trace (Anglican-compatible)
+        .{ "make-trace", &makeTraceFn },
+        .{ "trace-observe!", &traceObserveBangFn },
+        .{ "trace-log-weight", &traceLogWeightFn },
+        .{ "trace-sites", &traceSitesFn },
     };
 
     inline for (builtins) |b| {
@@ -2342,6 +2355,8 @@ fn typeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         .partial_fn => "function",
         .multimethod => "multimethod",
         .protocol => "protocol",
+        .dense_f64 => "dense-f64",
+        .trace => "trace",
     }
     else "unknown";
     return Value.makeString(try gc.internString(t));
@@ -4198,4 +4213,133 @@ fn addWatchFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 fn removeWatchFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return args[0];
+}
+
+// ============================================================================
+// DENSE F64 (Neanderthal-compatible)
+// ============================================================================
+
+/// (fv 1.0 2.0 3.0) or (fv n) — create dense f64 vector
+fn fvFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const obj = try gc.allocObj(.dense_f64);
+    if (args.len == 1 and args[0].isInt()) {
+        // (fv n) — zero-filled vector of length n
+        const n: usize = @intCast(@max(@as(i48, 0), args[0].asInt()));
+        const data = try gc.allocator.alloc(f64, n);
+        @memset(data, 0);
+        obj.data.dense_f64 = .{ .data = data, .len = n, .owned = true };
+    } else {
+        // (fv 1.0 2.0 3.0) — from literal values
+        const data = try gc.allocator.alloc(f64, args.len);
+        for (args, 0..) |a, i| {
+            data[i] = if (a.isFloat()) a.asFloat() else if (a.isInt()) @as(f64, @floatFromInt(a.asInt())) else 0;
+        }
+        obj.data.dense_f64 = .{ .data = data, .len = args.len, .owned = true };
+    }
+    return Value.makeObj(obj);
+}
+
+/// (fv-get v i) — get element at index
+fn fvGetFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64 or !args[1].isInt()) return error.TypeError;
+    const v = &args[0].asObj().data.dense_f64;
+    const i: usize = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    if (i >= v.len) return error.TypeError;
+    return Value.makeFloat(v.get(i));
+}
+
+/// (fv-set! v i x) — set element at index (mutating)
+fn fvSetBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64 or !args[1].isInt()) return error.TypeError;
+    var v = &args[0].asObj().data.dense_f64;
+    const i: usize = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    if (i >= v.len) return error.TypeError;
+    const x = if (args[2].isFloat()) args[2].asFloat() else if (args[2].isInt()) @as(f64, @floatFromInt(args[2].asInt())) else return error.TypeError;
+    v.set(i, x);
+    return args[0];
+}
+
+/// (fv-dot a b) — dot product
+fn fvDotFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64) return error.TypeError;
+    if (!args[1].isObj() or args[1].asObj().kind != .dense_f64) return error.TypeError;
+    return Value.makeFloat(args[0].asObj().data.dense_f64.dot(&args[1].asObj().data.dense_f64));
+}
+
+/// (fv-norm v) — L2 norm
+fn fvNormFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64) return error.TypeError;
+    return Value.makeFloat(args[0].asObj().data.dense_f64.norm());
+}
+
+/// (fv-axpy! alpha x y) — y += alpha * x (mutating y)
+fn fvAxpyBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    const alpha = if (args[0].isFloat()) args[0].asFloat() else if (args[0].isInt()) @as(f64, @floatFromInt(args[0].asInt())) else return error.TypeError;
+    if (!args[1].isObj() or args[1].asObj().kind != .dense_f64) return error.TypeError;
+    if (!args[2].isObj() or args[2].asObj().kind != .dense_f64) return error.TypeError;
+    args[2].asObj().data.dense_f64.axpy(alpha, &args[1].asObj().data.dense_f64);
+    return args[2];
+}
+
+/// (fv-count v) — length
+fn fvCountFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64) return error.TypeError;
+    return Value.makeInt(@intCast(args[0].asObj().data.dense_f64.len));
+}
+
+// ============================================================================
+// TRACE (Anglican-compatible probabilistic programming)
+// ============================================================================
+
+/// (make-trace) — create an empty execution trace
+fn makeTraceFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const obj = try gc.allocObj(.trace);
+    obj.data.trace = .{
+        .site_names = compat.emptyList(u32),
+        .site_values = compat.emptyList(Value),
+        .site_log_probs = compat.emptyList(f64),
+    };
+    return Value.makeObj(obj);
+}
+
+/// (trace-observe! trace name value log-prob) — record a sample site
+fn traceObserveBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 4) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .trace) return error.TypeError;
+    const name_id: u32 = if (args[1].isString()) @as(u32, @truncate(args[1].asStringId())) else if (args[1].isSymbol()) @as(u32, @truncate(args[1].asSymbolId())) else return error.TypeError;
+    const lp = if (args[3].isFloat()) args[3].asFloat() else if (args[3].isInt()) @as(f64, @floatFromInt(args[3].asInt())) else return error.TypeError;
+    try args[0].asObj().data.trace.observe(gc.allocator, name_id, args[2], lp);
+    return args[0];
+}
+
+/// (trace-log-weight trace) — cumulative log-weight
+fn traceLogWeightFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .trace) return error.TypeError;
+    return Value.makeFloat(args[0].asObj().data.trace.log_weight);
+}
+
+/// (trace-sites trace) — return [{:name n :value v :log-prob lp} ...]
+fn traceSitesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .trace) return error.TypeError;
+    const t = &args[0].asObj().data.trace;
+    const result = try gc.allocObj(.vector);
+    for (0..t.len()) |i| {
+        const site = try gc.allocObj(.map);
+        try site.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("name")));
+        try site.data.map.vals.append(gc.allocator, Value.makeString(t.site_names.items[i]));
+        try site.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("value")));
+        try site.data.map.vals.append(gc.allocator, t.site_values.items[i]);
+        try site.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("log-prob")));
+        try site.data.map.vals.append(gc.allocator, Value.makeFloat(t.site_log_probs.items[i]));
+        try result.data.vector.items.append(gc.allocator, Value.makeObj(site));
+    }
+    return Value.makeObj(result);
 }
