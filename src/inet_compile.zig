@@ -265,7 +265,9 @@ pub fn inetReadbackFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const ib = @import("inet_builtins.zig");
     const net = try ib.getNetPub(args[0]);
     if (!args[1].isInt()) return error.InvalidArgument;
-    const cell_idx: u16 = @intCast(args[1].asInt());
+    const raw_idx = args[1].asInt();
+    if (raw_idx < 0) return error.InvalidArgument;
+    const cell_idx: u16 = std.math.cast(u16, raw_idx) orelse return error.InvalidArgument;
     return readback(net, cell_idx, gc);
 }
 

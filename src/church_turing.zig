@@ -611,7 +611,9 @@ pub fn primitiveRecursiveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (std.mem.eql(u8, op, "proj")) {
         // π_i(x_0, ..., x_n) = x_i
         if (args.len < 3 or !args[1].isInt()) return error.ArityError;
-        const i: usize = @intCast(args[1].asInt());
+        const raw_i = args[1].asInt();
+        if (raw_i < 0) return error.InvalidArgs;
+        const i: usize = std.math.cast(usize, raw_i) orelse return error.InvalidArgs;
         if (i + 2 >= args.len) return error.ArityError;
         return args[i + 2];
     }

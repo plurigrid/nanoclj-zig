@@ -67,7 +67,9 @@ pub fn inetNewFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// Public accessor for other modules (inet_compile)
 pub fn getNetPub(id_val: Value) !*Net {
     if (!id_val.isInt()) return error.InvalidArgument;
-    const id: usize = @intCast(id_val.asInt());
+    const raw = id_val.asInt();
+    if (raw < 0) return error.InvalidArgument;
+    const id: usize = std.math.cast(usize, raw) orelse return error.InvalidArgument;
     if (id >= 64) return error.InvalidArgument;
     return &(nets[id] orelse return error.InvalidArgument);
 }
@@ -75,7 +77,9 @@ pub fn getNetPub(id_val: Value) !*Net {
 fn getNet(args: []Value) !*Net {
     if (args.len < 1) return error.InvalidArgument;
     if (!args[0].isInt()) return error.InvalidArgument;
-    const id: usize = @intCast(args[0].asInt());
+    const raw = args[0].asInt();
+    if (raw < 0) return error.InvalidArgument;
+    const id: usize = std.math.cast(usize, raw) orelse return error.InvalidArgument;
     if (id >= 64) return error.InvalidArgument;
     return &(nets[id] orelse return error.InvalidArgument);
 }
@@ -107,7 +111,9 @@ pub fn inetCellFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const net = try getNet(args);
     const kind = parseKind(gc, args[1]) orelse return error.InvalidArgument;
     if (!args[2].isInt()) return error.InvalidArgument;
-    const arity: u8 = @intCast(args[2].asInt());
+    const raw_arity = args[2].asInt();
+    if (raw_arity < 0 or raw_arity > 255) return error.InvalidArgument;
+    const arity: u8 = @intCast(raw_arity);
     const payload = if (args.len >= 4) args[3] else Value.makeNil();
     const idx = try net.addCell(kind, arity, payload);
     return Value.makeInt(@intCast(idx));
@@ -119,8 +125,13 @@ pub fn inetWireFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     const net = try getNet(args);
     if (!args[1].isInt() or !args[2].isInt() or !args[3].isInt() or !args[4].isInt())
         return error.InvalidArgument;
-    const pa = Port{ .cell = @intCast(args[1].asInt()), .port = @intCast(args[2].asInt()) };
-    const pb = Port{ .cell = @intCast(args[3].asInt()), .port = @intCast(args[4].asInt()) };
+    const raw_ca = args[1].asInt();
+    const raw_pa = args[2].asInt();
+    const raw_cb = args[3].asInt();
+    const raw_pb = args[4].asInt();
+    if (raw_ca < 0 or raw_pa < 0 or raw_cb < 0 or raw_pb < 0) return error.InvalidArgument;
+    const pa = Port{ .cell = std.math.cast(u16, raw_ca) orelse return error.InvalidArgument, .port = std.math.cast(u8, raw_pa) orelse return error.InvalidArgument };
+    const pb = Port{ .cell = std.math.cast(u16, raw_cb) orelse return error.InvalidArgument, .port = std.math.cast(u8, raw_pb) orelse return error.InvalidArgument };
     try net.connect(pa, pb);
     return Value.makeNil();
 }

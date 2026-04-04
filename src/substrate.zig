@@ -166,7 +166,9 @@ pub fn colorSeedFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // colors (n) -> vector of n color maps
 pub fn colorsFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
-    const n: usize = @intCast(args[0].asInt());
+    const raw = args[0].asInt();
+    if (raw < 0) return error.InvalidArgs;
+    const n: usize = std.math.cast(usize, raw) orelse return error.InvalidArgs;
     const vec = try gc.allocObj(.vector);
     for (0..n) |i| {
         var a = [_]Value{ Value.makeInt(@intCast(CANONICAL_SEED)), Value.makeInt(@intCast(i)) };
@@ -303,7 +305,9 @@ fn nreplThreadFn(ctx: NreplCtx) void {
 
 pub fn nreplStartFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
-    const port: u16 = @intCast(args[0].asInt());
+    const raw_port = args[0].asInt();
+    if (raw_port < 1 or raw_port > 65535) return error.InvalidArgs;
+    const port: u16 = @intCast(raw_port);
     if (nrepl_thread != null) {
         // already running, return current port
         return Value.makeInt(@intCast(nrepl_port));

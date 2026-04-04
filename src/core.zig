@@ -422,7 +422,9 @@ fn nth(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj() or !args[1].isInt()) return error.TypeError;
     const obj = args[0].asObj();
-    const idx: usize = @intCast(args[1].asInt());
+    const raw = args[1].asInt();
+    if (raw < 0) return error.InvalidArgs;
+    const idx: usize = std.math.cast(usize, raw) orelse return error.InvalidArgs;
     const items = switch (obj.kind) {
         .list => obj.data.list.items.items,
         .vector => obj.data.vector.items.items,
@@ -583,8 +585,14 @@ fn subsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len < 2 or args.len > 3) return error.ArityError;
     if (!args[0].isString() or !args[1].isInt()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
-    const start: usize = @intCast(args[1].asInt());
-    const end: usize = if (args.len == 3 and args[2].isInt()) @intCast(args[2].asInt()) else s.len;
+    const raw_start = args[1].asInt();
+    if (raw_start < 0) return error.InvalidArgs;
+    const start: usize = std.math.cast(usize, raw_start) orelse return error.InvalidArgs;
+    const end: usize = if (args.len == 3 and args[2].isInt()) blk: {
+        const raw_end = args[2].asInt();
+        if (raw_end < 0) return error.InvalidArgs;
+        break :blk std.math.cast(usize, raw_end) orelse return error.InvalidArgs;
+    } else s.len;
     if (start > s.len or end > s.len or start > end) return error.InvalidArgs;
     const id = try gc.internString(s[start..end]);
     return Value.makeString(id);
