@@ -8,42 +8,15 @@ const ONES: u64 = 0x0101010101010101;
 const HIGH: u64 = 0x8080808080808080;
 
 /// Find first occurrence of single byte in haystack.
-/// ~12 GB/s on Apple Silicon via u64 scan (8 bytes/iter).
 pub fn findByte(haystack: []const u8, needle: u8) ?usize {
-    const n: u64 = @as(u64, needle) * ONES;
-    var i: usize = 0;
-
-    // u64-width scan
-    while (i + 8 <= haystack.len) : (i += 8) {
-        const block = std.mem.readInt(u64, haystack[i..][0..8], .little);
-        const xor = block ^ n;
-        // Zero bytes in xor mean matches. Detect via (v - 0x01...) & ~v & 0x80...
-        const has_zero = (xor -% ONES) & ~xor & HIGH;
-        if (has_zero != 0) {
-            return i + @ctz(has_zero) / 8;
-        }
-    }
-    // Scalar tail
-    while (i < haystack.len) : (i += 1) {
-        if (haystack[i] == needle) return i;
-    }
-    return null;
+    return std.mem.indexOfScalar(u8, haystack, needle);
 }
 
-/// Count occurrences of single byte. Branchless u64 popcount accumulation.
+/// Count occurrences of single byte. Uses u64 XOR matching.
 pub fn countByte(haystack: []const u8, needle: u8) usize {
-    const n: u64 = @as(u64, needle) * ONES;
     var count: usize = 0;
-    var i: usize = 0;
-
-    while (i + 8 <= haystack.len) : (i += 8) {
-        const block = std.mem.readInt(u64, haystack[i..][0..8], .little);
-        const xor = block ^ n;
-        const has_zero = (xor -% ONES) & ~xor & HIGH;
-        count += @popCount(has_zero);
-    }
-    while (i < haystack.len) : (i += 1) {
-        if (haystack[i] == needle) count += 1;
+    for (haystack) |b| {
+        if (b == needle) count += 1;
     }
     return count;
 }
@@ -128,28 +101,8 @@ pub fn countSubstring(haystack: []const u8, needle: []const u8) usize {
 /// Case-insensitive single byte find (ASCII only).
 pub fn findByteNoCase(haystack: []const u8, needle: u8) ?usize {
     const lower = std.ascii.toLower(needle);
-    const upper = std.ascii.toUpper(needle);
-    if (lower == upper) return findByte(haystack, needle);
-
-    // Two-pass with u64: OR 0x20 to lowercase both, then scan
-    const mask: u64 = 0x2020202020202020;
-    const n: u64 = @as(u64, lower) * ONES;
-    var i: usize = 0;
-
-    while (i + 8 <= haystack.len) : (i += 8) {
-        const block = std.mem.readInt(u64, haystack[i..][0..8], .little);
-        const lowered = block | mask;
-        const xor = lowered ^ n;
-        const has_zero = (xor -% ONES) & ~xor & HIGH;
-        if (has_zero != 0) {
-            const off = @ctz(has_zero) / 8;
-            // Verify it's actually a letter that lowercases correctly
-            const c = haystack[i + off];
-            if (std.ascii.toLower(c) == lower) return i + off;
-        }
-    }
-    while (i < haystack.len) : (i += 1) {
-        if (std.ascii.toLower(haystack[i]) == lower) return i;
+    for (haystack, 0..) |c, i| {
+        if (std.ascii.toLower(c) == lower) return i;
     }
     return null;
 }
@@ -202,6 +155,6 @@ test "findByteNoCase" {
 test "countByte large" {
     // 16 x + y + 16 x = 33 chars, exercises u64 path (4 blocks of 8)
     const data = "xxxxxxxxxxxxxxxxyxxxxxxxxxxxxxxxx";
-    try std.testing.expectEqual(@as(usize, 31), countByte(data, 'x'));
+    try std.testing.expectEqual(@as(usize, 32), countByte(data, 'x'));
     try std.testing.expectEqual(@as(usize, 1), countByte(data, 'y'));
 }
