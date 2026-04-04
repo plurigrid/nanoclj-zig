@@ -158,6 +158,8 @@ pub const Reader = struct {
         var max_arg: u8 = 0;
         var has_rest = false;
         self.scanPercents(body, &max_arg, &has_rest);
+        // Rewrite bare % → %1 in the body
+        if (max_arg >= 1) self.rewriteBarePercent(body);
         // Build params vector: [%1 %2 ... %N] or [%1 ... %N & %&]
         const params_obj = self.gc.allocObj(.vector) catch return error.OutOfMemory;
         var i: u8 = 1;
@@ -181,6 +183,27 @@ pub const Reader = struct {
         fn_list.data.list.items.append(self.gc.allocator, Value.makeObj(params_obj)) catch return error.OutOfMemory;
         fn_list.data.list.items.append(self.gc.allocator, body) catch return error.OutOfMemory;
         return Value.makeObj(fn_list);
+    }
+
+    fn rewriteBarePercent(self: *Reader, val: Value) void {
+        if (!val.isObj()) return;
+        const obj = val.asObj();
+        var items = switch (obj.kind) {
+            .list => obj.data.list.items.items,
+            .vector => obj.data.vector.items.items,
+            else => return,
+        };
+        for (items, 0..) |item, idx| {
+            if (item.isSymbol()) {
+                const name = self.gc.getString(item.asSymbolId());
+                if (name.len == 1 and name[0] == '%') {
+                    const id = self.gc.internString("%1") catch return;
+                    items[idx] = Value.makeSymbol(id);
+                }
+            } else {
+                self.rewriteBarePercent(item);
+            }
+        }
     }
 
     fn scanPercents(self: *Reader, val: Value, max_arg: *u8, has_rest: *bool) void {
@@ -357,4 +380,62 @@ test "read string" {
     const v = try r.readForm();
     try std.testing.expect(v.isString());
     try std.testing.expectEqualStrings("hello world", gc.getString(v.asStringId()));
+}
+
+test "read #() anonymous fn" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    // #(+ %1 %2) => (fn* [%1 %2] (+ %1 %2))
+    var r = Reader.init("#(+ %1 %2)", &gc);
+    const v = try r.readForm();
+    try std.testing.expect(v.isObj());
+    const items = v.asObj().data.list.items.items;
+    // First item should be fn* symbol
+    try std.testing.expect(items[0].isSymbol());
+    try std.testing.expectEqualStrings("fn*", gc.getString(items[0].asSymbolId()));
+    // Second item should be params vector [%1 %2]
+    try std.testing.expect(items[1].isObj());
+    try std.testing.expectEqual(@as(usize, 2), items[1].asObj().data.vector.items.items.len);
+    // Third item should be body (+ %1 %2)
+    try std.testing.expect(items[2].isObj());
+}
+
+test "read #() bare percent" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    // #(inc %) => (fn* [%1] (inc %1))
+    var r = Reader.init("#(inc %)", &gc);
+    const v = try r.readForm();
+    const items = v.asObj().data.list.items.items;
+    // Params should be [%1]
+    const params = items[1].asObj().data.vector.items.items;
+    try std.testing.expectEqual(@as(usize, 1), params.len);
+    try std.testing.expectEqualStrings("%1", gc.getString(params[0].asSymbolId()));
+    // Body: bare % rewritten to %1
+    const body = items[2].asObj().data.list.items.items;
+    try std.testing.expectEqualStrings("%1", gc.getString(body[1].asSymbolId()));
+}
+
+test "read #{} set literal" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("#{1 2 3}", &gc);
+    const v = try r.readForm();
+    try std.testing.expect(v.isObj());
+    try std.testing.expect(v.asObj().kind == .set);
+    try std.testing.expectEqual(@as(usize, 3), v.asObj().data.set.items.items.len);
+}
+
+test "read #_ discard" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("#_foo bar", &gc);
+    const v = try r.readForm();
+    // Should return bar (foo is discarded)
+    try std.testing.expect(v.isSymbol());
+    try std.testing.expectEqualStrings("bar", gc.getString(v.asSymbolId()));
 }

@@ -49,6 +49,12 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "if")) return evalIf(items, env, gc);
         if (std.mem.eql(u8, name, "do")) return evalDo(items, env, gc);
         if (std.mem.eql(u8, name, "fn*")) return evalFnStar(items, env, gc);
+        if (std.mem.eql(u8, name, "defn")) return evalDefn(items, env, gc);
+        if (std.mem.eql(u8, name, "throw")) {
+            if (items.len != 2) return error.ArityError;
+            _ = try eval(items[1], env, gc);
+            return error.EvalFailed;
+        }
     }
 
     // Check builtins before general application

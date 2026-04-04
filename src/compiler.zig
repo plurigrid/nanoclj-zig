@@ -1428,3 +1428,19 @@ test "compiler: cond — no match, no else" {
     const result = try compileAndRun("(cond false 1 false 2)", std.testing.allocator);
     try std.testing.expect(result.isNil());
 }
+
+// ── defn ──
+
+test "compiler: defn basic" {
+    const result = try compileAndRun(
+        \\(do (defn double [x] (* x 2)) (double 21))
+    , std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: defn with multiple body forms" {
+    const result = try compileAndRun(
+        \\(do (defn add-and-double [a b] (let* [s (+ a b)] (* s 2))) (add-and-double 10 11))
+    , std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
