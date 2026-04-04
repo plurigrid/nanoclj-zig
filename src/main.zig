@@ -187,4 +187,6 @@ test {
     _ = @import("ibc_denom.zig");
     _ = @import("http_fetch.zig");
     _ = @import("church_turing.zig");
+    _ = @import("syrup_bridge.zig");
+    _ = @import("gorj_bridge.zig");
 }

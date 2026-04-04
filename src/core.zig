@@ -18,6 +18,7 @@ const peval_mod = @import("peval.zig");
 const ibc_denom = @import("ibc_denom.zig");
 const church_turing = @import("church_turing.zig");
 const gorj_bridge = @import("gorj_bridge.zig");
+const computable_sets = @import("computable_sets.zig");
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
@@ -152,12 +153,20 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "semi-decide", &church_turing.semiDecideFn },
         .{ "halting-witness", &church_turing.haltingWitnessFn },
         .{ "primitive-recursive", &church_turing.primitiveRecursiveFn },
-        // gorj bridge (nanoclj-zig ↔ gorj relay via Syrup + Braid)
+        // gorj bridge — collapsed loops (no hex roundtrip, fused eval pipeline)
+        .{ "gorj-pipe", &gorj_bridge.gorjPipeFn },
         .{ "gorj-eval", &gorj_bridge.gorjEvalFn },
         .{ "gorj-encode", &gorj_bridge.gorjEncodeFn },
         .{ "gorj-decode", &gorj_bridge.gorjDecodeFn },
         .{ "gorj-version", &gorj_bridge.gorjVersionFn },
         .{ "gorj-tools", &gorj_bridge.gorjToolsFn },
+        // Computable sets, reductions, Weihrauch degrees, guideline auditor
+        .{ "computable-set", &computable_sets.computableSetFn },
+        .{ "set-density", &computable_sets.setDensityFn },
+        .{ "reduce-verify", &computable_sets.reduceVerifyFn },
+        .{ "weihrauch-degree", &computable_sets.weihrauchDegreeFn },
+        .{ "audit-guideline", &computable_sets.auditGuidelineFn },
+        .{ "audit-all-guidelines", &computable_sets.auditAllGuidelinesFn },
     };
 
     inline for (builtins) |b| {

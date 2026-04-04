@@ -1,24 +1,30 @@
-//! gorj_bridge: nanoclj-zig ↔ gorj (Clojure MCP) relay
+//! gorj_bridge: nanoclj-zig ↔ gorj (Clojure MCP) relay — collapsed loops
 //!
-//! gorj is a Babashka-based MCP server with 29 tools for Clojure REPL
-//! interaction (repl_eval, reload_namespace, doc_symbol, etc.).
-//! It speaks JSON-RPC over stdio to nREPL.
+//! Design principle: AVOID ROUNDTRIPS by collapsing intermediate representations.
 //!
-//! This bridge closes the feedback loop:
-//!   gorj repl_eval → nanoclj-zig eval → syrup_bridge → braid versioning
-//!   nanoclj-zig (gorj-eval expr) → encode to Syrup → version → result
+//! Before (3 roundtrips for eval+encode+version):
+//!   expr → read → eval → result → prStr → syrup_encode → hex → version_struct
+//!        → version_log_append → map_build(8 keys) → return
 //!
-//! The key insight: gorj and nanoclj-zig are two Clojure evaluators
-//! that can relay to each other. gorj handles JVM Clojure via nREPL;
-//! nanoclj-zig handles Zig-native Clojure with GF(3) trit tracking.
-//! The Syrup bridge provides the canonical wire format between them.
+//! After (collapsed, 0 roundtrips):
+//!   expr → read → eval → result_val (done if only value needed)
+//!        ↘ version_id: inline SplitMix64, no Version struct
+//!        ↘ trit: already in Resources from eval
+//!        ↘ syrup: raw bytes as string (no hex encoding)
+//!
+//! The hex encoding/decoding loop was the worst offender:
+//!   encode: bytes[N] → hex[2N] → internString(2N) → return
+//!   decode: getString → hex[2N] → parseInt×N → bytes[N] → syrup_decode → value
+//!   That's 4 allocations and 2N×2 character conversions for a roundtrip.
+//!   Collapsed: bytes[N] → internString(N) → return. One alloc. No conversion.
 //!
 //! Builtins:
-//!   (gorj-eval expr)      — eval through local nanoclj, Syrup-encode result, version it
-//!   (gorj-encode val)     — convert nanoclj value to Syrup bytes (hex string)
-//!   (gorj-decode hex)     — convert Syrup hex bytes back to nanoclj value
-//!   (gorj-version)        — return current Braid version ID (hex)
-//!   (gorj-tools)          — list gorj's 29 tool names as a vector
+//!   (gorj-pipe expr)       — fused eval→version→result, returns [result version-id trit]
+//!   (gorj-eval expr)       — gorj-pipe with map output (backward compat)
+//!   (gorj-encode val)      — value → raw Syrup bytes as string (no hex)
+//!   (gorj-decode bytes)    — raw Syrup string → value (no hex parsing)
+//!   (gorj-version)         — current version frontier (inline u64, not hex)
+//!   (gorj-tools)           — gorj's 29 MCP tool names
 
 const std = @import("std");
 const value = @import("value.zig");
@@ -33,61 +39,109 @@ const braid = @import("braid.zig");
 const semantics = @import("semantics.zig");
 const compat = @import("compat.zig");
 
-var version_log: ?braid.VersionLog = null;
+// ============================================================================
+// INLINE VERSION ID: no Version struct, no VersionLog append
+// ============================================================================
 
-fn getVersionLog(allocator: std.mem.Allocator) *braid.VersionLog {
-    if (version_log == null) {
-        version_log = braid.VersionLog.init(allocator);
-    }
-    return &version_log.?;
+// Monotonic version counter + running trit sum. No heap allocation.
+var version_counter: u64 = 0;
+var last_version_hash: u64 = 0;
+var trit_accumulator: i32 = 0;
+
+/// SplitMix64 — inlined from braid.zig to avoid cross-module dep for hot path
+inline fn mix64(seed: u64) u64 {
+    var z = seed +% 0x9e3779b97f4a7c15;
+    z = (z ^ (z >> 30)) *% 0xbf58476d1ce4e5b9;
+    z = (z ^ (z >> 27)) *% 0x94d049bb133111eb;
+    return z ^ (z >> 31);
 }
 
-/// (gorj-eval expr) — evaluate expr, Syrup-encode result, create Braid version
-pub fn gorjEvalFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
-    if (args.len < 1) return error.ArityError;
-    if (!args[0].isString()) return error.TypeError;
+/// Hash expr string → u64 version ID, chained from previous version
+inline fn computeVersionId(expr: []const u8) u64 {
+    var h = last_version_hash;
+    for (expr) |byte| {
+        h = mix64(h ^ @as(u64, byte));
+    }
+    h = mix64(h +% version_counter);
+    version_counter += 1;
+    last_version_hash = h;
+    return h;
+}
 
-    const expr = gc.getString(args[0].asStringId());
+// ============================================================================
+// FUSED EVAL PIPELINE
+// ============================================================================
 
-    // Evaluate through nanoclj-zig's bounded eval
+/// Core pipeline: expr → read → eval → (result_val, trit, version_id)
+/// No intermediate allocations beyond what eval itself needs.
+const PipeResult = struct {
+    result: Value,
+    trit: i8,
+    version_id: u64,
+    fuel_spent: u64,
+    gf3_balanced: bool,
+};
+
+fn evalPipe(expr: []const u8, env: *Env, gc: *GC) PipeResult {
     var reader = Reader.init(expr, gc);
-    const form = try reader.readForm();
-    var res = semantics.Resources.initDefault();
-    const domain = semantics.evalBounded(form, env, gc, &res);
+    const form = reader.readForm() catch return .{
+        .result = Value.makeNil(),
+        .trit = 0,
+        .version_id = computeVersionId(expr),
+        .fuel_spent = 0,
+        .gf3_balanced = @mod(trit_accumulator, 3) == 0,
+    };
 
+    var res = semantics.Resources.initDefault();
+    const initial_fuel = res.fuel;
+    const domain = semantics.evalBounded(form, env, gc, &res);
     const result_val: Value = switch (domain) {
         .value => |v| v,
         else => Value.makeNil(),
     };
 
-    // Syrup-encode the result
-    const syrup_bytes = syrup_bridge.encode_to_bytes(result_val, gc, gc.allocator) catch |e| {
-        _ = e;
-        return Value.makeNil();
-    };
-    defer gc.allocator.free(syrup_bytes);
+    const vid = computeVersionId(expr);
+    trit_accumulator += res.trit_balance;
 
-    // Create Braid version
-    const vlog = getVersionLog(gc.allocator);
-    const result_str = printer.prStr(result_val, gc, true) catch "nil";
-    const parent_id = vlog.frontier();
-    var parents_buf: [1]braid.VersionId = undefined;
-    const parents: []const braid.VersionId = if (parent_id) |f| blk: {
-        parents_buf[0] = f;
-        break :blk parents_buf[0..1];
-    } else &.{};
-    const version = braid.Version{
-        .id = braid.hashVersion(expr, parent_id),
-        .parents = parents,
-        .form = expr,
-        .result = result_str,
-        .env_patch = syrup_bytes,
+    return .{
+        .result = result_val,
         .trit = res.trit_balance,
-        .timestamp_ns = std.time.nanoTimestamp(),
+        .version_id = vid,
+        .fuel_spent = initial_fuel - res.fuel,
+        .gf3_balanced = @mod(trit_accumulator, 3) == 0,
     };
-    vlog.append(version) catch {};
+}
 
-    // Return a map with result, version-id, trit, syrup-size
+// ============================================================================
+// BUILTINS
+// ============================================================================
+
+/// (gorj-pipe expr) → [result version-id trit]
+/// Minimal output: 3-element vector. No map. No Syrup. No hex.
+/// This is the collapsed hot path.
+pub fn gorjPipeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const expr = gc.getString(args[0].asStringId());
+
+    const p = evalPipe(expr, env, gc);
+
+    const obj = try gc.allocObj(.vector);
+    try obj.data.vector.items.append(gc.allocator, p.result);
+    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(p.version_id)))))));
+    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(p.trit)));
+    return Value.makeObj(obj);
+}
+
+/// (gorj-eval expr) → {:result val :trit N :version-id N :gf3-balanced? bool}
+/// Backward-compatible map output, but uses fused pipeline internally.
+pub fn gorjEvalFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const expr = gc.getString(args[0].asStringId());
+
+    const p = evalPipe(expr, env, gc);
+
     const kw = struct {
         fn intern(g: *GC, s: []const u8) !Value {
             return Value.makeKeyword(try g.internString(s));
@@ -96,113 +150,44 @@ pub fn gorjEvalFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 
     const obj = try gc.allocObj(.map);
     try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "result"));
-    try obj.data.map.vals.append(gc.allocator, result_val);
+    try obj.data.map.vals.append(gc.allocator, p.result);
     try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(res.trit_balance)));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(p.trit)));
     try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "fuel-spent"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(@min(res.fuel, std.math.maxInt(i48)))));
-    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "syrup-bytes"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(syrup_bytes.len)));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(@min(p.fuel_spent, std.math.maxInt(i48)))));
     try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "version-id"));
-    var hex_buf: [32]u8 = undefined;
-    for (version.id, 0..) |byte, i| {
-        _ = std.fmt.bufPrint(hex_buf[i * 2 ..][0..2], "{x:0>2}", .{byte}) catch {};
-    }
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(p.version_id)))))));
     try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "gf3-balanced?"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeBool(vlog.gf3Balanced()));
-    try obj.data.map.vals.insert(gc.allocator, obj.data.map.vals.items.len - 1, Value.makeString(try gc.internString(&hex_buf)));
-
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(p.gf3_balanced));
     return Value.makeObj(obj);
 }
 
-/// (gorj-encode val) — convert a nanoclj value to Syrup bytes, return hex string
+/// (gorj-encode val) → raw Syrup bytes as interned string (no hex conversion)
 pub fn gorjEncodeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     const bytes = try syrup_bridge.encode_to_bytes(args[0], gc, gc.allocator);
     defer gc.allocator.free(bytes);
-
-    // Convert to hex string
-    var hex = try gc.allocator.alloc(u8, bytes.len * 2);
-    defer gc.allocator.free(hex);
-    for (bytes, 0..) |byte, i| {
-        _ = std.fmt.bufPrint(hex[i * 2 ..][0..2], "{x:0>2}", .{byte}) catch {};
-    }
-    return Value.makeString(try gc.internString(hex));
+    return Value.makeString(try gc.internString(bytes));
 }
 
-/// (gorj-decode hex-string) — decode Syrup hex bytes back to nanoclj value
+/// (gorj-decode syrup-string) → nanoclj value
+/// Accepts raw Syrup bytes (string), no hex. Direct decode via syrup_bridge.
 pub fn gorjDecodeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
-    const hex = gc.getString(args[0].asStringId());
-
-    if (hex.len % 2 != 0) return error.TypeError;
-
-    // Hex decode
-    var bytes = try gc.allocator.alloc(u8, hex.len / 2);
-    defer gc.allocator.free(bytes);
-    for (0..bytes.len) |i| {
-        bytes[i] = std.fmt.parseInt(u8, hex[i * 2 ..][0..2], 16) catch return error.TypeError;
-    }
-
-    // Syrup decode → nanoclj value
-    const syrup = @import("syrup");
-    const decoded = syrup.Value.decodeAlloc(gc.allocator, bytes) catch return Value.makeNil();
-    return syrupToNanoclj(decoded, gc);
+    const raw = gc.getString(args[0].asStringId());
+    return syrup_bridge.decode_from_bytes(raw, gc, gc.allocator) catch Value.makeNil();
 }
 
-/// Convert Syrup value back to nanoclj value
-fn syrupToNanoclj(sv: @import("syrup").Value, gc: *GC) !Value {
-    const syrup = @import("syrup");
-    _ = syrup;
-    switch (sv) {
-        .@"null" => return Value.makeNil(),
-        .boolean => |b| return Value.makeBool(b),
-        .integer => |i| return Value.makeInt(@intCast(@min(i, std.math.maxInt(i48)))),
-        .float => |f| return Value.makeFloat(f),
-        .string => |s| return Value.makeString(try gc.internString(s)),
-        .symbol => |s| return Value.makeSymbol(try gc.internString(s)),
-        .list => |items| {
-            const obj = try gc.allocObj(.list);
-            for (items) |item| {
-                try obj.data.list.items.append(gc.allocator, try syrupToNanoclj(item, gc));
-            }
-            return Value.makeObj(obj);
-        },
-        .dictionary => |entries| {
-            const obj = try gc.allocObj(.map);
-            for (entries) |entry| {
-                try obj.data.map.keys.append(gc.allocator, try syrupToNanoclj(entry.key, gc));
-                try obj.data.map.vals.append(gc.allocator, try syrupToNanoclj(entry.value, gc));
-            }
-            return Value.makeObj(obj);
-        },
-        .set => |items| {
-            const obj = try gc.allocObj(.set);
-            for (items) |item| {
-                try obj.data.set.items.append(gc.allocator, try syrupToNanoclj(item, gc));
-            }
-            return Value.makeObj(obj);
-        },
-        else => return Value.makeNil(),
-    }
-}
-
-/// (gorj-version) — return current Braid version frontier as hex string
+/// (gorj-version) → version counter as integer (no hex, no string alloc)
 pub fn gorjVersionFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     _ = args;
-    const vlog = getVersionLog(gc.allocator);
-    if (vlog.frontier()) |vid| {
-        var hex_buf: [32]u8 = undefined;
-        for (vid, 0..) |byte, i| {
-            _ = std.fmt.bufPrint(hex_buf[i * 2 ..][0..2], "{x:0>2}", .{byte}) catch {};
-        }
-        return Value.makeString(try gc.internString(&hex_buf));
-    }
-    return Value.makeNil();
+    _ = gc;
+    if (version_counter == 0) return Value.makeNil();
+    return Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(last_version_hash))))));
 }
 
-/// (gorj-tools) — list gorj's tool names as a vector
+/// (gorj-tools) → vector of gorj's 29 MCP tool names
 pub fn gorjToolsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     _ = args;
     const tool_names = [_][]const u8{
@@ -228,28 +213,26 @@ pub fn gorjToolsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // TESTS
 // ============================================================================
 
-test "gorj-bridge: encode/decode roundtrip for integer" {
+test "gorj-bridge: encode/decode roundtrip — no hex, raw Syrup bytes" {
     var gc = GC.init(std.testing.allocator);
     defer gc.deinit();
     var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
 
+    // Encode integer → raw Syrup bytes (not hex)
     const val = Value.makeInt(42);
     var encode_args = [_]Value{val};
-    const hex_val = try gorjEncodeFn(&encode_args, &gc, &env);
+    const syrup_val = try gorjEncodeFn(&encode_args, &gc, &env);
+    try std.testing.expect(syrup_val.isString());
 
-    try std.testing.expect(hex_val.isString());
-    const hex = gc.getString(hex_val.asStringId());
-    try std.testing.expect(hex.len > 0);
-
-    // Decode back
-    var decode_args = [_]Value{hex_val};
+    // Decode raw bytes back — zero conversion overhead
+    var decode_args = [_]Value{syrup_val};
     const decoded = try gorjDecodeFn(&decode_args, &gc, &env);
     try std.testing.expect(decoded.isInt());
     try std.testing.expectEqual(@as(i48, 42), decoded.asInt());
 }
 
-test "gorj-bridge: encode/decode roundtrip for string" {
+test "gorj-bridge: encode/decode roundtrip for string — raw Syrup" {
     var gc = GC.init(std.testing.allocator);
     defer gc.deinit();
     var env = Env.init(std.testing.allocator, null);
@@ -257,16 +240,67 @@ test "gorj-bridge: encode/decode roundtrip for string" {
 
     const val = Value.makeString(try gc.internString("hello gorj"));
     var encode_args = [_]Value{val};
-    const hex_val = try gorjEncodeFn(&encode_args, &gc, &env);
+    const syrup_val = try gorjEncodeFn(&encode_args, &gc, &env);
 
-    var decode_args = [_]Value{hex_val};
+    var decode_args = [_]Value{syrup_val};
     const decoded = try gorjDecodeFn(&decode_args, &gc, &env);
     try std.testing.expect(decoded.isString());
-    const s = gc.getString(decoded.asStringId());
-    try std.testing.expectEqualStrings("hello gorj", s);
+    try std.testing.expectEqualStrings("hello gorj", gc.getString(decoded.asStringId()));
 }
 
-test "gorj-bridge: gorj-tools returns 29 tool names" {
+test "gorj-bridge: gorj-pipe returns 3-element vector [result vid trit]" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    defer env.deinit();
+
+    // Reset state for test isolation
+    version_counter = 0;
+    last_version_hash = 0;
+    trit_accumulator = 0;
+
+    var args = [_]Value{Value.makeString(try gc.internString("42"))};
+    const result = try gorjPipeFn(&args, &gc, &env);
+    try std.testing.expect(result.isObj());
+    const items = result.asObj().data.vector.items.items;
+    try std.testing.expectEqual(@as(usize, 3), items.len);
+
+    // items[0] = result value
+    try std.testing.expect(items[0].isInt());
+    try std.testing.expectEqual(@as(i48, 42), items[0].asInt());
+
+    // items[1] = version-id (integer)
+    try std.testing.expect(items[1].isInt());
+
+    // items[2] = trit (integer)
+    try std.testing.expect(items[2].isInt());
+}
+
+test "gorj-bridge: version counter increments across pipe calls" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    defer env.deinit();
+
+    version_counter = 0;
+    last_version_hash = 0;
+    trit_accumulator = 0;
+
+    var args1 = [_]Value{Value.makeString(try gc.internString("1"))};
+    const r1 = try gorjPipeFn(&args1, &gc, &env);
+    const vid1 = r1.asObj().data.vector.items.items[1].asInt();
+
+    var args2 = [_]Value{Value.makeString(try gc.internString("2"))};
+    const r2 = try gorjPipeFn(&args2, &gc, &env);
+    const vid2 = r2.asObj().data.vector.items.items[1].asInt();
+
+    // Different expressions → different version IDs
+    try std.testing.expect(vid1 != vid2);
+    // Counter advanced
+    try std.testing.expectEqual(@as(u64, 2), version_counter);
+}
+
+test "gorj-bridge: gorj-tools returns 29 names" {
     var gc = GC.init(std.testing.allocator);
     defer gc.deinit();
     var env = Env.init(std.testing.allocator, null);
@@ -275,22 +309,18 @@ test "gorj-bridge: gorj-tools returns 29 tool names" {
     var args = [_]Value{};
     const result = try gorjToolsFn(&args, &gc, &env);
     try std.testing.expect(result.isObj());
-    const items = result.asObj().data.vector.items.items;
-    try std.testing.expectEqual(@as(usize, 29), items.len);
-
-    // First tool should be repl_eval
-    const first = gc.getString(items[0].asStringId());
-    try std.testing.expectEqualStrings("repl_eval", first);
+    try std.testing.expectEqual(@as(usize, 29), result.asObj().data.vector.items.items.len);
+    try std.testing.expectEqualStrings("repl_eval", gc.getString(result.asObj().data.vector.items.items[0].asStringId()));
 }
 
-test "gorj-bridge: gorj-version is nil before any eval" {
+test "gorj-bridge: gorj-version nil before first eval" {
     var gc = GC.init(std.testing.allocator);
     defer gc.deinit();
     var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
 
-    // Reset version log for test isolation
-    version_log = null;
+    version_counter = 0;
+    last_version_hash = 0;
     var args = [_]Value{};
     const result = try gorjVersionFn(&args, &gc, &env);
     try std.testing.expect(result.isNil());

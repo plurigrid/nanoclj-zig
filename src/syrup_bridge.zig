@@ -62,3 +62,42 @@ pub fn encode_to_bytes(v: Value, gc: *GC, alloc: std.mem.Allocator) ![]const u8 
     const sv = try nanoclj_to_syrup(v, gc, alloc);
     return sv.encodeAlloc(alloc);
 }
+
+pub fn syrup_to_nanoclj(sv: syrup.Value, gc: *GC) !Value {
+    switch (sv) {
+        .@"null" => return Value.makeNil(),
+        .bool => |b| return Value.makeBool(b),
+        .integer => |i| return Value.makeInt(@intCast(@min(i, std.math.maxInt(i48)))),
+        .float => |f| return Value.makeFloat(f),
+        .string => |s| return Value.makeString(try gc.internString(s)),
+        .symbol => |s| return Value.makeSymbol(try gc.internString(s)),
+        .list => |items| {
+            const obj = try gc.allocObj(.list);
+            for (items) |item| {
+                try obj.data.list.items.append(gc.allocator, try syrup_to_nanoclj(item, gc));
+            }
+            return Value.makeObj(obj);
+        },
+        .dictionary => |entries| {
+            const obj = try gc.allocObj(.map);
+            for (entries) |entry| {
+                try obj.data.map.keys.append(gc.allocator, try syrup_to_nanoclj(entry.key, gc));
+                try obj.data.map.vals.append(gc.allocator, try syrup_to_nanoclj(entry.value, gc));
+            }
+            return Value.makeObj(obj);
+        },
+        .set => |items| {
+            const obj = try gc.allocObj(.set);
+            for (items) |item| {
+                try obj.data.set.items.append(gc.allocator, try syrup_to_nanoclj(item, gc));
+            }
+            return Value.makeObj(obj);
+        },
+        else => return Value.makeNil(),
+    }
+}
+
+pub fn decode_from_bytes(raw: []const u8, gc: *GC, alloc: std.mem.Allocator) !Value {
+    const sv = try syrup.decode(raw, alloc);
+    return syrup_to_nanoclj(sv, gc);
+}
