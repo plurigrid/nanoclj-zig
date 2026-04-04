@@ -733,6 +733,12 @@ fn mertens_impl(n: i48) i48 {
     return sum;
 }
 
+fn mertensTritImpl(n: i48) i48 {
+    const m = mertens_impl(n);
+    const r = @mod(m + 300, 3);
+    return if (r == 2) @as(i48, -1) else r;
+}
+
 /// (mobius n) → μ(n) ∈ {-1, 0, 1}
 pub fn mobiusBuiltinFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
@@ -775,6 +781,24 @@ pub fn moebiusBoundaryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(incl_trit));
     try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "flips?"));
     try obj.data.map.vals.append(gc.allocator, Value.makeBool(excl_trit != incl_trit));
+
+    // Flip index: count primes p ≤ seed where Mertens trit flips Π→Σ
+    var flip_count: i48 = 0;
+    var flip_index: i48 = -1;
+    var p: i48 = 2;
+    while (p <= seed) : (p += 1) {
+        if (mobiusFn_impl(p) != -1) continue; // not prime
+        const pt = mertensTritImpl(p - 1);
+        const qt = mertensTritImpl(p);
+        if (pt == -1 and qt == 1) {
+            if (p == seed) flip_index = flip_count;
+            flip_count += 1;
+        }
+    }
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "flip-index"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(if (flip_index >= 0) flip_index else flip_count));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "total-flip-primes"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(flip_count));
     return Value.makeObj(obj);
 }
 
@@ -793,7 +817,7 @@ fn isqrt(n: u64) u64 {
 /// (pythagorean-triples bound) → vector of [a b c] triples with a≤b, c≤bound
 pub fn pythagoreanTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len < 1) return Value.makeNil();
-    const bound_val = args[0].toI48() orelse return Value.makeNil();
+    const bound_val = if (args[0].isInt()) args[0].asInt() else return Value.makeNil();
     if (bound_val <= 0) return Value.makeNil();
     const bound: u32 = @intCast(@min(bound_val, 10000));
 
@@ -824,7 +848,7 @@ pub fn pythagoreanTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// (pell-solve D) → {:x n :y m} fundamental solution of x²-Dy²=1, or nil
 pub fn pellSolveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len < 1) return Value.makeNil();
-    const d_val = args[0].toI48() orelse return Value.makeNil();
+    const d_val = if (args[0].isInt()) args[0].asInt() else return Value.makeNil();
     if (d_val < 2) return Value.makeNil();
     const D: u64 = @intCast(d_val);
 
@@ -879,7 +903,7 @@ pub fn pellSolveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// (markov-triples bound) → vector of [a b c] with a²+b²+c²=3abc, a≤b≤c≤bound
 pub fn markovTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len < 1) return Value.makeNil();
-    const bound_val = args[0].toI48() orelse return Value.makeNil();
+    const bound_val = if (args[0].isInt()) args[0].asInt() else return Value.makeNil();
     if (bound_val <= 0) return Value.makeNil();
     const bound: u32 = @intCast(@min(bound_val, 500));
 
@@ -908,7 +932,7 @@ pub fn markovTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// (rh-check bound) → vector of {:x n :pi π(n) :li Li(n) :error |π-Li| :bound C√n·ln(n) :ok? bool}
 pub fn rhCheckFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len < 1) return Value.makeNil();
-    const bound_val = args[0].toI48() orelse return Value.makeNil();
+    const bound_val = if (args[0].isInt()) args[0].asInt() else return Value.makeNil();
     if (bound_val < 10) return Value.makeNil();
     const bound: u32 = @intCast(@min(bound_val, 1000000));
 
