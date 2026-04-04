@@ -356,6 +356,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "cs-chroma", &csChromaFn },
         .{ "cs-resolve", &csResolveFn },
         .{ "cs-radius", &csRadiusFn },
+        // Regex
+        .{ "re-pattern", &rePatternFn },
+        .{ "re-find", &reFindFn },
+        .{ "re-matches", &reMatchesFn },
     };
 
     inline for (builtins) |b| {

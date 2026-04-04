@@ -160,6 +160,18 @@ pub const Reader = struct {
         };
     }
 
+    /// #"pattern" => (re-pattern "pattern")
+    fn readRegex(self: *Reader) ReadError!Value {
+        // Read the string content (readString handles the opening ")
+        const str_val = try self.readString();
+        // Wrap as (re-pattern "...")
+        const re_sym = self.gc.internString("re-pattern") catch return error.OutOfMemory;
+        const obj = self.gc.allocObj(.list) catch return error.OutOfMemory;
+        obj.data.list.items.append(self.gc.allocator, Value.makeSymbol(re_sym)) catch return error.OutOfMemory;
+        obj.data.list.items.append(self.gc.allocator, str_val) catch return error.OutOfMemory;
+        return Value.makeObj(obj);
+    }
+
     /// #(...) => (fn* [%1 %2 ...] (...))
     /// Scans body for %, %1-%9, %&; builds param vector automatically.
     fn readAnonFn(self: *Reader) ReadError!Value {
