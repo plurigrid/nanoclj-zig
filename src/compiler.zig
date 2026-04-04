@@ -41,6 +41,8 @@ pub const Compiler = struct {
     gc: *GC,
     allocator: std.mem.Allocator,
     parent: ?*Compiler, // for nested fn* compilation
+    in_tail: bool, // true when compiling in tail position of fn*
+    self_name: ?[]const u8, // for self-recursive fn* (set by compileFnStar caller)
 
     pub fn init(allocator: std.mem.Allocator, gc: *GC, parent: ?*Compiler) Compiler {
         return .{
@@ -53,6 +55,8 @@ pub const Compiler = struct {
             .gc = gc,
             .allocator = allocator,
             .parent = parent,
+            .in_tail = false,
+            .self_name = null,
         };
     }
 
@@ -113,6 +117,21 @@ pub const Compiler = struct {
 
     /// Compile an expression, placing the result in `dest` register.
     pub fn compile(self: *Compiler, expr: Value, dest: u8) CompileError!void {
+        const saved = self.in_tail;
+        self.in_tail = false;
+        defer self.in_tail = saved;
+        return self.compileInner(expr, dest);
+    }
+
+    /// Compile in tail position (for fn* body last expression).
+    fn compileTail(self: *Compiler, expr: Value, dest: u8) CompileError!void {
+        const saved = self.in_tail;
+        self.in_tail = true;
+        defer self.in_tail = saved;
+        return self.compileInner(expr, dest);
+    }
+
+    fn compileInner(self: *Compiler, expr: Value, dest: u8) CompileError!void {
         // nil
         if (expr.isNil()) {
             try self.emit(bc.encode_d(.load_nil, dest));
@@ -149,16 +168,7 @@ pub const Compiler = struct {
             const name = self.gc.getString(expr.asSymbolId());
             if (self.resolveLocal(name)) |local_reg| {
                 if (local_reg != dest) {
-                    // Move from local register to dest (encode as add with 0)
-                    // We need a MOVE instruction -- use load_const with the local value
-                    // Actually, just read from local_reg directly via get_global fallback
-                    // Simplest: emit load_int 0 to a scratch, then add dest = local + scratch
-                    // Better: use the register directly. If caller can accept any register,
-                    // we'd return the register. But our API puts result in dest.
-                    // For now: store local in dest via a self-add trick if different.
-                    // TODO: add MOVE opcode or let compile() return the register instead
-                    try self.emit(bc.encode_ae(.load_int, dest, 0));
-                    try self.emit(bc.encode_abc(.add, dest, local_reg, dest));
+                    try self.emit(bc.encode_abc(.move, dest, local_reg, 0));
                 }
                 // else: result already in dest (happens when dest == local_reg)
             } else {
@@ -205,6 +215,7 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, name, "let*")) return self.compileLet(items, dest);
             if (std.mem.eql(u8, name, "do")) return self.compileDo(items, dest);
             if (std.mem.eql(u8, name, "fn*")) return self.compileFnStar(items, dest);
+            if (std.mem.eql(u8, name, "recur")) return self.compileRecur(items, dest);
 
             // Inline arithmetic/comparison for known builtins
             if (items.len == 3) {
@@ -222,34 +233,30 @@ pub const Compiler = struct {
 
     fn compileIf(self: *Compiler, items: []Value, dest: u8) CompileError!void {
         if (items.len < 3 or items.len > 4) return error.InvalidSyntax;
+        const tail = self.in_tail;
 
-        // Compile test into dest
+        // Compile test (never in tail)
         try self.compile(items[1], dest);
 
-        // jump_if_not -> else branch
         const jump_else = self.codeLen();
         try self.emit(0); // placeholder
 
-        // Compile then branch
-        try self.compile(items[2], dest);
+        // Then branch (tail if outer is tail)
+        if (tail) try self.compileTail(items[2], dest) else try self.compile(items[2], dest);
 
         if (items.len == 4) {
-            // jump past else
             const jump_end = self.codeLen();
             try self.emit(0); // placeholder
 
-            // Patch jump_else to here
             const else_offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_else)) - 1);
             self.emitAt(jump_else, bc.encode_ae(.jump_if_not, dest, @bitCast(else_offset)));
 
-            // Compile else branch
-            try self.compile(items[3], dest);
+            // Else branch (tail if outer is tail)
+            if (tail) try self.compileTail(items[3], dest) else try self.compile(items[3], dest);
 
-            // Patch jump_end
             const end_offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_end)) - 1);
             self.emitAt(jump_end, bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(@as(i24, @intCast(end_offset)))))));
         } else {
-            // No else: jump_if_not past, then load nil
             const else_offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_else)));
             self.emitAt(jump_else, bc.encode_ae(.jump_if_not, dest, @bitCast(else_offset)));
             try self.emit(bc.encode_d(.load_nil, dest));
@@ -291,9 +298,15 @@ pub const Compiler = struct {
             try self.addLocal(name, reg);
         }
 
-        // Compile body forms
-        for (items[2..]) |form| {
-            try self.compile(form, dest);
+        // Compile body forms (last one inherits tail position)
+        const tail = self.in_tail;
+        const body = items[2..];
+        for (body, 0..) |form, idx| {
+            if (idx == body.len - 1 and tail) {
+                try self.compileTail(form, dest);
+            } else {
+                try self.compile(form, dest);
+            }
         }
 
         // Restore locals (let scope ends)
@@ -305,9 +318,38 @@ pub const Compiler = struct {
             try self.emit(bc.encode_d(.load_nil, dest));
             return;
         }
-        for (items[1..]) |form| {
-            try self.compile(form, dest);
+        const tail = self.in_tail;
+        const body = items[1..];
+        for (body, 0..) |form, idx| {
+            if (idx == body.len - 1 and tail) {
+                try self.compileTail(form, dest);
+            } else {
+                try self.compile(form, dest);
+            }
         }
+    }
+
+    /// (recur arg1 arg2 ...) — rebind params and jump to function entry.
+    /// Compiles to: eval args into temps, move to param regs, jump to 0.
+    fn compileRecur(self: *Compiler, items: []Value, _: u8) CompileError!void {
+        const argc = items.len - 1; // exclude 'recur' symbol
+        // Eval new arg values into temp registers
+        var temps: [64]u8 = undefined;
+        for (items[1..], 0..) |arg, i| {
+            const tmp = try self.allocReg();
+            try self.compile(arg, tmp);
+            temps[i] = tmp;
+        }
+        // Move temps → param registers 0..n-1
+        for (0..argc) |i| {
+            const param_reg: u8 = @intCast(i);
+            if (temps[i] != param_reg) {
+                try self.emit(bc.encode_abc(.move, param_reg, temps[i], 0));
+            }
+        }
+        // Jump to instruction 0 (function entry)
+        const offset: i24 = -@as(i24, @intCast(self.codeLen())) - 1;
+        try self.emit(bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(offset)))));
     }
 
     fn compileFnStar(self: *Compiler, items: []Value, dest: u8) CompileError!void {
@@ -322,7 +364,6 @@ pub const Compiler = struct {
         else
             return error.InvalidSyntax;
 
-        // Compile body in a child compiler
         var child = Compiler.init(self.allocator, self.gc, self);
 
         // Params become locals in registers 0..n-1
@@ -342,16 +383,24 @@ pub const Compiler = struct {
             };
         }
 
-        // Compile body into return register
+        // Compile body in tail position (last form gets tail call optimization)
         const body_dest = child.allocReg() catch {
             child.deinit();
             return error.TooManyRegisters;
         };
-        for (items[2..]) |form| {
-            child.compile(form, body_dest) catch {
-                child.deinit();
-                return error.InvalidSyntax;
-            };
+        const body = items[2..];
+        for (body, 0..) |form, idx| {
+            if (idx == body.len - 1) {
+                child.compileTail(form, body_dest) catch {
+                    child.deinit();
+                    return error.InvalidSyntax;
+                };
+            } else {
+                child.compile(form, body_dest) catch {
+                    child.deinit();
+                    return error.InvalidSyntax;
+                };
+            }
         }
         child.emit(bc.encode_d(.ret, body_dest)) catch {
             child.deinit();
@@ -441,23 +490,23 @@ pub const Compiler = struct {
         }
 
         // Phase 3: move compiled values into contiguous block
-        // func
         if (compiled_regs[0] != func_reg) {
-            try self.emit(bc.encode_ae(.load_int, func_reg, 0));
-            try self.emit(bc.encode_abc(.add, func_reg, compiled_regs[0], func_reg));
+            try self.emit(bc.encode_abc(.move, func_reg, compiled_regs[0], 0));
         }
-        // args
         for (0..argc) |i| {
             const src = compiled_regs[1 + i];
             const dst = contiguous[1 + i];
             if (src != dst) {
-                try self.emit(bc.encode_ae(.load_int, dst, 0));
-                try self.emit(bc.encode_abc(.add, dst, src, dst));
+                try self.emit(bc.encode_abc(.move, dst, src, 0));
             }
         }
 
-        // CALL: dest = call(func_reg, argc args starting at func_reg+1)
-        try self.emit(bc.encode_abc(.call, dest, argc, func_reg));
+        // In tail position: emit tail_call (reuses current frame, no stack growth)
+        if (self.in_tail) {
+            try self.emit(bc.encode_abc(.tail_call, func_reg, argc, 0));
+        } else {
+            try self.emit(bc.encode_abc(.call, dest, argc, func_reg));
+        }
     }
 
     // ========================================================================
@@ -577,4 +626,98 @@ test "compiler: compile + execute roundtrip" {
     const result = try vm.execute(&closure);
     try std.testing.expect(result.isInt());
     try std.testing.expectEqual(@as(i48, 30), result.asInt());
+}
+
+fn freeFuncDef(def: *FuncDef, allocator: std.mem.Allocator) void {
+    for (def.defs) |child| freeFuncDef(@constCast(child), allocator);
+    allocator.free(def.code);
+    allocator.free(def.constants);
+    allocator.free(def.defs);
+    allocator.destroy(def);
+}
+
+fn compileAndRun(src: []const u8, allocator: std.mem.Allocator) !Value {
+    var gc = GC.init(allocator);
+    defer gc.deinit();
+    const Reader = @import("reader.zig").Reader;
+    var reader = Reader.init(src, &gc);
+    const form = try reader.readForm();
+    var comp = Compiler.init(allocator, &gc, null);
+    const dest = try comp.allocReg();
+    try comp.compile(form, dest);
+    try comp.emit(bc.encode_d(.ret, dest));
+    const func_def = try comp.finalize();
+    comp.deinit();
+    defer freeFuncDef(func_def, allocator);
+    const closure = bc.Closure{ .def = func_def, .upvalues = &.{} };
+    var vm = bc.VM.init(&gc, 10_000_000);
+    defer vm.deinit();
+    return vm.execute(&closure);
+}
+
+test "compiler: let* binding" {
+    const result = try compileAndRun("(let* [x 10 y 20] (+ x y))", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 30), result.asInt());
+}
+
+test "compiler: nested if" {
+    const result = try compileAndRun("(if (< 1 2) (if (< 3 4) 42 0) 99)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: do form" {
+    const result = try compileAndRun("(do 1 2 3)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 3), result.asInt());
+}
+
+test "compiler: fn* and call" {
+    const result = try compileAndRun("((fn* [x] (+ x 1)) 10)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 11), result.asInt());
+}
+
+test "compiler: recur — sum 1..10" {
+    // (let* [sum (fn* [n acc] (if (<= n 0) acc (recur (- n 1) (+ acc n))))]
+    //   (sum 10 0))
+    const src =
+        \\(let* [sum (fn* [n acc] (if (<= n 0) acc (recur (- n 1) (+ acc n))))]
+        \\  (sum 10 0))
+    ;
+    const result = try compileAndRun(src, std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 55), result.asInt());
+}
+
+test "compiler: recur — factorial 10" {
+    const src =
+        \\(let* [fac (fn* [n acc] (if (<= n 1) acc (recur (- n 1) (* acc n))))]
+        \\  (fac 10 1))
+    ;
+    const result = try compileAndRun(src, std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 3628800), result.asInt());
+}
+
+test "compiler: recur — fibonacci via accumulator" {
+    // fib(30) = 832040, using O(n) iterative recur
+    const src =
+        \\(let* [fib (fn* [n a b] (if (<= n 0) a (recur (- n 1) b (+ a b))))]
+        \\  (fib 30 0 1))
+    ;
+    const result = try compileAndRun(src, std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 832040), result.asInt());
+}
+
+test "compiler: move opcode emitted for local access" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    const Reader = @import("reader.zig").Reader;
+    var reader = Reader.init("(let* [x 42] x)", &gc);
+    const form = try reader.readForm();
+    var c = Compiler.init(std.testing.allocator, &gc, null);
+    defer c.deinit();
+    const dest = try c.allocReg();
+    try c.compile(form, dest);
+    var found_move = false;
+    for (c.code.items) |inst| {
+        if (bc.decode_op(inst) == .move) found_move = true;
+    }
+    try std.testing.expect(found_move);
 }

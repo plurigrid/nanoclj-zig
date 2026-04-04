@@ -55,6 +55,9 @@ pub const Op = enum(u8) {
     tail_call,    // return call(R[A], R[A+1..A+B]) with B args
     closure,      // $A = make_closure(defs[E])
 
+    // Data movement (1)
+    move,         // $A = $B  (register copy)
+
     // Globals (2)
     get_global,   // $A = globals[constants[E]]
     set_global,   // globals[constants[E]] = $A
@@ -455,6 +458,13 @@ pub const VM = struct {
                         .upvalues = &.{}, // TODO: capture upvalues
                     };
                     self.reg(a).* = Value.makeObj(obj);
+                },
+
+                // ── Data movement ──
+                .move => {
+                    const a = decode_a(inst);
+                    const b = decode_b(inst);
+                    self.reg(a).* = self.reg(b).*;
                 },
 
                 // ── Globals ──
