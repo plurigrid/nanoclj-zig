@@ -56,30 +56,43 @@ const MIX2: u64 = 0x94d049bb133111eb;
 // COLOR-GAME DEPTH BOUNDING
 // ============================================================================
 
-/// Compute the fuel cost for a given recursion depth.
-/// Uses SplitMix64 to deterministically assign a color to each depth,
-/// then the color's hue-trit determines the cost multiplier.
-///
-/// This creates "seasons" in recursion: some depths are cheap (red/+1),
-/// some moderate (green/0), some expensive (blue/-1). Adversarial
-/// inputs can't predict or exploit the pattern because it's PRF-derived.
-pub fn depthFuelCost(depth: u32) u64 {
+/// Compute the fuel cost for a given recursion depth (slow path).
+fn computeDepthFuelCost(depth: u32) u64 {
     const state = @as(u64, depth) *% GOLDEN +% GAY_SEED;
     var z = state +% GOLDEN;
     z = (z ^ (z >> 30)) *% MIX1;
     z = (z ^ (z >> 27)) *% MIX2;
     z = z ^ (z >> 31);
-    // Extract hue-trit from the hash
     const r: u8 = @truncate(z >> 16);
     const g: u8 = @truncate(z >> 8);
     const b: u8 = @truncate(z);
     const trit = substrate.hueToTrit(rgbToHue(r, g, b));
     return switch (trit) {
-        1 => 1,  // red: cheap recursion (generator)
-        0 => 2,  // green: moderate (coordinator)
-        -1 => 3, // blue: expensive (validator)
+        1 => 1,
+        0 => 2,
+        -1 => 3,
         else => 2,
     };
+}
+
+/// Comptime lookup table: eliminates ~10M float computations per fib(28).
+const DEPTH_FUEL_LUT_SIZE = 1024;
+const depth_fuel_lut: [DEPTH_FUEL_LUT_SIZE]u64 = blk: {
+    @setEvalBranchQuota(100_000);
+    var table: [DEPTH_FUEL_LUT_SIZE]u64 = undefined;
+    for (0..DEPTH_FUEL_LUT_SIZE) |d| {
+        table[d] = computeDepthFuelCost(@intCast(d));
+    }
+    break :blk table;
+};
+
+/// Fuel cost for a given recursion depth. Uses comptime LUT for depths < 1024.
+/// Creates "seasons" in recursion: some depths are cheap (red/+1),
+/// some moderate (green/0), some expensive (blue/-1). Adversarial
+/// inputs can't predict or exploit the pattern because it's PRF-derived.
+pub fn depthFuelCost(depth: u32) u64 {
+    if (depth < DEPTH_FUEL_LUT_SIZE) return depth_fuel_lut[depth];
+    return computeDepthFuelCost(depth);
 }
 
 /// RGB to hue (local copy to avoid import cycles)

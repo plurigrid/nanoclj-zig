@@ -6,6 +6,11 @@ This map grounds runtime skills in current source code and ties them to the 14-f
 
 Source of truth for exposed REPL builtins: `src/core.zig` (`initCore` builtin table).
 
+Verification snapshot (current tree):
+- Exposed builtins in `src/core.zig`: **84**
+- Non-builtin special forms in evaluator: `quote`, `def`, `let*`, `if`, `do`, `fn*`, `peval`
+- Cross-version shim present: `src/compat.zig` (Zig 0.15 ↔ 0.16 support)
+
 ---
 
 ## Skill Clusters → Faces
@@ -60,6 +65,13 @@ Source of truth for exposed REPL builtins: `src/core.zig` (`initCore` builtin ta
 | HTTP fetch builtin | `http-fetch` (`src/http_fetch.zig`) | 9 |
 | Braid sync + CRDT | `src/braid.zig` | 9, 13 |
 | VCV bridge | `src/vcv_bridge.zig` | 9 |
+
+## 7) Compatibility skills (toolchain continuity)
+
+| Capability | Implementation | Faces | Purpose |
+|---|---|---|---|
+| ArrayList compatibility | `compat.emptyList(T)` | 9 | Smooth 0.15/0.16 container init differences |
+| Mutex compatibility | `compat.Mutex` | 9 | Unified lock API across stdlib mutex changes |
 
 ---
 

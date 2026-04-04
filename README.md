@@ -181,24 +181,22 @@ Benchmarks on Apple Silicon (ReleaseFast, Zig 0.15.2). Compared against Janet 1.
 | Benchmark | nanoclj-zig | Janet 1.40.1 | Ratio |
 |-----------|-------------|--------------|-------|
 | fib(20) | <0.01s | <0.01s | ~1x |
-| fib(25) | 0.07s | <0.01s | ~7x |
-| fib(28) | 0.29s | 0.01s | ~29x |
+| fib(25) | 0.02s | <0.01s | ~2x |
+| fib(28) | 0.13s | 0.01s | ~13x |
 | fib(30) | fuel limit* | 0.04s | — |
 | tak(18,12,6) | 0.02s | <0.01s | ~2x |
 | startup | <0.01s | <0.01s | ~1x |
 | binary size | 1.1 MB | 71 KB | 15x |
 
-\* nanoclj-zig's fuel-bounded evaluator uses fork/join resource tracking for
-parallel-ready eval, costing ~10x fuel overhead per function application vs
-a simple tick. This is the main bottleneck. Janet uses a conventional bytecode
-VM with no resource tracking.
+\* nanoclj-zig's fuel limit (10B steps) caps very deep recursion.
 
-**Why nanoclj-zig is slower (and why that's a feature):** Every function
-application forks fuel across arguments, tracks trit balance for GF(3)
-conservation, and joins resources back — modeling parallel evaluation even
-when running sequentially. When Zig 0.16's `std.Io` fibers land, `peval`
-expressions will become real concurrent futures with zero code changes to
-the Clojure layer.
+**Optimizations applied (v0.2):** Lazy fork (sequential eval skips fork/join),
+comptime depthFuelCost LUT (eliminates ~10M float ops), symbol-ID special form
+dispatch (u48 compare instead of string compare). Combined ~2.2x speedup over v0.1.
+
+The remaining ~13x gap vs Janet is the fundamental tree-walking vs bytecode-VM
+difference: Janet compiles to bytecodes with a tight switch loop; nanoclj-zig
+re-traverses the AST on every eval.
 
 ## Dependencies
 

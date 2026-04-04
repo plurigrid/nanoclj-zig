@@ -11,6 +11,7 @@ pub const GC = struct {
     objects: std.ArrayListUnmanaged(*Obj) = compat.emptyList(*Obj),
     roots: std.ArrayListUnmanaged(*Value) = compat.emptyList(*Value),
     strings: std.ArrayListUnmanaged([]const u8) = compat.emptyList([]const u8),
+    string_index: std.StringHashMapUnmanaged(u48) = .{},
     envs: std.ArrayListUnmanaged(*Env) = compat.emptyList(*Env),
     bytes_allocated: usize = 0,
     next_gc: usize = 1024 * 1024,
@@ -31,6 +32,7 @@ pub const GC = struct {
             self.allocator.free(s);
         }
         self.strings.deinit(self.allocator);
+        self.string_index.deinit(self.allocator);
         for (self.envs.items) |e| {
             e.deinit();
             self.allocator.destroy(e);
@@ -45,12 +47,11 @@ pub const GC = struct {
     }
 
     pub fn internString(self: *GC, s: []const u8) !u48 {
-        for (self.strings.items, 0..) |existing, i| {
-            if (std.mem.eql(u8, existing, s)) return @intCast(i);
-        }
+        if (self.string_index.get(s)) |id| return id;
         const copy = try self.allocator.dupe(u8, s);
         const id: u48 = @intCast(self.strings.items.len);
         try self.strings.append(self.allocator, copy);
+        try self.string_index.put(self.allocator, copy, id);
         return id;
     }
 

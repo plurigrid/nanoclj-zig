@@ -27,7 +27,7 @@ const Port = inet.Port;
 const CellKind = inet.CellKind;
 
 /// Scope: tracks variable bindings (name → port where the binder lives)
-const Scope = struct {
+pub const Scope = struct {
     bindings: std.StringHashMap(BindInfo),
     parent: ?*Scope,
 
@@ -36,14 +36,14 @@ const Scope = struct {
         uses: u16,    // how many times referenced (for dup/erase)
     };
 
-    fn init(allocator: std.mem.Allocator, parent: ?*Scope) Scope {
+    pub fn init(allocator: std.mem.Allocator, parent: ?*Scope) Scope {
         return .{
             .bindings = std.StringHashMap(BindInfo).init(allocator),
             .parent = parent,
         };
     }
 
-    fn deinit(self: *Scope) void {
+    pub fn deinit(self: *Scope) void {
         self.bindings.deinit();
     }
 

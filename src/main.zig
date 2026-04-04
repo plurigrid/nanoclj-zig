@@ -75,6 +75,11 @@ pub fn main() !void {
     const inet_builtins = @import("inet_builtins.zig");
     defer inet_builtins.deinitNets();
 
+    // First Futamura projection: PE constant bindings through inet
+    const peval = @import("peval.zig");
+    const pe_count = peval.pevalEnv(&env, &gc);
+    _ = pe_count;
+
     const stdout = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
     const stdin_file = std.fs.File{ .handle = std.posix.STDIN_FILENO };
 
@@ -177,4 +182,5 @@ test {
     _ = @import("inet_builtins.zig");
     _ = @import("inet_compile.zig");
     _ = @import("thread_peval.zig");
+    _ = @import("peval.zig");
 }

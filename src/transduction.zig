@@ -17,6 +17,31 @@ const transclusion = @import("transclusion.zig");
 const Domain = transclusion.Domain;
 
 // ============================================================================
+// SPECIAL FORM IDS: u48 integer dispatch (avoids string comparisons)
+// ============================================================================
+
+var sf_quote: u48 = 0;
+var sf_def: u48 = 0;
+var sf_let: u48 = 0;
+var sf_if: u48 = 0;
+var sf_do: u48 = 0;
+var sf_fn: u48 = 0;
+var sf_peval: u48 = 0;
+var sf_initialized: bool = false;
+
+fn ensureSpecialFormIds(gc: *GC) void {
+    if (sf_initialized) return;
+    sf_quote = gc.internString("quote") catch return;
+    sf_def = gc.internString("def") catch return;
+    sf_let = gc.internString("let*") catch return;
+    sf_if = gc.internString("if") catch return;
+    sf_do = gc.internString("do") catch return;
+    sf_fn = gc.internString("fn*") catch return;
+    sf_peval = gc.internString("peval") catch return;
+    sf_initialized = true;
+}
+
+// ============================================================================
 // OPERATIONAL SEMANTICS: Fuel-bounded eval
 // ============================================================================
 
@@ -50,18 +75,31 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
     if (items.len == 0) return Domain.pure(val);
 
     if (items[0].isSymbol()) {
-        const name = gc.getString(items[0].asSymbolId());
-        if (std.mem.eql(u8, name, "quote")) {
-            return if (items.len == 2) Domain.pure(items[1]) else Domain.fail(.arity_error);
+        ensureSpecialFormIds(gc);
+        const sym_id = items[0].asSymbolId();
+
+        if (sf_initialized) {
+            if (sym_id == sf_quote) return if (items.len == 2) Domain.pure(items[1]) else Domain.fail(.arity_error);
+            if (sym_id == sf_def) return evalBoundedDef(items, env, gc, res);
+            if (sym_id == sf_let) return evalBoundedLet(items, env, gc, res);
+            if (sym_id == sf_if) return evalBoundedIf(items, env, gc, res);
+            if (sym_id == sf_do) return evalBoundedDo(items, env, gc, res);
+            if (sym_id == sf_fn) return evalBoundedFnStar(items, env, gc, res);
+            if (sym_id == sf_peval) return evalBoundedPeval(items, env, gc, res);
+        } else {
+            // Fallback to string compare if interning failed
+            const name = gc.getString(sym_id);
+            if (std.mem.eql(u8, name, "quote")) return if (items.len == 2) Domain.pure(items[1]) else Domain.fail(.arity_error);
+            if (std.mem.eql(u8, name, "def")) return evalBoundedDef(items, env, gc, res);
+            if (std.mem.eql(u8, name, "let*")) return evalBoundedLet(items, env, gc, res);
+            if (std.mem.eql(u8, name, "if")) return evalBoundedIf(items, env, gc, res);
+            if (std.mem.eql(u8, name, "do")) return evalBoundedDo(items, env, gc, res);
+            if (std.mem.eql(u8, name, "fn*")) return evalBoundedFnStar(items, env, gc, res);
+            if (std.mem.eql(u8, name, "peval")) return evalBoundedPeval(items, env, gc, res);
         }
-        if (std.mem.eql(u8, name, "def")) return evalBoundedDef(items, env, gc, res);
-        if (std.mem.eql(u8, name, "let*")) return evalBoundedLet(items, env, gc, res);
-        if (std.mem.eql(u8, name, "if")) return evalBoundedIf(items, env, gc, res);
-        if (std.mem.eql(u8, name, "do")) return evalBoundedDo(items, env, gc, res);
-        if (std.mem.eql(u8, name, "fn*")) return evalBoundedFnStar(items, env, gc, res);
-        if (std.mem.eql(u8, name, "peval")) return evalBoundedPeval(items, env, gc, res);
 
         const core = @import("core.zig");
+        const name = gc.getString(sym_id);
         if (core.lookupBuiltin(name)) |builtin| {
             return evalBoundedBuiltin(builtin, items[1..], env, gc, res);
         }
@@ -77,22 +115,17 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         }
     }
 
-    // Fork fuel across args (Level 1: parallel arg eval)
+    // Sequential arg eval — no fork/join overhead (peval has its own fork path)
     const raw_args = items[1..];
-    var child_res = res.fork(raw_args.len);
     var args_buf: [64]Value = undefined;
     var args_count: usize = 0;
-    for (raw_args, 0..) |arg, i| {
+    for (raw_args) |arg| {
         if (args_count >= 64) return Domain.fail(.collection_too_large);
-        const d = evalBounded(arg, env, gc, &child_res[i]);
-        if (!d.isValue()) {
-            res.join(&child_res, args_count);
-            return d;
-        }
+        const d = evalBounded(arg, env, gc, res);
+        if (!d.isValue()) return d;
         args_buf[args_count] = d.value;
         args_count += 1;
     }
-    res.join(&child_res, args_count);
     return applyBounded(func_d.value, args_buf[0..args_count], env, gc, res);
 }
 
@@ -103,25 +136,16 @@ fn evalBoundedBuiltin(
     gc: *GC,
     res: *Resources,
 ) Domain {
-    // Fork fuel across args (Level 1: adiabatic expansion)
-    // Currently sequential but resource-tracked as if parallel.
-    // When Zig async lands, each child_res eval becomes a frame.
-    var child_res = res.fork(raw_args.len);
+    // Sequential arg eval — no fork/join overhead
     var args_buf: [64]Value = undefined;
     var args_count: usize = 0;
-    for (raw_args, 0..) |arg, i| {
+    for (raw_args) |arg| {
         if (args_count >= 64) return Domain.fail(.collection_too_large);
-        const d = evalBounded(arg, env, gc, &child_res[i]);
-        if (!d.isValue()) {
-            // Join partial results back before returning error
-            res.join(&child_res, args_count);
-            return d;
-        }
+        const d = evalBounded(arg, env, gc, res);
+        if (!d.isValue()) return d;
         args_buf[args_count] = d.value;
         args_count += 1;
     }
-    // Join: merge child resources back (measurement cost = kT·ln(n))
-    res.join(&child_res, args_count);
     const result = builtin(args_buf[0..args_count], gc, env) catch
         return Domain.fail(.type_error);
     return Domain.pure(result);
