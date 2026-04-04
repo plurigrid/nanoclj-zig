@@ -51,6 +51,9 @@ pub const Compiler = struct {
     parent: ?*Compiler, // for nested fn* compilation
     in_tail: bool, // true when compiling in tail position of fn*
     self_name: ?[]const u8, // for self-recursive fn* (set by compileFnStar caller)
+    loop_entry: ?usize = null, // instruction index of loop head (for recur in loop)
+    loop_regs: [64]u8 = undefined, // registers holding loop bindings
+    loop_arity: u8 = 0, // number of loop bindings
 
     pub fn init(allocator: std.mem.Allocator, gc: *GC, parent: ?*Compiler) Compiler {
         return .{
@@ -258,6 +261,7 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, name, "do")) return self.compileDo(items, dest);
             if (std.mem.eql(u8, name, "fn*")) return self.compileFnStar(items, dest);
             if (std.mem.eql(u8, name, "recur")) return self.compileRecur(items, dest);
+            if (std.mem.eql(u8, name, "loop")) return self.compileLoop(items, dest);
             if (std.mem.eql(u8, name, "and")) return self.compileAnd(items, dest);
             if (std.mem.eql(u8, name, "or")) return self.compileOr(items, dest);
             if (std.mem.eql(u8, name, "when")) return self.compileWhen(items, dest);
@@ -379,10 +383,11 @@ pub const Compiler = struct {
         }
     }
 
-    /// (recur arg1 arg2 ...) — rebind params and jump to function entry.
-    /// Compiles to: eval args into temps, move to param regs, jump to 0.
+    /// (recur arg1 arg2 ...) — rebind bindings and jump back.
+    /// If inside a loop, jumps to loop_entry and updates loop_regs.
+    /// If inside a fn*, jumps to instruction 0 and updates param regs.
     fn compileRecur(self: *Compiler, items: []Value, _: u8) CompileError!void {
-        const argc = items.len - 1; // exclude 'recur' symbol
+        const argc = items.len - 1;
         // Eval new arg values into temp registers
         var temps: [64]u8 = undefined;
         for (items[1..], 0..) |arg, i| {
@@ -390,16 +395,86 @@ pub const Compiler = struct {
             try self.compile(arg, tmp);
             temps[i] = tmp;
         }
-        // Move temps → param registers 0..n-1
-        for (0..argc) |i| {
-            const param_reg: u8 = @intCast(i);
-            if (temps[i] != param_reg) {
-                try self.emit(bc.encode_abc(.move, param_reg, temps[i], 0));
+
+        if (self.loop_entry) |entry| {
+            // Loop recur: move temps → loop binding registers
+            for (0..argc) |i| {
+                if (temps[i] != self.loop_regs[i]) {
+                    try self.emit(bc.encode_abc(.move, self.loop_regs[i], temps[i], 0));
+                }
+            }
+            // Jump to loop entry
+            const offset: i24 = @intCast(@as(i64, @intCast(entry)) - @as(i64, @intCast(self.codeLen())) - 1);
+            try self.emit(bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(offset)))));
+        } else {
+            // Function recur: move temps → param registers 0..n-1
+            for (0..argc) |i| {
+                const param_reg: u8 = @intCast(i);
+                if (temps[i] != param_reg) {
+                    try self.emit(bc.encode_abc(.move, param_reg, temps[i], 0));
+                }
+            }
+            // Jump to instruction 0 (function entry)
+            const offset: i24 = -@as(i24, @intCast(self.codeLen())) - 1;
+            try self.emit(bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(offset)))));
+        }
+    }
+
+    /// (loop [x init-x y init-y] body...) — like let* but recur jumps back here
+    fn compileLoop(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 3) return error.InvalidSyntax;
+        if (!items[1].isObj()) return error.InvalidSyntax;
+
+        const bindings_obj = items[1].asObj();
+        const bindings = if (bindings_obj.kind == .vector)
+            bindings_obj.data.vector.items.items
+        else if (bindings_obj.kind == .list)
+            bindings_obj.data.list.items.items
+        else
+            return error.InvalidSyntax;
+
+        if (bindings.len % 2 != 0) return error.InvalidSyntax;
+
+        const saved_local_count = self.local_count;
+        const saved_loop_entry = self.loop_entry;
+        const saved_loop_arity = self.loop_arity;
+        var saved_loop_regs: [64]u8 = undefined;
+        @memcpy(saved_loop_regs[0..saved_loop_arity], self.loop_regs[0..saved_loop_arity]);
+
+        // Compile bindings
+        const n_bindings: u8 = @intCast(bindings.len / 2);
+        var i: usize = 0;
+        var bi: u8 = 0;
+        while (i < bindings.len) : (i += 2) {
+            if (!bindings[i].isSymbol()) return error.InvalidSyntax;
+            const name = self.gc.getString(bindings[i].asSymbolId());
+            const reg = try self.allocReg();
+            try self.compile(bindings[i + 1], reg);
+            try self.addLocal(name, reg);
+            self.loop_regs[bi] = reg;
+            bi += 1;
+        }
+
+        // Mark loop entry point (instruction AFTER binding setup)
+        self.loop_entry = self.codeLen();
+        self.loop_arity = n_bindings;
+
+        // Compile body (last form in tail position if enclosing is tail)
+        const tail = self.in_tail;
+        const body = items[2..];
+        for (body, 0..) |form, idx| {
+            if (idx == body.len - 1 and tail) {
+                try self.compileTail(form, dest);
+            } else {
+                try self.compile(form, dest);
             }
         }
-        // Jump to instruction 0 (function entry)
-        const offset: i24 = -@as(i24, @intCast(self.codeLen())) - 1;
-        try self.emit(bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(offset)))));
+
+        // Restore
+        self.local_count = saved_local_count;
+        self.loop_entry = saved_loop_entry;
+        self.loop_arity = saved_loop_arity;
+        @memcpy(self.loop_regs[0..saved_loop_arity], saved_loop_regs[0..saved_loop_arity]);
     }
 
     /// (and a b c) → short-circuit: if a is falsy return a, else if b is falsy return b, else c
