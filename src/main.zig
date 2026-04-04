@@ -207,6 +207,88 @@ fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator,
     return allocator.dupe(u8, out) catch "Error: alloc failed";
 }
 
+/// Load bytecode prelude: defines core HOFs (map, filter, reduce, reverse, range)
+/// as bytecode globals so they're available to all (bc ...) calls.
+fn loadBcPrelude(gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) void {
+    const forms = [_][]const u8{
+        // reverse: accumulator-based O(n)
+        \\(def reverse (fn* [xs]
+        \\  (loop [acc (list) rem xs]
+        \\    (if (zero? (count rem))
+        \\      acc
+        \\      (recur (cons (first rem) acc) (rest rem))))))
+        ,
+        // map: apply f to each element
+        \\(def map (fn* [f xs]
+        \\  (loop [acc (list) rem xs]
+        \\    (if (zero? (count rem))
+        \\      (reverse acc)
+        \\      (recur (cons (f (first rem)) acc) (rest rem))))))
+        ,
+        // filter: keep elements where (f x) is truthy
+        \\(def filter (fn* [f xs]
+        \\  (loop [acc (list) rem xs]
+        \\    (if (zero? (count rem))
+        \\      (reverse acc)
+        \\      (if (f (first rem))
+        \\        (recur (cons (first rem) acc) (rest rem))
+        \\        (recur acc (rest rem)))))))
+        ,
+        // reduce: fold left with initial value
+        \\(def reduce (fn* [f init xs]
+        \\  (loop [acc init rem xs]
+        \\    (if (zero? (count rem))
+        \\      acc
+        \\      (recur (f acc (first rem)) (rest rem))))))
+        ,
+        // range: generate list of integers [0, n)
+        \\(def range (fn* [n]
+        \\  (loop [acc (list) i (dec n)]
+        \\    (if (neg? i)
+        \\      acc
+        \\      (recur (cons i acc) (dec i))))))
+        ,
+        // take: first n elements
+        \\(def take (fn* [n xs]
+        \\  (loop [acc (list) rem xs i n]
+        \\    (if (zero? i)
+        \\      (reverse acc)
+        \\      (if (zero? (count rem))
+        \\        (reverse acc)
+        \\        (recur (cons (first rem) acc) (rest rem) (dec i)))))))
+        ,
+        // drop: skip first n elements
+        \\(def drop (fn* [n xs]
+        \\  (loop [rem xs i n]
+        \\    (if (zero? i)
+        \\      rem
+        \\      (if (zero? (count rem))
+        \\        (list)
+        \\        (recur (rest rem) (dec i)))))))
+        ,
+        // concat: append two lists
+        \\(def concat (fn* [a b]
+        \\  (loop [acc b rem (reverse a)]
+        \\    (if (zero? (count rem))
+        \\      acc
+        \\      (recur (cons (first rem) acc) (rest rem))))))
+        ,
+        // apply: apply function to arg list (limited to arity ≤ 8)
+        \\(def apply (fn* [f args]
+        \\  (let* [n (count args)]
+        \\    (if (= n 0) (f)
+        \\    (if (= n 1) (f (nth args 0))
+        \\    (if (= n 2) (f (nth args 0) (nth args 1))
+        \\    (if (= n 3) (f (nth args 0) (nth args 1) (nth args 2))
+        \\    (f (nth args 0) (nth args 1) (nth args 2) (nth args 3)))))))))
+        ,
+    };
+
+    for (forms) |src| {
+        _ = bcRep(src, gc, allocator, vm);
+    }
+}
+
 pub fn main() !void {
     const compat = @import("compat.zig");
     var gpa = compat.makeDebugAllocator();
@@ -270,6 +352,9 @@ pub fn main() !void {
     // ── Bytecode VM (persistent across REPL) ──────────────────────
     var vm = bc.VM.init(&gc, 100_000_000);
     defer vm.deinit();
+
+    // ── Bytecode prelude: core higher-order functions ────────────
+    loadBcPrelude(&gc, allocator, &vm);
 
     // ── REPL: world=> ─────────────────────────────────────────────
     while (true) {

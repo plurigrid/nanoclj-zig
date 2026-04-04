@@ -29,6 +29,7 @@ var sf_do: u48 = 0;
 var sf_fn: u48 = 0;
 var sf_fn_bare: u48 = 0;
 var sf_peval: u48 = 0;
+var sf_defn: u48 = 0;
 var sf_initialized: bool = false;
 
 fn ensureSpecialFormIds(gc: *GC) void {
@@ -42,6 +43,7 @@ fn ensureSpecialFormIds(gc: *GC) void {
     sf_fn = gc.internString("fn*") catch return;
     sf_fn_bare = gc.internString("fn") catch return;
     sf_peval = gc.internString("peval") catch return;
+    sf_defn = gc.internString("defn") catch return;
     sf_initialized = true;
 }
 
@@ -94,6 +96,7 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
             if (sym_id == sf_do) return evalBoundedDo(items, env, gc, res);
             if (sym_id == sf_fn or sym_id == sf_fn_bare) return evalBoundedFnStar(items, env, gc, res);
             if (sym_id == sf_peval) return evalBoundedPeval(items, env, gc, res);
+            if (sym_id == sf_defn) return evalBoundedDefn(items, env, gc, res);
         } else {
             // Fallback to string compare if interning failed
             const name = gc.getString(sym_id);
@@ -103,6 +106,7 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
             if (std.mem.eql(u8, name, "if")) return evalBoundedIf(items, env, gc, res);
             if (std.mem.eql(u8, name, "do")) return evalBoundedDo(items, env, gc, res);
             if (std.mem.eql(u8, name, "fn*") or std.mem.eql(u8, name, "fn")) return evalBoundedFnStar(items, env, gc, res);
+            if (std.mem.eql(u8, name, "defn")) return evalBoundedDefn(items, env, gc, res);
             if (std.mem.eql(u8, name, "peval")) return evalBoundedPeval(items, env, gc, res);
         }
 
@@ -195,6 +199,26 @@ fn evalBoundedDef(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     env.set(name, d.value) catch return Domain.fail(.type_error);
     env.setById(sym_id, d.value) catch {};
     return d;
+}
+
+/// (defn name [params] body...) → desugar to (def name (fn* [params] body...))
+fn evalBoundedDefn(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+    if (items.len < 4) return Domain.fail(.arity_error);
+    if (!items[1].isSymbol()) return Domain.fail(.type_error);
+    const sym_id = items[1].asSymbolId();
+    const name = gc.getString(sym_id);
+    // Build synthetic [fn*, params, body...] — reuse items[1..] shifted
+    var fn_items: [64]Value = undefined;
+    fn_items[0] = items[0]; // placeholder (ignored by evalBoundedFnStar)
+    fn_items[1] = items[2]; // params vector
+    const body = items[3..];
+    if (body.len + 2 > fn_items.len) return Domain.fail(.arity_error);
+    for (body, 0..) |b, i| fn_items[2 + i] = b;
+    const fn_d = evalBoundedFnStar(fn_items[0 .. 2 + body.len], env, gc, res);
+    if (!fn_d.isValue()) return fn_d;
+    env.set(name, fn_d.value) catch return Domain.fail(.type_error);
+    env.setById(sym_id, fn_d.value) catch {};
+    return fn_d;
 }
 
 fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
