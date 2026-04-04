@@ -62,10 +62,27 @@ pub const SplitRng = struct {
         return self.next() % n;
     }
 
-    /// Next trit: -1, 0, or +1
+    /// Next trit: -1, 0, or +1 (unconstrained — ergodic, not conserved)
     pub fn nextTrit(self: *SplitRng) i8 {
         const v = self.next() % 3;
         return @as(i8, @intCast(v)) - 1;
+    }
+
+    /// Next trit triple: exactly one of each {-1, 0, +1}, permuted by hash.
+    /// Sum is ALWAYS 0 mod 3 by construction. Returns [3]i8.
+    /// This is the real conservation law — not ergodic, exact.
+    pub fn nextBalancedTriple(self: *SplitRng) [3]i8 {
+        const v = self.next();
+        // 6 permutations of (-1, 0, 1), select by v mod 6
+        return switch (v % 6) {
+            0 => .{ -1, 0, 1 },
+            1 => .{ -1, 1, 0 },
+            2 => .{ 0, -1, 1 },
+            3 => .{ 0, 1, -1 },
+            4 => .{ 1, -1, 0 },
+            5 => .{ 1, 0, -1 },
+            else => .{ 0, 0, 0 },
+        };
     }
 
     /// Fork: produce two independent generators from this one.
@@ -128,12 +145,31 @@ pub fn at(seed: u64, index: u64) u64 {
     return mix64(seed +% index *% GOLDEN);
 }
 
-/// Trit at position: -1, 0, or +1. GF(3) phase of the index-addressed value.
-pub fn tritAt(seed: u64, index: u64) i8 {
+/// Trit at position (unconstrained): -1, 0, or +1. Ergodic, ~1/3 conservation.
+pub fn tritAtFree(seed: u64, index: u64) i8 {
     return @as(i8, @intCast(at(seed, index) % 3)) - 1;
 }
 
-/// Trit sum over [0, n): O(n) but deterministic and replayable.
+/// Trit at position (balanced): every group of 3 is a permutation of {-1,0,+1}.
+/// GF(3) conservation is EXACT at every 3k boundary by construction.
+/// index / 3 selects the triple, index % 3 selects within it.
+pub fn tritAt(seed: u64, index: u64) i8 {
+    const triple_idx = index / 3;
+    const within = @as(usize, @intCast(index % 3));
+    const v = at(seed, triple_idx);
+    const triple: [3]i8 = switch (v % 6) {
+        0 => .{ -1, 0, 1 },
+        1 => .{ -1, 1, 0 },
+        2 => .{ 0, -1, 1 },
+        3 => .{ 0, 1, -1 },
+        4 => .{ 1, -1, 0 },
+        5 => .{ 1, 0, -1 },
+        else => .{ 0, 0, 0 },
+    };
+    return triple[within];
+}
+
+/// Trit sum over [0, n): exact 0 at every 3k, bounded drift otherwise.
 pub fn tritSum(seed: u64, n: u64) i32 {
     var s: i32 = 0;
     for (0..n) |i| {

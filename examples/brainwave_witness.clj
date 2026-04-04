@@ -1,0 +1,12 @@
+(do
+(def w1 (semi-decide "(+ -1 0 1 0 -1 -1 0 -1 -1 -1 -1 -1 0 -1 0 -1)" -10))
+(println "W1:trit-sum")
+(println w1)
+(def w2 (semi-decide "(if (< 100 5) 0 (if (< 100 50) 1 -1))" -1))
+(println "W2:rail-classify")
+(println w2)
+(def w3 (semi-decide "(if (< 0 5) 0 (if (< 0 50) 1 -1))" 0))
+(println "W3:clean-classify")
+(println w3)
+(println (str "fuel:" (simulation-fuel)))
+)
