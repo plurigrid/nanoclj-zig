@@ -258,10 +258,18 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, name, "do")) return self.compileDo(items, dest);
             if (std.mem.eql(u8, name, "fn*")) return self.compileFnStar(items, dest);
             if (std.mem.eql(u8, name, "recur")) return self.compileRecur(items, dest);
+            if (std.mem.eql(u8, name, "and")) return self.compileAnd(items, dest);
+            if (std.mem.eql(u8, name, "or")) return self.compileOr(items, dest);
+            if (std.mem.eql(u8, name, "when")) return self.compileWhen(items, dest);
+            if (std.mem.eql(u8, name, "cond")) return self.compileCond(items, dest);
 
-            // Inline arithmetic/comparison for known builtins
-            if (items.len == 3) {
-                if (self.tryCompileBinop(name, items[1], items[2], dest)) |_| return;
+            // Variadic arithmetic: (+ a b c ...) → left-fold of binary ops
+            if (items.len >= 3) {
+                if (self.tryCompileVariadicOp(name, items[1..], dest)) |_| return;
+            }
+            // Unary: (- x) → negate
+            if (items.len == 2 and std.mem.eql(u8, name, "-")) {
+                return self.compileNegate(items[1], dest);
             }
         }
 
@@ -394,6 +402,129 @@ pub const Compiler = struct {
         try self.emit(bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(offset)))));
     }
 
+    /// (and a b c) → short-circuit: if a is falsy return a, else if b is falsy return b, else c
+    fn compileAnd(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len == 1) {
+            try self.emit(bc.encode_d(.load_true, dest));
+            return;
+        }
+        var patches = std.ArrayListUnmanaged(usize){ .items = &.{}, .capacity = 0 };
+        defer patches.deinit(self.allocator);
+
+        for (items[1..]) |form| {
+            try self.compile(form, dest);
+            const idx = self.codeLen();
+            try self.emit(0); // placeholder jump_if_not → end
+            patches.append(self.allocator, idx) catch return error.OutOfMemory;
+        }
+        // Patch all short-circuits to here (dest holds the last falsy or last truthy value)
+        for (patches.items) |idx| {
+            const offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(idx)) - 1);
+            self.emitAt(idx, bc.encode_ae(.jump_if_not, dest, @bitCast(offset)));
+        }
+    }
+
+    /// (or a b c) → short-circuit: if a is truthy return a, else if b is truthy return b, else c
+    fn compileOr(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len == 1) {
+            try self.emit(bc.encode_d(.load_nil, dest));
+            return;
+        }
+        var patches = std.ArrayListUnmanaged(usize){ .items = &.{}, .capacity = 0 };
+        defer patches.deinit(self.allocator);
+
+        for (items[1..]) |form| {
+            try self.compile(form, dest);
+            const idx = self.codeLen();
+            try self.emit(0); // placeholder jump_if → end
+            patches.append(self.allocator, idx) catch return error.OutOfMemory;
+        }
+        for (patches.items) |idx| {
+            const offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(idx)) - 1);
+            self.emitAt(idx, bc.encode_ae(.jump_if, dest, @bitCast(offset)));
+        }
+    }
+
+    /// (when test body...) → (if test (do body...) nil)
+    fn compileWhen(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 2) return error.InvalidSyntax;
+        try self.compile(items[1], dest);
+        const jump_idx = self.codeLen();
+        try self.emit(0); // placeholder jump_if_not → end
+
+        // Body forms
+        const tail = self.in_tail;
+        const body = items[2..];
+        for (body, 0..) |form, i| {
+            if (i == body.len - 1 and tail) {
+                try self.compileTail(form, dest);
+            } else {
+                try self.compile(form, dest);
+            }
+        }
+        const end_idx = self.codeLen();
+        // jump past nil load
+        try self.emit(0); // placeholder jump → after nil
+
+        // Patch jump_if_not to nil
+        const else_offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_idx)) - 1);
+        self.emitAt(jump_idx, bc.encode_ae(.jump_if_not, dest, @bitCast(else_offset)));
+        try self.emit(bc.encode_d(.load_nil, dest));
+
+        // Patch jump past nil
+        const end_offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(end_idx)) - 1);
+        self.emitAt(end_idx, bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(@as(i24, @intCast(end_offset)))))));
+    }
+
+    /// (cond test1 expr1 test2 expr2 ... :else default)
+    fn compileCond(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 3 or (items.len - 1) % 2 != 0) return error.InvalidSyntax;
+        const tail = self.in_tail;
+        var end_patches = std.ArrayListUnmanaged(usize){ .items = &.{}, .capacity = 0 };
+        defer end_patches.deinit(self.allocator);
+
+        var i: usize = 1;
+        while (i < items.len) : (i += 2) {
+            const test_expr = items[i];
+            const body_expr = items[i + 1];
+
+            // Check for :else keyword (always true)
+            if (test_expr.isKeyword()) {
+                const kw_name = self.gc.getString(test_expr.asKeywordId());
+                if (std.mem.eql(u8, kw_name, "else")) {
+                    if (tail) try self.compileTail(body_expr, dest) else try self.compile(body_expr, dest);
+                    break;
+                }
+            }
+
+            try self.compile(test_expr, dest);
+            const jump_next = self.codeLen();
+            try self.emit(0); // placeholder jump_if_not → next clause
+
+            if (tail) try self.compileTail(body_expr, dest) else try self.compile(body_expr, dest);
+
+            // Jump to end
+            const end_jump = self.codeLen();
+            try self.emit(0); // placeholder
+            end_patches.append(self.allocator, end_jump) catch return error.OutOfMemory;
+
+            // Patch jump_if_not → here (next clause)
+            const next_offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_next)) - 1);
+            self.emitAt(jump_next, bc.encode_ae(.jump_if_not, dest, @bitCast(next_offset)));
+        }
+
+        // If no :else, load nil
+        if (i >= items.len) {
+            try self.emit(bc.encode_d(.load_nil, dest));
+        }
+
+        // Patch all end jumps
+        for (end_patches.items) |idx| {
+            const offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(idx)) - 1);
+            self.emitAt(idx, bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(@as(i24, @intCast(offset)))))));
+        }
+    }
+
     fn compileFnStar(self: *Compiler, items: []Value, dest: u8) CompileError!void {
         if (items.len < 3) return error.InvalidSyntax;
         if (!items[1].isObj()) return error.InvalidSyntax;
@@ -491,28 +622,101 @@ pub const Compiler = struct {
     }
 
     // ========================================================================
-    // INLINE BINARY OPERATIONS
+    // INLINE OPERATIONS: variadic arithmetic, comparisons, unary negate
     // ========================================================================
 
-    fn tryCompileBinop(self: *Compiler, name: []const u8, lhs: Value, rhs: Value, dest: u8) ?void {
-        const op: Op = if (std.mem.eql(u8, name, "+")) .add
-        else if (std.mem.eql(u8, name, "-")) .sub
-        else if (std.mem.eql(u8, name, "*")) .mul
-        else if (std.mem.eql(u8, name, "/")) .div
-        else if (std.mem.eql(u8, name, "=")) .eq
-        else if (std.mem.eql(u8, name, "<")) .lt
-        else if (std.mem.eql(u8, name, "<=")) .lte
-        else if (std.mem.eql(u8, name, "quot")) .quot
-        else if (std.mem.eql(u8, name, "mod")) .rem
-        else if (std.mem.eql(u8, name, "rem")) .rem
-        else return null;
+    fn nameToArithOp(name: []const u8) ?Op {
+        if (std.mem.eql(u8, name, "+")) return .add;
+        if (std.mem.eql(u8, name, "-")) return .sub;
+        if (std.mem.eql(u8, name, "*")) return .mul;
+        if (std.mem.eql(u8, name, "/")) return .div;
+        if (std.mem.eql(u8, name, "quot")) return .quot;
+        if (std.mem.eql(u8, name, "mod")) return .rem;
+        if (std.mem.eql(u8, name, "rem")) return .rem;
+        return null;
+    }
 
-        const r_lhs = self.allocReg() catch return null;
-        self.compile(lhs, r_lhs) catch return null;
-        const r_rhs = self.allocReg() catch return null;
-        self.compile(rhs, r_rhs) catch return null;
-        self.emit(bc.encode_abc(op, dest, r_lhs, r_rhs)) catch return null;
-        return {};
+    fn nameToCmpOp(name: []const u8) ?Op {
+        if (std.mem.eql(u8, name, "=")) return .eq;
+        if (std.mem.eql(u8, name, "<")) return .lt;
+        if (std.mem.eql(u8, name, "<=")) return .lte;
+        return null;
+    }
+
+    /// (+ a b c ...) → left-fold: tmp = a+b, tmp = tmp+c, ...
+    /// (< a b c)     → (and (< a b) (< b c)) with short-circuit
+    fn tryCompileVariadicOp(self: *Compiler, name: []const u8, args: []Value, dest: u8) ?void {
+        if (nameToArithOp(name)) |op| {
+            self.compileVariadicArith(op, args, dest) catch return null;
+            return {};
+        }
+        if (nameToCmpOp(name)) |op| {
+            if (args.len == 2) {
+                // Binary comparison: simple case
+                const r_lhs = self.allocReg() catch return null;
+                self.compile(args[0], r_lhs) catch return null;
+                const r_rhs = self.allocReg() catch return null;
+                self.compile(args[1], r_rhs) catch return null;
+                self.emit(bc.encode_abc(op, dest, r_lhs, r_rhs)) catch return null;
+                return {};
+            }
+            if (args.len >= 3) {
+                self.compileVariadicCmp(op, args, dest) catch return null;
+                return {};
+            }
+        }
+        return null;
+    }
+
+    fn compileVariadicArith(self: *Compiler, op: Op, args: []Value, dest: u8) CompileError!void {
+        // Compile first arg into accumulator
+        const acc = try self.allocReg();
+        try self.compile(args[0], acc);
+        // Left-fold remaining args
+        for (args[1..]) |arg| {
+            const tmp = try self.allocReg();
+            try self.compile(arg, tmp);
+            try self.emit(bc.encode_abc(op, acc, acc, tmp));
+        }
+        if (acc != dest) {
+            try self.emit(bc.encode_abc(.move, dest, acc, 0));
+        }
+    }
+
+    /// (< a b c) → compile as: r0=a, r1=b, cmp(dest, r0, r1), jump_if_not end,
+    ///             r2=c, cmp(dest, r1, r2), end:
+    fn compileVariadicCmp(self: *Compiler, op: Op, args: []Value, dest: u8) CompileError!void {
+        var patches = std.ArrayListUnmanaged(usize){ .items = &.{}, .capacity = 0 };
+        defer patches.deinit(self.allocator);
+
+        var prev_reg = try self.allocReg();
+        try self.compile(args[0], prev_reg);
+
+        for (args[1..]) |arg| {
+            const cur_reg = try self.allocReg();
+            try self.compile(arg, cur_reg);
+            try self.emit(bc.encode_abc(op, dest, prev_reg, cur_reg));
+            // Short-circuit: if false, jump to end
+            const patch_idx = self.codeLen();
+            try self.emit(0); // placeholder jump_if_not
+            patches.append(self.allocator, patch_idx) catch return error.OutOfMemory;
+            prev_reg = cur_reg;
+        }
+
+        // All comparisons passed → dest already holds true from last cmp
+        // Patch all jump_if_not to here
+        for (patches.items) |idx| {
+            const offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(idx)) - 1);
+            self.emitAt(idx, bc.encode_ae(.jump_if_not, dest, @bitCast(offset)));
+        }
+    }
+
+    fn compileNegate(self: *Compiler, arg: Value, dest: u8) CompileError!void {
+        const zero_reg = try self.allocReg();
+        try self.emit(bc.encode_ae(.load_int, zero_reg, 0));
+        const arg_reg = try self.allocReg();
+        try self.compile(arg, arg_reg);
+        try self.emit(bc.encode_abc(.sub, dest, zero_reg, arg_reg));
     }
 
     // ========================================================================
@@ -892,4 +1096,90 @@ test "compiler: chained builtins" {
     // (inc (inc (dec 42)))  =>  43
     const result = try compileAndRunWithBuiltins("(inc (inc (dec 42)))", std.testing.allocator, true);
     try std.testing.expectEqual(@as(i48, 43), result.asInt());
+}
+
+// ── Variadic arithmetic ──
+
+test "compiler: variadic + (3 args)" {
+    const result = try compileAndRun("(+ 1 2 3)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 6), result.asInt());
+}
+
+test "compiler: variadic + (5 args)" {
+    const result = try compileAndRun("(+ 10 20 30 40 50)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 150), result.asInt());
+}
+
+test "compiler: variadic * (4 args)" {
+    const result = try compileAndRun("(* 2 3 4 5)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 120), result.asInt());
+}
+
+test "compiler: unary negate" {
+    const result = try compileAndRun("(- 42)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, -42), result.asInt());
+}
+
+test "compiler: variadic < (chained comparison)" {
+    const r1 = try compileAndRun("(< 1 2 3)", std.testing.allocator);
+    try std.testing.expect(r1.asBool());
+    const r2 = try compileAndRun("(< 1 3 2)", std.testing.allocator);
+    try std.testing.expect(!r2.asBool());
+}
+
+test "compiler: variadic = (all equal)" {
+    const r1 = try compileAndRun("(= 5 5 5)", std.testing.allocator);
+    try std.testing.expect(r1.asBool());
+    const r2 = try compileAndRun("(= 5 5 6)", std.testing.allocator);
+    try std.testing.expect(!r2.asBool());
+}
+
+// ── and/or ──
+
+test "compiler: and — all truthy" {
+    const result = try compileAndRun("(and 1 2 3)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 3), result.asInt());
+}
+
+test "compiler: and — short-circuit on false" {
+    const result = try compileAndRun("(and 1 false 3)", std.testing.allocator);
+    try std.testing.expect(result.isBool());
+    try std.testing.expect(!result.asBool());
+}
+
+test "compiler: or — first truthy" {
+    const result = try compileAndRun("(or false nil 42)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: or — all falsy" {
+    const result = try compileAndRun("(or false nil false)", std.testing.allocator);
+    try std.testing.expect(!result.isTruthy());
+}
+
+// ── when/cond ──
+
+test "compiler: when — true" {
+    const result = try compileAndRun("(when true 1 2 42)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: when — false" {
+    const result = try compileAndRun("(when false 42)", std.testing.allocator);
+    try std.testing.expect(result.isNil());
+}
+
+test "compiler: cond — first match" {
+    const result = try compileAndRun("(cond false 1 true 42)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: cond — else clause" {
+    const result = try compileAndRun("(cond false 1 false 2 :else 99)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 99), result.asInt());
+}
+
+test "compiler: cond — no match, no else" {
+    const result = try compileAndRun("(cond false 1 false 2)", std.testing.allocator);
+    try std.testing.expect(result.isNil());
 }
