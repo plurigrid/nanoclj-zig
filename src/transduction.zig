@@ -293,10 +293,31 @@ fn applyBounded(func: Value, args: []Value, _: *Env, gc: *GC, res: *Resources) D
 
     const fn_data = if (obj.kind == .function) &obj.data.function else &obj.data.macro_fn;
     const fn_env = fn_data.env orelse return Domain.fail(.not_a_function);
+
+    const fn_params = fn_data.params.items;
+
+    // Fast path: non-variadic, small arity — use stack-local env (no heap alloc, no GC)
+    if (!fn_data.is_variadic and fn_params.len <= 8) {
+        var local_env = Env.init(gc.allocator, fn_env);
+        defer local_env.deinit();
+        if (args.len != fn_params.len) return Domain.fail(.arity_error);
+        for (fn_params, 0..) |p, i| {
+            const pid = p.asSymbolId();
+            local_env.setById(pid, args[i]) catch {};
+            local_env.set(gc.getString(pid), args[i]) catch return Domain.fail(.type_error);
+        }
+        var result = Domain.pure(Value.makeNil());
+        for (fn_data.body.items) |form| {
+            result = evalBounded(form, &local_env, gc, res);
+            if (!result.isValue()) return result;
+        }
+        return result;
+    }
+
+    // Slow path: variadic or large arity — heap-allocate and GC-track
     const child = fn_env.createChild() catch return Domain.fail(.type_error);
     gc.trackEnv(child) catch return Domain.fail(.type_error);
 
-    const fn_params = fn_data.params.items;
     if (fn_data.is_variadic) {
         if (fn_params.len == 0) return Domain.fail(.arity_error);
         const required = fn_params.len - 1;

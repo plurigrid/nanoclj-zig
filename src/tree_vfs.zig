@@ -27,8 +27,15 @@ const TreeEntry = struct {
     path: []const u8,
     content: []const u8,
     title: ?[]const u8,
+    taxon: ?[]const u8,
+    author: ?[]const u8,
     /// IDs this tree transcludes (outgoing edges)
     transcludes: std.ArrayListUnmanaged([]const u8),
+    /// IDs this tree imports (\import{id})
+    imports: std.ArrayListUnmanaged([]const u8),
+    /// \meta{key}{val} pairs
+    meta_keys: std.ArrayListUnmanaged([]const u8),
+    meta_vals: std.ArrayListUnmanaged([]const u8),
 };
 
 /// The materialized forest
@@ -45,6 +52,9 @@ const Forest = struct {
         var it = self.entries.iterator();
         while (it.next()) |e| {
             e.value_ptr.transcludes.deinit(self.allocator);
+            e.value_ptr.imports.deinit(self.allocator);
+            e.value_ptr.meta_keys.deinit(self.allocator);
+            e.value_ptr.meta_vals.deinit(self.allocator);
             self.allocator.free(e.value_ptr.content);
         }
         self.entries.deinit();
@@ -95,6 +105,84 @@ fn extractTranscludes(allocator: std.mem.Allocator, content: []const u8) !std.Ar
     return result;
 }
 
+/// Extract \taxon{...} from content
+fn extractTaxon(content: []const u8) ?[]const u8 {
+    return extractSimpleDirective(content, "\\taxon{");
+}
+
+/// Extract \author{...} from content
+fn extractAuthor(content: []const u8) ?[]const u8 {
+    return extractSimpleDirective(content, "\\author{");
+}
+
+/// Extract a simple \directive{value} (no nesting expected)
+fn extractSimpleDirective(content: []const u8, marker: []const u8) ?[]const u8 {
+    const start = std.mem.indexOf(u8, content, marker) orelse return null;
+    const after = start + marker.len;
+    var depth: u32 = 1;
+    var i: usize = after;
+    while (i < content.len and depth > 0) : (i += 1) {
+        if (content[i] == '{') depth += 1;
+        if (content[i] == '}') depth -= 1;
+    }
+    if (depth == 0) return content[after .. i - 1];
+    return null;
+}
+
+/// Extract all \import{ID} targets from content
+fn extractImports(allocator: std.mem.Allocator, content: []const u8) !std.ArrayListUnmanaged([]const u8) {
+    var result = compat.emptyList([]const u8);
+    const marker = "\\import{";
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, content, pos, marker)) |start| {
+        const after = start + marker.len;
+        const end = std.mem.indexOfPos(u8, content, after, "}") orelse break;
+        try result.append(allocator, content[after..end]);
+        pos = end + 1;
+    }
+    return result;
+}
+
+/// Extract all \meta{key}{val} pairs from content
+fn extractMeta(allocator: std.mem.Allocator, content: []const u8) !struct {
+    keys: std.ArrayListUnmanaged([]const u8),
+    vals: std.ArrayListUnmanaged([]const u8),
+} {
+    var keys = compat.emptyList([]const u8);
+    var vals = compat.emptyList([]const u8);
+    const marker = "\\meta{";
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, content, pos, marker)) |start| {
+        const k_after = start + marker.len;
+        // Find end of key
+        var depth: u32 = 1;
+        var i: usize = k_after;
+        while (i < content.len and depth > 0) : (i += 1) {
+            if (content[i] == '{') depth += 1;
+            if (content[i] == '}') depth -= 1;
+        }
+        if (depth != 0) break;
+        const key = content[k_after .. i - 1];
+        // Expect {val} immediately after
+        if (i < content.len and content[i] == '{') {
+            const v_after = i + 1;
+            depth = 1;
+            i = v_after;
+            while (i < content.len and depth > 0) : (i += 1) {
+                if (content[i] == '{') depth += 1;
+                if (content[i] == '}') depth -= 1;
+            }
+            if (depth == 0) {
+                const val = content[v_after .. i - 1];
+                try keys.append(allocator, key);
+                try vals.append(allocator, val);
+            }
+        }
+        pos = i;
+    }
+    return .{ .keys = keys, .vals = vals };
+}
+
 /// Recursively scan a directory for .tree files
 fn scanDir(allocator: std.mem.Allocator, dir_path: []const u8, entries: *std.StringHashMap(TreeEntry)) !void {
     var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch return;
@@ -134,14 +222,23 @@ fn scanDir(allocator: std.mem.Allocator, dir_path: []const u8, entries: *std.Str
                 continue;
             };
             const transcludes = try extractTranscludes(allocator, content);
+            const imports = try extractImports(allocator, content);
+            const meta = try extractMeta(allocator, content);
             const title = extractTitle(content);
+            const taxon = extractTaxon(content);
+            const author = extractAuthor(content);
 
             try entries.put(id, .{
                 .id = id,
                 .path = try allocator.dupe(u8, child_path),
                 .content = content,
                 .title = title,
+                .taxon = taxon,
+                .author = author,
                 .transcludes = transcludes,
+                .imports = imports,
+                .meta_keys = meta.keys,
+                .meta_vals = meta.vals,
             });
         }
     }
@@ -364,6 +461,75 @@ fn longestChainDFS(
     _ = current.pop();
 }
 
+/// (tree-taxon "dct-0001") → taxon string (e.g. "doctrine") or nil
+pub fn treeTaxonFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isString()) return error.TypeError;
+    const id = gc.getString(args[0].asStringId());
+    const f = try loadForest(gc.allocator);
+    const entry = f.entries.get(id) orelse return Value.makeNil();
+    const taxon = entry.taxon orelse return Value.makeNil();
+    return Value.makeString(try gc.internString(taxon));
+}
+
+/// (tree-author "bci-0001") → author string or nil
+pub fn treeAuthorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isString()) return error.TypeError;
+    const id = gc.getString(args[0].asStringId());
+    const f = try loadForest(gc.allocator);
+    const entry = f.entries.get(id) orelse return Value.makeNil();
+    const author = entry.author orelse return Value.makeNil();
+    return Value.makeString(try gc.internString(author));
+}
+
+/// (tree-meta "dct-0001") → {:key1 "val1" :key2 "val2"} or nil
+pub fn treeMetaFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isString()) return error.TypeError;
+    const id = gc.getString(args[0].asStringId());
+    const f = try loadForest(gc.allocator);
+    const entry = f.entries.get(id) orelse return Value.makeNil();
+    if (entry.meta_keys.items.len == 0) return Value.makeNil();
+    const map_obj = try gc.allocObj(.map);
+    for (entry.meta_keys.items, 0..) |key, i| {
+        const kw = Value.makeKeyword(try gc.internString(key));
+        const val = Value.makeString(try gc.internString(entry.meta_vals.items[i]));
+        try map_obj.data.map.keys.append(gc.allocator, kw);
+        try map_obj.data.map.vals.append(gc.allocator, val);
+    }
+    return Value.makeObj(map_obj);
+}
+
+/// (tree-imports "horse-0001") → list of IDs this tree imports
+pub fn treeImportsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isString()) return error.TypeError;
+    const id = gc.getString(args[0].asStringId());
+    const f = try loadForest(gc.allocator);
+    const entry = f.entries.get(id) orelse return Value.makeNil();
+    const list_obj = try gc.allocObj(.list);
+    for (entry.imports.items) |imp| {
+        const sid = try gc.internString(imp);
+        try list_obj.data.list.items.append(gc.allocator, Value.makeString(sid));
+    }
+    return Value.makeObj(list_obj);
+}
+
+/// (tree-by-taxon "doctrine") → list of tree IDs with that taxon
+pub fn treeByTaxonFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isString()) return error.TypeError;
+    const taxon = gc.getString(args[0].asStringId());
+    const f = try loadForest(gc.allocator);
+    const list_obj = try gc.allocObj(.list);
+    var it = f.entries.iterator();
+    while (it.next()) |e| {
+        if (e.value_ptr.taxon) |t| {
+            if (std.mem.eql(u8, t, taxon)) {
+                const sid = try gc.internString(e.value_ptr.id);
+                try list_obj.data.list.items.append(gc.allocator, Value.makeString(sid));
+            }
+        }
+    }
+    return Value.makeObj(list_obj);
+}
+
 /// Skill table for registration in core.zig
 pub const skill_table = .{
     .{ "tree-read", &treeReadFn },
@@ -373,4 +539,9 @@ pub const skill_table = .{
     .{ "tree-ids", &treeIdsFn },
     .{ "tree-isolated", &treeIsolatedFn },
     .{ "tree-chain", &treeChainFn },
+    .{ "tree-taxon", &treeTaxonFn },
+    .{ "tree-author", &treeAuthorFn },
+    .{ "tree-meta", &treeMetaFn },
+    .{ "tree-imports", &treeImportsFn },
+    .{ "tree-by-taxon", &treeByTaxonFn },
 };

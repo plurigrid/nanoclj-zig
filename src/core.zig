@@ -91,6 +91,11 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "tree-ids", &tree_vfs.treeIdsFn },
         .{ "tree-isolated", &tree_vfs.treeIsolatedFn },
         .{ "tree-chain", &tree_vfs.treeChainFn },
+        .{ "tree-taxon", &tree_vfs.treeTaxonFn },
+        .{ "tree-author", &tree_vfs.treeAuthorFn },
+        .{ "tree-meta", &tree_vfs.treeMetaFn },
+        .{ "tree-imports", &tree_vfs.treeImportsFn },
+        .{ "tree-by-taxon", &tree_vfs.treeByTaxonFn },
         // Interaction net builtins
         .{ "inet-new", &inet_builtins.inetNewFn },
         .{ "inet-cell", &inet_builtins.inetCellFn },
