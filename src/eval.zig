@@ -14,7 +14,11 @@ pub const EvalError = error{
     OutOfMemory,
     TypeError,
     EvalFailed,
+    ThrownException,
 };
+
+/// Last thrown exception value (set by throw, read by catch).
+var thrown_value: Value = Value.makeNil();
 
 pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
     if (val.isNil() or val.isBool() or val.isInt() or val.isString() or val.isKeyword()) {
@@ -50,10 +54,11 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "do")) return evalDo(items, env, gc);
         if (std.mem.eql(u8, name, "fn*")) return evalFnStar(items, env, gc);
         if (std.mem.eql(u8, name, "defn")) return evalDefn(items, env, gc);
+        if (std.mem.eql(u8, name, "try")) return evalTry(items, env, gc);
         if (std.mem.eql(u8, name, "throw")) {
             if (items.len != 2) return error.ArityError;
-            _ = try eval(items[1], env, gc);
-            return error.EvalFailed;
+            thrown_value = try eval(items[1], env, gc);
+            return error.ThrownException;
         }
     }
 
@@ -128,16 +133,173 @@ fn evalLet(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     gc.trackEnv(child) catch return error.OutOfMemory;
     var i: usize = 0;
     while (i < bindings.len) : (i += 2) {
-        if (!bindings[i].isSymbol()) return error.TypeError;
-        const name = gc.getString(bindings[i].asSymbolId());
         const val = try eval(bindings[i + 1], child, gc);
-        child.set(name, val) catch return error.OutOfMemory;
+        try bindPattern(bindings[i], val, child, gc);
     }
 
     var result = Value.makeNil();
     for (items[2..]) |form| {
         result = try eval(form, child, gc);
     }
+    return result;
+}
+
+/// Bind a destructuring pattern to a value.
+/// Supports: simple symbol, sequential [a b & rest], associative {:keys [a b]}.
+fn bindPattern(pattern: Value, val: Value, env_child: *Env, gc: *GC) EvalError!void {
+    if (pattern.isSymbol()) {
+        const name = gc.getString(pattern.asSymbolId());
+        env_child.set(name, val) catch return error.OutOfMemory;
+        return;
+    }
+    if (!pattern.isObj()) return error.TypeError;
+    const pat_obj = pattern.asObj();
+
+    // Sequential destructuring: [a b c & rest]
+    if (pat_obj.kind == .vector) {
+        const pats = pat_obj.data.vector.items.items;
+        const src_items = getSeqItems(val);
+        var pi: usize = 0;
+        var si: usize = 0;
+        while (pi < pats.len) : (pi += 1) {
+            if (pats[pi].isSymbol() and std.mem.eql(u8, gc.getString(pats[pi].asSymbolId()), "&")) {
+                // Rest binding: everything from si onward
+                pi += 1;
+                if (pi >= pats.len) return error.TypeError;
+                const rest_obj = gc.allocObj(.list) catch return error.OutOfMemory;
+                if (src_items) |items| {
+                    for (items[si..]) |item| {
+                        rest_obj.data.list.items.append(gc.allocator, item) catch return error.OutOfMemory;
+                    }
+                }
+                try bindPattern(pats[pi], Value.makeObj(rest_obj), env_child, gc);
+                return;
+            }
+            const v = if (src_items) |items| (if (si < items.len) items[si] else Value.makeNil()) else Value.makeNil();
+            try bindPattern(pats[pi], v, env_child, gc);
+            si += 1;
+        }
+        return;
+    }
+
+    // Associative destructuring: {:keys [a b]} or {local-name :key}
+    if (pat_obj.kind == .map) {
+        const keys = pat_obj.data.map.keys.items;
+        const vals = pat_obj.data.map.vals.items;
+        for (keys, vals) |k, v| {
+            if (k.isKeyword() and std.mem.eql(u8, gc.getString(k.asKeywordId()), "keys")) {
+                // {:keys [a b c]} — each symbol name becomes a keyword lookup
+                if (!v.isObj()) return error.TypeError;
+                const syms = switch (v.asObj().kind) {
+                    .vector => v.asObj().data.vector.items.items,
+                    .list => v.asObj().data.list.items.items,
+                    else => return error.TypeError,
+                };
+                for (syms) |sym| {
+                    if (!sym.isSymbol()) return error.TypeError;
+                    const name = gc.getString(sym.asSymbolId());
+                    const kw_id = gc.internString(name) catch return error.OutOfMemory;
+                    const lookup = mapGet(val, Value.makeKeyword(kw_id), gc);
+                    env_child.set(name, lookup) catch return error.OutOfMemory;
+                }
+            } else if (v.isKeyword()) {
+                // {local-sym :key} — bind keyword lookup to local symbol
+                if (!k.isSymbol()) return error.TypeError;
+                const name = gc.getString(k.asSymbolId());
+                const lookup = mapGet(val, v, gc);
+                env_child.set(name, lookup) catch return error.OutOfMemory;
+            }
+        }
+        return;
+    }
+    return error.TypeError;
+}
+
+fn getSeqItems(val: Value) ?[]Value {
+    if (val.isNil()) return null;
+    if (!val.isObj()) return null;
+    const obj = val.asObj();
+    return switch (obj.kind) {
+        .vector => obj.data.vector.items.items,
+        .list => obj.data.list.items.items,
+        else => null,
+    };
+}
+
+fn mapGet(map_val: Value, key: Value, gc: *GC) Value {
+    if (!map_val.isObj()) return Value.makeNil();
+    const obj = map_val.asObj();
+    if (obj.kind != .map) return Value.makeNil();
+    const semantics = @import("semantics.zig");
+    for (obj.data.map.keys.items, obj.data.map.vals.items) |k, v| {
+        if (semantics.structuralEq(k, key, gc)) return v;
+    }
+    return Value.makeNil();
+}
+
+/// (try body (catch e handler)) or (try body (catch e handler) (finally cleanup))
+fn evalTry(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    // Find catch and finally clauses
+    var catch_clause: ?[]Value = null;
+    var finally_clause: ?[]Value = null;
+    var body_end: usize = items.len;
+
+    for (items[1..], 1..) |form, idx| {
+        if (form.isObj() and form.asObj().kind == .list) {
+            const sub = form.asObj().data.list.items.items;
+            if (sub.len > 0 and sub[0].isSymbol()) {
+                const sym = gc.getString(sub[0].asSymbolId());
+                if (std.mem.eql(u8, sym, "catch")) {
+                    catch_clause = sub;
+                    if (body_end == items.len) body_end = idx;
+                } else if (std.mem.eql(u8, sym, "finally")) {
+                    finally_clause = sub;
+                    if (body_end == items.len) body_end = idx;
+                }
+            }
+        }
+    }
+
+    // Execute body
+    const result = blk: {
+        var r = Value.makeNil();
+        for (items[1..body_end]) |form| {
+            r = eval(form, env, gc) catch |err| {
+                if (err == error.ThrownException) {
+                    if (catch_clause) |cc| {
+                        // (catch ExnType e handler-body...)
+                        // We simplify: (catch e handler-body...)
+                        if (cc.len >= 3) {
+                            const child = env.createChild() catch break :blk Value.makeNil();
+                            gc.trackEnv(child) catch break :blk Value.makeNil();
+                            // cc[1] = exception binding symbol
+                            if (cc[1].isSymbol()) {
+                                const ename = gc.getString(cc[1].asSymbolId());
+                                child.set(ename, thrown_value) catch {};
+                            }
+                            var catch_result = Value.makeNil();
+                            for (cc[2..]) |cf| {
+                                catch_result = eval(cf, child, gc) catch break :blk Value.makeNil();
+                            }
+                            break :blk catch_result;
+                        }
+                        break :blk Value.makeNil();
+                    }
+                    break :blk Value.makeNil();
+                }
+                break :blk Value.makeNil();
+            };
+        }
+        break :blk r;
+    };
+
+    // Finally clause always runs
+    if (finally_clause) |fc| {
+        for (fc[1..]) |form| {
+            _ = eval(form, env, gc) catch {};
+        }
+    }
+
     return result;
 }
 
