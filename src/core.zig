@@ -104,6 +104,11 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "hue-to-trit", &substrate.hueToTritFn },
         .{ "mix64", &substrate.mix64Fn },
         .{ "xor-fingerprint", &substrate.xorFingerprintFn },
+        // Splittable RNG builtins
+        .{ "split-rng", &splitRngFn },
+        .{ "rng-next", &rngNextFn },
+        .{ "rng-split", &rngSplitFn },
+        .{ "rng-trit", &rngTritFn },
         // GF(3) builtins
         .{ "gf3-add", &substrate.gf3AddFn },
         .{ "gf3-mul", &substrate.gf3MulFn },
@@ -691,6 +696,48 @@ fn subsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 fn notFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(!args[0].isTruthy());
+}
+
+// ── Splittable RNG (SplitMix64) ──
+
+fn splitMix64(seed: u64) u64 {
+    var z = seed +% 0x9e3779b97f4a7c15;
+    z = (z ^ (z >> 30)) *% 0xbf58476d1ce4e5b9;
+    z = (z ^ (z >> 27)) *% 0x94d049bb133111eb;
+    return z ^ (z >> 31);
+}
+
+fn splitRngFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
+    const left = splitMix64(seed);
+    const right = splitMix64(left);
+    const obj = try gc.allocObj(.vector);
+    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@bitCast(@as(i48, @truncate(@as(i64, @bitCast(left)))))));
+    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@bitCast(@as(i48, @truncate(@as(i64, @bitCast(right)))))));
+    return Value.makeObj(obj);
+}
+
+fn rngNextFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
+    const next = splitMix64(seed);
+    return Value.makeInt(@bitCast(@as(i48, @truncate(@as(i64, @bitCast(next))))));
+}
+
+fn rngSplitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    return splitRngFn(args, gc, undefined);
+}
+
+fn rngTritFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
+    const h = splitMix64(seed);
+    const trit: i48 = @as(i48, @intCast(h % 3)) - 1; // -1, 0, or 1
+    return Value.makeInt(trit);
 }
 
 fn incFn(args: []Value, _: *GC, _: *Env) anyerror!Value {

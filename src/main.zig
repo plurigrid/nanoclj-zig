@@ -11,6 +11,7 @@ const color_strip = @import("color_strip.zig");
 const substrate = @import("substrate.zig");
 const bc = @import("bytecode.zig");
 const Compiler = @import("compiler.zig").Compiler;
+const disasm = @import("disasm.zig");
 
 fn nanoNow() i128 {
     var ts: std.c.timespec = undefined;
@@ -357,6 +358,40 @@ pub fn main() !void {
             compat.fileWriteAll(stdout, "\n");
             continue;
         }
+        // Disassemble: (disasm <expr>)
+        if (std.mem.startsWith(u8, line, "(disasm ") and line[line.len - 1] == ')') {
+            const inner = line[8 .. line.len - 1];
+            var reader = Reader.init(inner, &gc);
+            const form = reader.readForm() catch {
+                compat.fileWriteAll(stdout, "Error: read failed\n");
+                continue;
+            };
+            var comp = Compiler.init(allocator, &gc, null);
+            defer comp.deinit();
+            const dest = comp.allocReg() catch {
+                compat.fileWriteAll(stdout, "Error: compile failed\n");
+                continue;
+            };
+            comp.compile(form, dest) catch {
+                compat.fileWriteAll(stdout, "Error: compile failed\n");
+                continue;
+            };
+            comp.emit(bc.encode_d(.ret, dest)) catch {
+                compat.fileWriteAll(stdout, "Error: emit failed\n");
+                continue;
+            };
+            const func_def = comp.finalize() catch {
+                compat.fileWriteAll(stdout, "Error: finalize failed\n");
+                continue;
+            };
+            const listing = disasm.disassemble(func_def, &gc, allocator) catch {
+                compat.fileWriteAll(stdout, "Error: disassemble failed\n");
+                continue;
+            };
+            defer allocator.free(listing);
+            compat.fileWriteAll(stdout, listing);
+            continue;
+        }
 
         const result = rep(line, &env, &gc) catch "Error: internal error";
         // Suppress nil output from comment-only lines
@@ -390,4 +425,5 @@ test {
     _ = @import("gorj_bridge.zig");
     _ = @import("avalon_api_example.zig");
     _ = @import("gorj_mcp.zig");
+    _ = @import("disasm.zig");
 }
