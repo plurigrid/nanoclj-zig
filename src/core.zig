@@ -93,6 +93,9 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "jepsen/check", &jepsenCheckFn },
         .{ "jepsen/reset!", &jepsenResetFn },
         .{ "jepsen/history", &jepsenHistoryFn },
+        .{ "jepsen/check-unique-ids", &jepsenCheckUniqueIdsFn },
+        .{ "jepsen/check-counter", &jepsenCheckCounterFn },
+        .{ "jepsen/check-cas-register", &jepsenCheckCasRegisterFn },
         // Gay Color builtins
         .{ "color-at", &substrate.colorAtFn },
         .{ "color-seed", &substrate.colorSeedFn },
@@ -1156,8 +1159,9 @@ fn jepsenRecordFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const trit_before: i8 = if (args[2].isInt()) @intCast(@max(@as(i48, -1), @min(args[2].asInt(), 1))) else 0;
     const trit_after: i8 = if (args[3].isInt()) @intCast(@max(@as(i48, -1), @min(args[3].asInt(), 1))) else 0;
     const version_id: u64 = if (args.len > 4 and args[4].isInt()) @intCast(@max(@as(i48, 0), args[4].asInt())) else 0;
+    const detail: u32 = if (args.len > 5 and args[5].isInt()) @intCast(@max(@as(i48, 0), args[5].asInt())) else 0;
 
-    jepsen.record(op, result_kind, trit_before, trit_after, version_id, 0);
+    jepsen.record(op, result_kind, trit_before, trit_after, version_id, detail);
     return Value.makeInt(@intCast(jepsen.causal_clock));
 }
 
@@ -1217,5 +1221,63 @@ fn jepsenHistoryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         try entry_obj.data.map.vals.append(gc.allocator, Value.makeInt(@as(i48, entry.trit_after)));
         try obj.data.vector.items.append(gc.allocator, Value.makeObj(entry_obj));
     }
+    return Value.makeObj(obj);
+}
+
+/// (jepsen/check-unique-ids) → {:valid? bool :attempted N :duplicated N :min-id N :max-id N}
+fn jepsenCheckUniqueIdsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    const r = jepsen.checkUniqueIds();
+    const obj = try gc.allocObj(.map);
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("valid?")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(r.valid));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("attempted")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.attempted)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("duplicated")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.duplicated)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("min-id")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.min_id)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("max-id")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.max_id)));
+    return Value.makeObj(obj);
+}
+
+/// (jepsen/check-counter) → {:valid? bool :reads N :errors N :lower N :upper N}
+fn jepsenCheckCounterFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    const r = jepsen.checkCounter();
+    const obj = try gc.allocObj(.map);
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("valid?")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(r.valid));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("reads")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.reads)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("errors")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.errors)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("lower")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(@min(r.lower_bound, @as(u64, @intCast(std.math.maxInt(i48)))))));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("upper")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(@min(r.upper_bound, @as(u64, @intCast(std.math.maxInt(i48)))))));
+    return Value.makeObj(obj);
+}
+
+/// (jepsen/check-cas-register) → {:valid? bool :reads N :writes N :cas-ops N :stale-reads N :lost-writes N :value N}
+fn jepsenCheckCasRegisterFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    const r = jepsen.checkCasRegister();
+    const obj = try gc.allocObj(.map);
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("valid?")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(r.valid));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("reads")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.reads)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("writes")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.writes)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("cas-ops")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.cas_ops)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("stale-reads")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.stale_reads)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("lost-writes")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.lost_writes)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("value")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.register_value)));
     return Value.makeObj(obj);
 }

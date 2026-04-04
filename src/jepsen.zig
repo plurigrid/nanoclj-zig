@@ -285,6 +285,185 @@ fn addViolation(result: *CheckResult, index: usize, kind: ViolationKind, ts: u64
 }
 
 // ============================================================================
+// JEPSEN CHECKER FIXTURES (lifted from jepsen.checker)
+// ============================================================================
+
+// --- UniqueIds (jepsen.checker/unique-ids) ---
+// Checks that a generator emits unique IDs.
+// History entries with op=eval and detail used as the generated ID.
+
+pub const UniqueIdsResult = struct {
+    valid: bool,
+    attempted: usize,
+    acknowledged: usize,
+    duplicated: usize,
+    min_id: u32,
+    max_id: u32,
+};
+
+pub fn checkUniqueIds() UniqueIdsResult {
+    const hist = getHistory();
+    var seen: [HISTORY_SIZE]u32 = undefined;
+    var seen_len: usize = 0;
+    var attempted: usize = 0;
+    var min_id: u32 = std.math.maxInt(u32);
+    var max_id: u32 = 0;
+
+    for (hist) |entry| {
+        if (entry.op != .eval or entry.result != .ok) continue;
+        attempted += 1;
+        const id = entry.detail;
+        if (id < min_id) min_id = id;
+        if (id > max_id) max_id = id;
+        if (seen_len < HISTORY_SIZE) {
+            seen[seen_len] = id;
+            seen_len += 1;
+        }
+    }
+
+    // Count duplicates (O(n²) but history is bounded)
+    var dups: usize = 0;
+    for (0..seen_len) |i| {
+        for (i + 1..seen_len) |j| {
+            if (seen[i] == seen[j]) {
+                dups += 1;
+                break; // count each dup once
+            }
+        }
+    }
+
+    return .{
+        .valid = dups == 0,
+        .attempted = attempted,
+        .acknowledged = attempted,
+        .duplicated = dups,
+        .min_id = if (attempted > 0) min_id else 0,
+        .max_id = max_id,
+    };
+}
+
+// --- Counter (jepsen.checker/counter) ---
+// Monotonic counter: adds increment, reads should be between
+// lower bound (sum of :ok adds) and upper bound (sum of all attempted adds).
+// We encode: op=eval + detail=value for add, op=check + detail=read_value for read.
+
+pub const CounterResult = struct {
+    valid: bool,
+    reads: usize,
+    errors: usize,
+    lower_bound: u64,
+    upper_bound: u64,
+    final_read: u64,
+};
+
+pub fn checkCounter() CounterResult {
+    const hist = getHistory();
+    var lower: u64 = 0; // sum of confirmed adds
+    var upper: u64 = 0; // sum of all attempted adds
+    var reads: usize = 0;
+    var errors: usize = 0;
+    var final_read: u64 = 0;
+
+    for (hist) |entry| {
+        if (entry.op == .eval and entry.result == .ok) {
+            // Successful add
+            lower += entry.detail;
+            upper += entry.detail;
+        } else if (entry.op == .eval and entry.result == .fail) {
+            // Failed add — only upper bound increases
+            upper += entry.detail;
+        } else if (entry.op == .check) {
+            // Read operation
+            const read_val: u64 = entry.detail;
+            reads += 1;
+            final_read = read_val;
+            if (read_val < lower or read_val > upper) {
+                errors += 1;
+            }
+        }
+    }
+
+    return .{
+        .valid = errors == 0,
+        .reads = reads,
+        .errors = errors,
+        .lower_bound = lower,
+        .upper_bound = upper,
+        .final_read = final_read,
+    };
+}
+
+// --- CAS Register (jepsen.tests/linearizable-register) ---
+// Single register supporting read, write, CAS.
+// We check sequential consistency (not full linearizability — no Knossos).
+// History: op=eval for write (detail=new_val), op=check for read (detail=read_val).
+// CAS: we use a special encoding via version_id field (expected in low 16, new in high 16).
+
+pub const CasRegisterResult = struct {
+    valid: bool,
+    reads: usize,
+    writes: usize,
+    cas_ops: usize,
+    stale_reads: usize,     // read returned a value that was already overwritten
+    lost_writes: usize,     // write acknowledged but never observed
+    register_value: u32,    // final register state
+};
+
+pub fn checkCasRegister() CasRegisterResult {
+    const hist = getHistory();
+    var reg: u32 = 0; // current register value
+    var reads: usize = 0;
+    var writes: usize = 0;
+    var cas_ops: usize = 0;
+    var stale_reads: usize = 0;
+    var lost_writes: usize = 0;
+    var last_write: u32 = 0;
+    var write_observed = true;
+
+    for (hist) |entry| {
+        if (entry.op == .eval and entry.result == .ok) {
+            // Write operation
+            if (!write_observed and last_write != reg) {
+                lost_writes += 1;
+            }
+            reg = entry.detail;
+            last_write = entry.detail;
+            write_observed = false;
+            writes += 1;
+        } else if (entry.op == .check and entry.result == .ok) {
+            // Read operation
+            const read_val = entry.detail;
+            reads += 1;
+            if (read_val == last_write) write_observed = true;
+            if (read_val != reg and entry.trit_before == 0) {
+                // Stale read outside nemesis
+                stale_reads += 1;
+            }
+        } else if (entry.op == .eval and entry.result == .info) {
+            // CAS operation (encoded in version_id: low16=expected, high16=new)
+            const expected: u32 = @truncate(@as(u64, entry.version_id) & 0xFFFF);
+            const new_val: u32 = @truncate((@as(u64, entry.version_id) >> 16) & 0xFFFF);
+            cas_ops += 1;
+            if (reg == expected) {
+                reg = new_val;
+                last_write = new_val;
+                write_observed = false;
+            }
+        }
+    }
+
+    return .{
+        .valid = stale_reads == 0 and lost_writes == 0,
+        .reads = reads,
+        .writes = writes,
+        .cas_ops = cas_ops,
+        .stale_reads = stale_reads,
+        .lost_writes = lost_writes,
+        .register_value = reg,
+    };
+}
+
+// ============================================================================
 // TESTS
 // ============================================================================
 
@@ -349,4 +528,89 @@ test "jepsen: nemesis apply flips trit" {
     try std.testing.expectEqual(@as(i8, 1), applyNemesis(-1));
     deactivateNemesis();
     try std.testing.expectEqual(@as(i8, 1), applyNemesis(1)); // no corruption
+}
+
+// --- Checker fixture tests ---
+
+test "jepsen: unique-ids — all unique passes" {
+    resetHistory();
+    record(.eval, .ok, 0, 0, 0, 1);
+    record(.eval, .ok, 0, 0, 0, 2);
+    record(.eval, .ok, 0, 0, 0, 3);
+    record(.eval, .ok, 0, 0, 0, 4);
+    const result = checkUniqueIds();
+    try std.testing.expect(result.valid);
+    try std.testing.expectEqual(@as(usize, 4), result.attempted);
+    try std.testing.expectEqual(@as(usize, 0), result.duplicated);
+    try std.testing.expectEqual(@as(u32, 1), result.min_id);
+    try std.testing.expectEqual(@as(u32, 4), result.max_id);
+}
+
+test "jepsen: unique-ids — duplicate detected" {
+    resetHistory();
+    record(.eval, .ok, 0, 0, 0, 1);
+    record(.eval, .ok, 0, 0, 0, 2);
+    record(.eval, .ok, 0, 0, 0, 2); // dup!
+    record(.eval, .ok, 0, 0, 0, 3);
+    const result = checkUniqueIds();
+    try std.testing.expect(!result.valid);
+    try std.testing.expectEqual(@as(usize, 1), result.duplicated);
+}
+
+test "jepsen: counter — clean increments pass" {
+    resetHistory();
+    record(.eval, .ok, 0, 0, 0, 5);   // add 5
+    record(.eval, .ok, 0, 0, 0, 3);   // add 3
+    record(.check, .ok, 0, 0, 0, 8);  // read 8 (= 5+3, within bounds)
+    const result = checkCounter();
+    try std.testing.expect(result.valid);
+    try std.testing.expectEqual(@as(u64, 8), result.lower_bound);
+    try std.testing.expectEqual(@as(u64, 8), result.upper_bound);
+    try std.testing.expectEqual(@as(usize, 0), result.errors);
+}
+
+test "jepsen: counter — read out of bounds detected" {
+    resetHistory();
+    record(.eval, .ok, 0, 0, 0, 5);   // add 5
+    record(.eval, .ok, 0, 0, 0, 3);   // add 3
+    record(.check, .ok, 0, 0, 0, 10); // read 10, but upper=8
+    const result = checkCounter();
+    try std.testing.expect(!result.valid);
+    try std.testing.expectEqual(@as(usize, 1), result.errors);
+}
+
+test "jepsen: counter — failed add widens bounds" {
+    resetHistory();
+    record(.eval, .ok, 0, 0, 0, 5);    // add 5 (ok)
+    record(.eval, .fail, 0, 0, 0, 3);  // add 3 (failed)
+    record(.check, .ok, 0, 0, 0, 7);   // read 7: lower=5, upper=8, valid
+    const result = checkCounter();
+    try std.testing.expect(result.valid);
+    try std.testing.expectEqual(@as(u64, 5), result.lower_bound);
+    try std.testing.expectEqual(@as(u64, 8), result.upper_bound);
+}
+
+test "jepsen: cas-register — clean writes and reads" {
+    resetHistory();
+    record(.eval, .ok, 0, 0, 0, 42);  // write 42
+    record(.check, .ok, 0, 0, 0, 42); // read 42
+    record(.eval, .ok, 0, 0, 0, 99);  // write 99
+    record(.check, .ok, 0, 0, 0, 99); // read 99
+    const result = checkCasRegister();
+    try std.testing.expect(result.valid);
+    try std.testing.expectEqual(@as(usize, 2), result.writes);
+    try std.testing.expectEqual(@as(usize, 2), result.reads);
+    try std.testing.expectEqual(@as(u32, 99), result.register_value);
+}
+
+test "jepsen: cas-register — CAS success" {
+    resetHistory();
+    record(.eval, .ok, 0, 0, 0, 10);             // write 10
+    // CAS: expect 10, set 20 — encoded as version_id = (20 << 16) | 10
+    record(.eval, .info, 0, 0, (20 << 16) | 10, 0);
+    record(.check, .ok, 0, 0, 0, 20);            // read 20
+    const result = checkCasRegister();
+    try std.testing.expect(result.valid);
+    try std.testing.expectEqual(@as(u32, 20), result.register_value);
+    try std.testing.expectEqual(@as(usize, 1), result.cas_ops);
 }
