@@ -38,6 +38,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/mcp_tool.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "syrup", .module = syrup_mod },
+            },
         }),
     });
     b.installArtifact(mcp);

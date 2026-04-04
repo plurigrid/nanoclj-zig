@@ -62,7 +62,7 @@ pub const Compiler = struct {
         self.defs.deinit(self.allocator);
     }
 
-    fn allocReg(self: *Compiler) CompileError!u8 {
+    pub fn allocReg(self: *Compiler) CompileError!u8 {
         if (self.next_reg == 255) return error.TooManyRegisters;
         const r = self.next_reg;
         self.next_reg += 1;
@@ -80,7 +80,7 @@ pub const Compiler = struct {
         return idx;
     }
 
-    fn emit(self: *Compiler, inst: Inst) CompileError!void {
+    pub fn emit(self: *Compiler, inst: Inst) CompileError!void {
         self.code.append(self.allocator, inst) catch return error.OutOfMemory;
     }
 

@@ -9,6 +9,14 @@ const core = @import("core.zig");
 const semantics = @import("semantics.zig");
 const color_strip = @import("color_strip.zig");
 const substrate = @import("substrate.zig");
+const bc = @import("bytecode.zig");
+const Compiler = @import("compiler.zig").Compiler;
+
+fn nanoNow() i128 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC_RAW, &ts);
+    return @as(i128, ts.sec) * 1_000_000_000 + ts.nsec;
+}
 pub const llm = @import("llm.zig");
 
 /// Bounded REP: uses fuel-bounded eval from semantics.zig.
@@ -54,6 +62,97 @@ fn rep(input: []const u8, env: *Env, gc: *GC) ![]const u8 {
             .invalid_syntax => "Error: invalid syntax",
         },
     };
+}
+
+/// Bytecode REP: parse -> compile -> VM execute (uses persistent VM for globals)
+fn bcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) []const u8 {
+    var reader = Reader.init(input, gc);
+    const form = reader.readForm() catch return "Error: read failed";
+
+    var comp = Compiler.init(allocator, gc, null);
+    defer comp.deinit();
+
+    const dest = comp.allocReg() catch return "Error: too many registers";
+    comp.compile(form, dest) catch return "Error: compilation failed";
+    comp.emit(bc.encode_d(.ret, dest)) catch return "Error: emit failed";
+
+    const func_def = comp.finalize() catch return "Error: finalize failed";
+
+    const closure_obj = gc.allocObj(.bc_closure) catch return "Error: alloc failed";
+    closure_obj.data.bc_closure = .{
+        .def = func_def,
+        .upvalues = &.{},
+    };
+
+    // Reset VM state for new execution but keep globals
+    vm.frame_count = 0;
+    vm.fuel = 100_000_000;
+    @memset(&vm.stack, Value.makeNil());
+
+    const result = vm.execute(&closure_obj.data.bc_closure) catch |err| return switch (err) {
+        error.FuelExhausted => "Error: fuel exhausted",
+        error.StackOverflow => "Error: stack overflow",
+        error.TypeError => "Error: type error",
+        error.ArityError => "Error: arity error",
+        error.UndefinedGlobal => "Error: undefined global",
+    };
+
+    return printer.prStr(result, gc, true) catch "Error: print failed";
+}
+
+/// Benchmark: run bytecode VM and tree-walk on same expression, return timing
+fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator) []const u8 {
+    // Tree-walk timing
+    var reader1 = Reader.init(input, gc);
+    const form1 = reader1.readForm() catch return "Error: read failed";
+    const tw_start = nanoNow();
+    var res = semantics.Resources.initDefault();
+    const tw_result = semantics.evalBounded(form1, env, gc, &res);
+    const tw_end = nanoNow();
+    const tw_ns: u64 = @intCast(tw_end - tw_start);
+
+    const tw_str = switch (tw_result) {
+        .value => |v| printer.prStr(v, gc, true) catch "?",
+        else => "bottom/err",
+    };
+
+    // Bytecode timing
+    var reader2 = Reader.init(input, gc);
+    const form2 = reader2.readForm() catch return "Error: read failed";
+
+    var comp = Compiler.init(allocator, gc, null);
+    defer comp.deinit();
+    const dest = comp.allocReg() catch return "Error: compile failed";
+    comp.compile(form2, dest) catch return "Error: compile failed";
+    comp.emit(bc.encode_d(.ret, dest)) catch return "Error: emit failed";
+    const func_def = comp.finalize() catch return "Error: finalize failed";
+
+    const closure_obj = gc.allocObj(.bc_closure) catch return "Error: alloc failed";
+    closure_obj.data.bc_closure = .{ .def = func_def, .upvalues = &.{} };
+
+    var vm = bc.VM.init(gc, 1_000_000_000);
+    defer vm.deinit();
+
+    const bc_start = nanoNow();
+    const bc_result = vm.execute(&closure_obj.data.bc_closure) catch {
+        return "Error: VM execution failed";
+    };
+    const bc_end = nanoNow();
+    const bc_ns: u64 = @intCast(bc_end - bc_start);
+
+    const bc_str = printer.prStr(bc_result, gc, true) catch "?";
+
+    // Format result
+    var buf: [512]u8 = undefined;
+    const out = std.fmt.bufPrint(&buf, "tree-walk: {s} in {d}ms | bytecode: {s} in {d}ms | speedup: {d:.1}x", .{
+        tw_str,
+        tw_ns / 1_000_000,
+        bc_str,
+        bc_ns / 1_000_000,
+        @as(f64, @floatFromInt(tw_ns)) / @as(f64, @floatFromInt(@max(bc_ns, 1))),
+    }) catch return "Error: format failed";
+
+    return allocator.dupe(u8, out) catch "Error: alloc failed";
 }
 
 pub fn main() !void {
@@ -112,6 +211,10 @@ pub fn main() !void {
     const seed_sym = gc.internString("*seed*") catch 0;
     env.set(gc.getString(seed_sym), Value.makeInt(@bitCast(@as(u48, @truncate(world_seed))))) catch {};
 
+    // ── Bytecode VM (persistent across REPL) ──────────────────────
+    var vm = bc.VM.init(&gc, 100_000_000);
+    defer vm.deinit();
+
     // ── REPL: world=> ─────────────────────────────────────────────
     while (true) {
         // Prompt with world name
@@ -162,6 +265,23 @@ pub fn main() !void {
             continue;
         }
 
+        // Bytecode eval: (bc <expr>)
+        if (std.mem.startsWith(u8, line, "(bc ") and line[line.len - 1] == ')') {
+            const inner = line[4 .. line.len - 1];
+            const bc_result = bcRep(inner, &gc, allocator, &vm);
+            compat.fileWriteAll(stdout, bc_result);
+            compat.fileWriteAll(stdout, "\n");
+            continue;
+        }
+        // Benchmark: (bench <expr>)
+        if (std.mem.startsWith(u8, line, "(bench ") and line[line.len - 1] == ')') {
+            const inner = line[7 .. line.len - 1];
+            const bench_result = benchRep(inner, &env, &gc, allocator);
+            compat.fileWriteAll(stdout, bench_result);
+            compat.fileWriteAll(stdout, "\n");
+            continue;
+        }
+
         const result = rep(line, &env, &gc) catch "Error: internal error";
         compat.fileWriteAll(stdout, result);
         compat.fileWriteAll(stdout, "\n");
@@ -189,4 +309,5 @@ test {
     _ = @import("church_turing.zig");
     _ = @import("syrup_bridge.zig");
     _ = @import("gorj_bridge.zig");
+    _ = @import("avalon_api_example.zig");
 }

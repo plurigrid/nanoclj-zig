@@ -19,6 +19,7 @@ const ibc_denom = @import("ibc_denom.zig");
 const church_turing = @import("church_turing.zig");
 const gorj_bridge = @import("gorj_bridge.zig");
 const computable_sets = @import("computable_sets.zig");
+const avalon_api_example = @import("avalon_api_example.zig");
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
@@ -167,6 +168,17 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "weihrauch-degree", &computable_sets.weihrauchDegreeFn },
         .{ "audit-guideline", &computable_sets.auditGuidelineFn },
         .{ "audit-all-guidelines", &computable_sets.auditAllGuidelinesFn },
+        // Arithmetical hierarchy
+        .{ "classify-problem", &computable_sets.classifyProblemFn },
+        .{ "detect-morphism", &computable_sets.detectMorphismFn },
+        .{ "list-problems", &computable_sets.listProblemsFn },
+        // Möbius inversion & realizability
+        .{ "mobius", &computable_sets.mobiusBuiltinFn },
+        .{ "mertens", &computable_sets.mertensBuiltinFn },
+        .{ "moebius-boundary", &computable_sets.moebiusBoundaryFn },
+        // Avalon integration API sample spec
+        .{ "avalon-api-spec", &avalon_api_example.avalonApiSpecFn },
+        .{ "avalon-api-example", &avalon_api_example.avalonApiExampleFn },
     };
 
     inline for (builtins) |b| {

@@ -141,6 +141,7 @@ const CallFrame = struct {
     closure: *const Closure,
     ip: u32, // instruction pointer (index into code)
     base: u32, // base register index in the VM stack
+    ret_dest: u8 = 0, // caller's register to store return value
 };
 
 // ============================================================================
@@ -223,25 +224,16 @@ pub const VM = struct {
                     const d = decode_d(inst);
                     const frame = self.currentFrame();
                     const result = self.stack[frame.base + @as(u32, d)];
-                    // Read return-dest marker (stored by caller after args)
-                    const ret_dest_val = self.stack[frame.base + frame.closure.def.num_registers];
+                    const ret_dest = frame.ret_dest;
                     self.frame_count -= 1;
                     if (self.frame_count == 0) return result;
-                    // Store result in caller's dest register
-                    if (ret_dest_val.isInt()) {
-                        const caller_dest: u8 = @intCast(ret_dest_val.asInt());
-                        self.reg(caller_dest).* = result;
-                    }
+                    self.reg(ret_dest).* = result;
                 },
                 .ret_nil => {
-                    const frame = self.currentFrame();
-                    const ret_dest_val = self.stack[frame.base + frame.closure.def.num_registers];
+                    const ret_dest = self.currentFrame().ret_dest;
                     self.frame_count -= 1;
                     if (self.frame_count == 0) return Value.makeNil();
-                    if (ret_dest_val.isInt()) {
-                        const caller_dest: u8 = @intCast(ret_dest_val.asInt());
-                        self.reg(caller_dest).* = Value.makeNil();
-                    }
+                    self.reg(ret_dest).* = Value.makeNil();
                 },
                 .jump => {
                     const offset = decode_ds(inst);
@@ -388,23 +380,13 @@ pub const VM = struct {
                         self.stack[new_base + i] = self.stack[base + c + 1 + i];
                     }
 
-                    // Save return info: where to put the result
-                    // We store dest in the frame's base calculation
-                    const ret_frame = self.currentFrame();
-                    _ = ret_frame;
-
                     self.frames[self.frame_count] = .{
                         .closure = callee,
                         .ip = 0,
                         .base = new_base,
+                        .ret_dest = a, // caller's register for return value
                     };
                     self.frame_count += 1;
-
-                    // When callee returns, we need to store result in R[a]
-                    // We'll handle this in the .ret opcode by peeking at caller
-                    // For now, store dest register index in a known location
-                    // Use stack slot just before new_base as return-dest marker
-                    self.stack[new_base + callee.def.num_registers] = Value.makeInt(@intCast(a));
                 },
                 // TAIL_CALL A, B: func_reg=A, argc=B — reuse current frame
                 .tail_call => {
