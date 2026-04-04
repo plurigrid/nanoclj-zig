@@ -276,6 +276,44 @@ fn evalBoundedDefn(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     return fn_d;
 }
 
+/// (defmacro name [params] body...) — like defn but creates macro_fn
+fn evalBoundedDefmacro(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+    if (items.len < 4) return Domain.fail(.arity_error);
+    if (!items[1].isSymbol()) return Domain.fail(.type_error);
+    const sym_id = items[1].asSymbolId();
+    const name = gc.getString(sym_id);
+
+    if (!items[2].isObj()) return Domain.fail(.type_error);
+    const params_obj = items[2].asObj();
+    const params = if (params_obj.kind == .vector)
+        params_obj.data.vector.items.items
+    else if (params_obj.kind == .list)
+        params_obj.data.list.items.items
+    else
+        return Domain.fail(.type_error);
+
+    const macro_obj = gc.allocObj(.macro_fn) catch return Domain.fail(.type_error);
+    var is_variadic = false;
+    for (params) |p| {
+        if (p.isSymbol() and std.mem.eql(u8, gc.getString(p.asSymbolId()), "&")) {
+            is_variadic = true;
+            continue;
+        }
+        macro_obj.data.macro_fn.params.append(gc.allocator, p) catch return Domain.fail(.type_error);
+    }
+    macro_obj.data.macro_fn.is_variadic = is_variadic;
+    macro_obj.data.macro_fn.env = env;
+    macro_obj.data.macro_fn.name = name;
+    _ = res;
+    for (items[3..]) |body_form| {
+        macro_obj.data.macro_fn.body.append(gc.allocator, body_form) catch return Domain.fail(.type_error);
+    }
+    const val = Value.makeObj(macro_obj);
+    env.set(name, val) catch return Domain.fail(.type_error);
+    env.setById(sym_id, val) catch {};
+    return Domain.pure(val);
+}
+
 fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     if (items.len < 3) return Domain.fail(.arity_error);
     if (!items[1].isObj()) return Domain.fail(.type_error);
