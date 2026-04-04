@@ -2,6 +2,7 @@ const std = @import("std");
 const Value = @import("value.zig").Value;
 const Env = @import("env.zig").Env;
 const GC = @import("gc.zig").GC;
+const compat = @import("compat.zig");
 
 /// OKLAB color coordinate — perceptually uniform color space.
 /// L ∈ [0,1] (lightness), a ∈ [-0.5,0.5] (green-red), b ∈ [-0.5,0.5] (blue-yellow).
@@ -124,7 +125,7 @@ pub const ColorspaceRegistry = struct {
 
     pub fn init(allocator: std.mem.Allocator, core_env: *Env) !ColorspaceRegistry {
         var reg = ColorspaceRegistry{
-            .spaces = .{},
+            .spaces = compat.emptyList(Colorspace),
             .focus = atlas.user,
             .focus_name = "user",
             .allocator = allocator,

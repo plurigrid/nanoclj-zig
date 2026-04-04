@@ -2,6 +2,7 @@ const std = @import("std");
 const Value = @import("value.zig").Value;
 const semantics = @import("semantics.zig");
 const GC = @import("gc.zig").GC;
+const compat = @import("compat.zig");
 
 /// Persistent hash map using a Hash Array Mapped Trie (HAMT).
 /// Branching factor = 32, uses a bitmap to indicate which slots are populated.
@@ -185,7 +186,7 @@ fn assocNode(allocator: std.mem.Allocator, node: ?*HamtNode, key: Value, val: Va
             if (existing_hash == hash) {
                 // True collision — create collision node
                 const new_node = try allocator.create(HamtNode);
-                var entries = std.ArrayListUnmanaged(Entry){};
+                var entries = compat.emptyList(Entry);
                 try entries.append(allocator, entry);
                 try entries.append(allocator, .{ .key = key, .val = val });
                 new_node.* = .{ .collision = .{ .entries = entries, .hash = hash } };
@@ -194,7 +195,7 @@ fn assocNode(allocator: std.mem.Allocator, node: ?*HamtNode, key: Value, val: Va
             }
             // Different hashes — create a branch
             const new_branch = try allocator.create(HamtNode);
-            var children = std.ArrayListUnmanaged(*HamtNode){};
+            var children = compat.emptyList(*HamtNode);
             const bit1: u32 = @as(u32, 1) << @intCast((existing_hash >> shift) & MASK);
             const bit2: u32 = @as(u32, 1) << @intCast((hash >> shift) & MASK);
             if (bit1 == bit2) {
@@ -224,7 +225,7 @@ fn assocNode(allocator: std.mem.Allocator, node: ?*HamtNode, key: Value, val: Va
             const bit: u32 = @as(u32, 1) << @intCast((hash >> shift) & MASK);
             const idx = branch.compressedIndex(bit);
             const new_node = try allocator.create(HamtNode);
-            var new_children = std.ArrayListUnmanaged(*HamtNode){};
+            var new_children = compat.emptyList(*HamtNode);
             try new_children.appendSlice(allocator, branch.children.items);
             if (branch.bitmap & bit != 0) {
                 // Existing slot — recurse
@@ -243,7 +244,7 @@ fn assocNode(allocator: std.mem.Allocator, node: ?*HamtNode, key: Value, val: Va
         .collision => |coll| {
             if (coll.hash == hash) {
                 const new_node = try allocator.create(HamtNode);
-                var entries = std.ArrayListUnmanaged(Entry){};
+                var entries = compat.emptyList(Entry);
                 try entries.appendSlice(allocator, coll.entries.items);
                 // Check for existing key
                 for (entries.items, 0..) |entry, i| {
@@ -290,7 +291,7 @@ fn dissocNode(allocator: std.mem.Allocator, node: *HamtNode, key: Value, hash: u
                     }
                 }
                 const new_node = try allocator.create(HamtNode);
-                var new_children = std.ArrayListUnmanaged(*HamtNode){};
+                var new_children = compat.emptyList(*HamtNode);
                 for (branch.children.items, 0..) |child, i| {
                     if (i != idx) try new_children.append(allocator, child);
                 }
@@ -298,7 +299,7 @@ fn dissocNode(allocator: std.mem.Allocator, node: *HamtNode, key: Value, hash: u
                 return new_node;
             } else {
                 const new_node = try allocator.create(HamtNode);
-                var new_children = std.ArrayListUnmanaged(*HamtNode){};
+                var new_children = compat.emptyList(*HamtNode);
                 try new_children.appendSlice(allocator, branch.children.items);
                 new_children.items[idx] = new_child.?;
                 new_node.* = .{ .branch = .{ .bitmap = branch.bitmap, .children = new_children } };
@@ -307,7 +308,7 @@ fn dissocNode(allocator: std.mem.Allocator, node: *HamtNode, key: Value, hash: u
         },
         .collision => |coll| {
             const new_node = try allocator.create(HamtNode);
-            var entries = std.ArrayListUnmanaged(Entry){};
+            var entries = compat.emptyList(Entry);
             for (coll.entries.items) |entry| {
                 if (!semantics.structuralEq(entry.key, key, gc)) {
                     try entries.append(allocator, entry);
