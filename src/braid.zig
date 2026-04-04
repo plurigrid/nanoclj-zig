@@ -50,7 +50,7 @@ pub const Version = struct {
 };
 
 /// SplitMix64 hash of form string → version ID
-fn hashVersion(form: []const u8, parent: ?VersionId) VersionId {
+pub fn hashVersion(form: []const u8, parent: ?VersionId) VersionId {
     var state: u64 = 0x9e3779b97f4a7c15;
     for (form) |byte| {
         state +%= @as(u64, byte) *% 0xbf58476d1ce4e5b9;

@@ -234,13 +234,39 @@ pub fn samplesToTritTicks(samples: u64, sample_rate: u32) u64 {
 /// Trit-tick duration struct for accumulating post-float time
 pub const TritTime = struct {
     ticks: u64 = 0,
+    glimpses: u64 = 0, // sub-tick cognitive microstructure
 
     pub fn addTicks(self: *TritTime, n: u64) void {
         self.ticks += n;
     }
 
+    pub fn addGlimpses(self: *TritTime, n: u64) void {
+        self.glimpses += n;
+        // Carry: 1069 glimpses = 1 trit-tick
+        const carry = self.glimpses / GLIMPSES_PER_TRIT_TICK;
+        self.glimpses %= GLIMPSES_PER_TRIT_TICK;
+        self.ticks += carry;
+    }
+
     pub fn phase(self: *const TritTime) i8 {
         return tritPhase(self.ticks);
+    }
+
+    /// Glimpse phase — drifts against tick phase because 1069 ≡ 2 mod 3
+    pub fn glimpsePhase(self: *const TritTime) i8 {
+        return tritPhase(self.glimpses);
+    }
+
+    /// Cognitive jerk indicator: alignment between tick phase and glimpse phase
+    /// 0 = aligned (flow), 1 = leading (anticipation), -1 = lagging (drag)
+    pub fn jerk(self: *const TritTime) i8 {
+        const tp = self.phase();
+        const gp = self.glimpsePhase();
+        const diff = @as(i16, tp) - @as(i16, gp);
+        const m = @mod(diff + 3, 3);
+        if (m == 0) return 0; // flow
+        if (m == 1) return 1; // anticipation
+        return -1; // drag
     }
 
     /// Which trit-cycle are we in? (0-indexed)
@@ -253,6 +279,11 @@ pub const TritTime = struct {
         return self.ticks / 3;
     }
 
+    /// Total glimpses (ticks × 1069 + sub-tick glimpses)
+    pub fn totalGlimpses(self: *const TritTime) u64 {
+        return self.ticks * GLIMPSES_PER_TRIT_TICK + self.glimpses;
+    }
+
     /// Seconds as integer + remainder trit-ticks
     pub fn asSeconds(self: *const TritTime) struct { secs: u64, remainder: u64 } {
         return .{
@@ -261,14 +292,82 @@ pub const TritTime = struct {
         };
     }
 
-    /// Phase-aligned equality: two times are "trit-equal" if same tick AND same phase
-    pub fn tritEql(a: TritTime, b: TritTime) bool {
-        return a.ticks == b.ticks;
-    }
-
     /// Phase-congruent: same phase but possibly different tick count
     pub fn phaseCongruent(a: TritTime, b: TritTime) bool {
         return a.ticks % 3 == b.ticks % 3;
+    }
+};
+
+// ============================================================================
+// P-ADIC VALUATION: Ultrametric depth for multi-prime time lenses
+// ============================================================================
+//
+// v_p(n) = highest power of prime p dividing n.
+// Each prime gives a different "time lens" — a different notion of which
+// ticks are "close" in the ultrametric topology.
+//
+// The flick factorization 2⁹ × 3² × 5⁵ × 7² reveals four natural lenses:
+//   v₂: binary depth (even/odd, power-of-2 landmarks at 2,4,8,16,...)
+//   v₃: trit depth (the GF(3) layer, landmarks at 9,27,81,243,...)
+//   v₅: quint depth (decimal/pentatonic landmarks at 25,125,625,...)
+//   v₇: sept depth (weekly/harmonic landmarks at 49,343,...)
+//
+// The 1069-adic valuation is special: since 1069 is prime and coprime to
+// all media rates, v₁₀₆₉(n) = 0 for all n < 1069. The first 1069-adic
+// landmark IS the glimpse boundary. No tick before it resonates in the
+// cognitive prime — this is why flow state requires accumulation.
+//
+// Multi-p-adic "depth vector" d(n) = (v₂(n), v₃(n), v₅(n), v₇(n), v₁₀₆₉(n))
+// gives a 5-dimensional ultrametric fingerprint of each moment in time.
+// Moments with matching depth vectors are "p-adically congruent" — they
+// feel the same across all time lenses simultaneously.
+
+/// p-adic valuation: highest power of p dividing n
+pub fn padicVal(p: u64, n: u64) u32 {
+    if (n == 0 or p < 2) return 0;
+    var v: u32 = 0;
+    var m = n;
+    while (m % p == 0) : (v += 1) {
+        m /= p;
+    }
+    return v;
+}
+
+/// The canonical primes for the trit-tick ultrametric tower
+pub const TOWER_PRIMES = [_]u64{ 2, 3, 5, 7, 1069 };
+
+/// Multi-p-adic depth vector: (v2, v3, v5, v7, v1069)
+pub const PadicDepth = struct {
+    v: [5]u32 = .{ 0, 0, 0, 0, 0 },
+
+    pub fn of(n: u64) PadicDepth {
+        var d: PadicDepth = .{};
+        for (TOWER_PRIMES, 0..) |p, i| {
+            d.v[i] = padicVal(p, n);
+        }
+        return d;
+    }
+
+    /// Total depth = sum of all valuations (crude "importance" measure)
+    pub fn total(self: *const PadicDepth) u32 {
+        var s: u32 = 0;
+        for (self.v) |vi| s += vi;
+        return s;
+    }
+
+    /// Two moments are ultrametrically congruent if all valuations match
+    pub fn congruent(a: PadicDepth, b: PadicDepth) bool {
+        return std.mem.eql(u32, &a.v, &b.v);
+    }
+
+    /// Ultrametric distance: max prime where valuations differ
+    /// Returns the index into TOWER_PRIMES, or 5 if identical
+    pub fn distance(a: PadicDepth, b: PadicDepth) u32 {
+        var max_diff: u32 = 5; // identical
+        for (a.v, b.v, 0..) |va, vb, i| {
+            if (va != vb) max_diff = @intCast(i);
+        }
+        return max_diff;
     }
 };
 

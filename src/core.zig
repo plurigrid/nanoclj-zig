@@ -17,6 +17,7 @@ const http_fetch = @import("http_fetch.zig");
 const peval_mod = @import("peval.zig");
 const ibc_denom = @import("ibc_denom.zig");
 const church_turing = @import("church_turing.zig");
+const gorj_bridge = @import("gorj_bridge.zig");
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
@@ -71,6 +72,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "samples->trit-ticks", &samplesToTritTicksFn },
         .{ "trit-ticks-per-sec", &tritTicksPerSecFn },
         .{ "flicks-per-sec", &flicksPerSecFn },
+        .{ "glimpses-per-tick", &glimpsesPerTickFn },
+        .{ "cognitive-jerk", &cognitiveJerkFn },
+        .{ "p-adic", &padicFn },
+        .{ "p-adic-depth", &padicDepthFn },
         // Gay Color builtins
         .{ "color-at", &substrate.colorAtFn },
         .{ "color-seed", &substrate.colorSeedFn },
@@ -147,6 +152,12 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "semi-decide", &church_turing.semiDecideFn },
         .{ "halting-witness", &church_turing.haltingWitnessFn },
         .{ "primitive-recursive", &church_turing.primitiveRecursiveFn },
+        // gorj bridge (nanoclj-zig ↔ gorj relay via Syrup + Braid)
+        .{ "gorj-eval", &gorj_bridge.gorjEvalFn },
+        .{ "gorj-encode", &gorj_bridge.gorjEncodeFn },
+        .{ "gorj-decode", &gorj_bridge.gorjDecodeFn },
+        .{ "gorj-version", &gorj_bridge.gorjVersionFn },
+        .{ "gorj-tools", &gorj_bridge.gorjToolsFn },
     };
 
     inline for (builtins) |b| {
@@ -887,4 +898,46 @@ fn tritTicksPerSecFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 fn flicksPerSecFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     return Value.makeInt(@intCast(transitivity.FLICK));
+}
+
+/// (glimpses-per-tick) → 1069
+fn glimpsesPerTickFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 0) return error.ArityError;
+    return Value.makeInt(1069);
+}
+
+/// (cognitive-jerk tick-count glimpse-count) → -1, 0, or 1
+/// Measures phase alignment between objective time (ticks) and
+/// subjective microstructure (glimpses).
+/// 0 = flow (aligned), 1 = anticipation (leading), -1 = drag (lagging)
+fn cognitiveJerkFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const ticks: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    const glimpses: u64 = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    var tt = transitivity.TritTime{ .ticks = ticks, .glimpses = glimpses };
+    _ = &tt;
+    return Value.makeInt(@as(i48, tt.jerk()));
+}
+
+/// (p-adic p n) → v_p(n), the p-adic valuation (highest power of p dividing n)
+fn padicFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const p: u64 = @intCast(@max(@as(i48, 2), args[0].asInt()));
+    const n: u64 = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    return Value.makeInt(@intCast(transitivity.padicVal(p, n)));
+}
+
+/// (p-adic-depth n) → (v2 v3 v5 v7 v1069) — multi-prime ultrametric fingerprint
+fn padicDepthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const n: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    const d = transitivity.PadicDepth.of(n);
+    const new = try gc.allocObj(.list);
+    for (d.v) |vi| {
+        try new.data.list.items.append(gc.allocator, Value.makeInt(@intCast(vi)));
+    }
+    return Value.makeObj(new);
 }
