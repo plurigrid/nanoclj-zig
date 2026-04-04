@@ -878,6 +878,58 @@ pub fn morphismGraphFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 // ============================================================================
+// GORARD ORDINAL TOWER
+// ============================================================================
+
+const GorardEntry = struct { index: u8, ordinal: []const u8, system: []const u8, causal: []const u8, trit: i48 };
+
+const gorard_tower = [_]GorardEntry{
+    .{ .index = 0, .ordinal = "omega", .system = "RCA_0", .causal = "finite causal diamond", .trit = 1 },
+    .{ .index = 1, .ordinal = "omega^omega", .system = "RCA_0", .causal = "primitive recursive causal depth", .trit = -1 },
+    .{ .index = 2, .ordinal = "omega^omega^omega", .system = "WKL_0", .causal = "compactness (infinite branch accumulation)", .trit = 1 },
+    .{ .index = 3, .ordinal = "epsilon_0", .system = "ACA_0", .causal = "Peano-complete causal invariance (Gentzen)", .trit = -1 },
+    .{ .index = 4, .ordinal = "Gamma_0", .system = "ATR_0", .causal = "predicative transfinite induction along causal WO", .trit = 1 },
+    .{ .index = 5, .ordinal = "psi(Omega_omega)", .system = "Pi11-CA_0", .causal = "impredicative causal graph minor theorem", .trit = -1 },
+    .{ .index = 6, .ordinal = "theta(Omega^omega*omega)", .system = "beyond", .causal = "TREE-scale causal branching (Friedman)", .trit = 0 },
+};
+
+/// (gorard-tower) → vector of {:index n :ordinal str :system str :causal str :trit n}
+pub fn gorardTowerFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    const obj = try gc.allocObj(.vector);
+    for (&gorard_tower) |*level| {
+        const entry = try gc.allocObj(.map);
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "index"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(level.index)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "ordinal"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(level.ordinal)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "system"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(level.system)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "causal"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(level.causal)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeInt(level.trit));
+        try obj.data.vector.items.append(gc.allocator, Value.makeObj(entry));
+    }
+    return Value.makeObj(obj);
+}
+
+/// (gorard-trit-sum) → GF(3) conservation check of the tower
+pub fn gorardTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    var sum: i48 = 0;
+    for (&gorard_tower) |*level| {
+        sum += level.trit;
+    }
+    return Value.makeInt(@mod(sum + 300, 3));
+}
+
+// ============================================================================
 // DIOPHANTINE EQUATIONS
 // ============================================================================
 

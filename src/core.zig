@@ -178,6 +178,9 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "moebius-boundary", &computable_sets.moebiusBoundaryFn },
         .{ "flip-primes", &computable_sets.flipPrimesFn },
         .{ "morphism-graph", &computable_sets.morphismGraphFn },
+        // Gorard ordinal tower
+        .{ "gorard-tower", &computable_sets.gorardTowerFn },
+        .{ "gorard-trit-sum", &computable_sets.gorardTritSumFn },
         // Diophantine equations
         .{ "pythagorean-triples", &computable_sets.pythagoreanTriplesFn },
         .{ "pell-solve", &computable_sets.pellSolveFn },
