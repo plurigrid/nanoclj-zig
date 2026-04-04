@@ -1360,6 +1360,11 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
             if (std.mem.eql(u8, marker, "__constantly__")) {
                 return bound[1];
             }
+            // SRFI-171 transducer dispatch (sector.zig Tier 5)
+            const sector = @import("sector.zig");
+            if (sector.dispatchTransducer(marker, bound, @constCast(args), gc, caller_env)) |result| {
+                return result catch return error.EvalFailed;
+            }
         }
 
         // Normal partial: prepend bound args

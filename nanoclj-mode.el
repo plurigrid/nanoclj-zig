@@ -172,9 +172,10 @@
   (setq-local comment-end "")
   (setq-local indent-tabs-mode nil)
   (add-hook 'after-change-functions
-            (lambda (_beg _end _len) (nanoclj--rainbow-delimiters))
+            (lambda (_beg _end _len)
+              (ignore-errors (nanoclj--rainbow-delimiters)))
             nil t)
-  (nanoclj--rainbow-delimiters))
+  (ignore-errors (nanoclj--rainbow-delimiters)))
 
 ;; Override parent if clojure-mode is available
 (when (fboundp 'clojure-mode)

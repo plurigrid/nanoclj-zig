@@ -375,6 +375,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Regex
         .{ "re-pattern", &rePatternFn },
         .{ "re-matches", &reMatchesFn },
+        .{ "re-seq", &reSeqFn },
         // Nested map ops
         .{ "get-in", &getInFn },
         .{ "assoc-in", &assocInFn },
@@ -511,11 +512,6 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "force", &forceFn },
         .{ "add-watch", &addWatchFn },
         .{ "remove-watch", &removeWatchFn },
-        // Regex
-        .{ "re-pattern", &rePatternFn },
-        .{ "re-find", &reFindFn },
-        .{ "re-matches", &reMatchesFn },
-        .{ "re-seq", &reSeqFn },
         // Dense f64 (Neanderthal-compatible)
         .{ "fv", &fvFn },
         .{ "fv-get", &fvGetFn },
@@ -2601,12 +2597,11 @@ fn bitShiftRightFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 fn reFindFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
-    const needle = gc.getString(args[0].asStringId());
-    const s = gc.getString(args[1].asStringId());
-    if (simd_str.findSubstring(s, needle)) |idx| {
-        return Value.makeString(try gc.internString(s[idx .. idx + needle.len]));
-    }
-    return Value.makeNil();
+    const pat_str = gc.getString(args[0].asStringId());
+    const text = gc.getString(args[1].asStringId());
+    const re = regex.Regex.init(pat_str);
+    const result = re.find(text) orelse return Value.makeNil();
+    return Value.makeString(try gc.internString(result));
 }
 
 fn countStrFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
@@ -3150,13 +3145,27 @@ fn rePatternFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 fn reMatchesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
-    const pat = gc.getString(args[0].asStringId());
-    const input = gc.getString(args[1].asStringId());
-    const result = pat_mod.matchWith(.thompson, pat, input);
-    if (result.matched and result.consumed == input.len) {
-        return args[1]; // full match
+    const pat_str = gc.getString(args[0].asStringId());
+    const text = gc.getString(args[1].asStringId());
+    const re = regex.Regex.init(pat_str);
+    return if (re.matches(text)) args[1] else Value.makeNil();
+}
+
+/// (re-seq pattern text) — return list of all non-overlapping matches
+fn reSeqFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    const pat_str = gc.getString(args[0].asStringId());
+    const text = gc.getString(args[1].asStringId());
+    const re = regex.Regex.init(pat_str);
+    const matches = re.findAll(text, gc.allocator) catch return error.OutOfMemory;
+    defer gc.allocator.free(matches);
+    const result = try gc.allocObj(.list);
+    for (matches) |m| {
+        const id = try gc.internString(m);
+        try result.data.list.items.append(gc.allocator, Value.makeString(id));
     }
-    return Value.makeNil();
+    return Value.makeObj(result);
 }
 
 // ============================================================================
@@ -4370,3 +4379,4 @@ fn traceSitesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     }
     return Value.makeObj(result);
 }
+

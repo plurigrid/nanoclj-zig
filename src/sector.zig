@@ -647,6 +647,34 @@ pub const SECTOR_BUILTINS = [_]BuiltinEntry{
     .{ .name = "assoc", .func = &t3_assoc, .tier = .collections },
     // ── Tier 4: SRFI-41/158/196 laziness ──
     .{ .name = "range", .func = &t4_range, .tier = .laziness },
+    // ── Tier 5: SRFI-171 transducers ──
+    .{ .name = "tmap", .func = &t5_tmap, .tier = .transducers },
+    .{ .name = "tfilter", .func = &t5_tfilter, .tier = .transducers },
+    .{ .name = "tremove", .func = &t5_tremove, .tier = .transducers },
+    .{ .name = "tfilter-map", .func = &t5_tfilter_map, .tier = .transducers },
+    .{ .name = "treplace", .func = &t5_treplace, .tier = .transducers },
+    .{ .name = "tdrop", .func = &t5_tdrop, .tier = .transducers },
+    .{ .name = "ttake", .func = &t5_ttake, .tier = .transducers },
+    .{ .name = "tdrop-while", .func = &t5_tdrop_while, .tier = .transducers },
+    .{ .name = "ttake-while", .func = &t5_ttake_while, .tier = .transducers },
+    .{ .name = "tconcatenate", .func = &t5_tconcatenate, .tier = .transducers },
+    .{ .name = "tappend-map", .func = &t5_tappend_map, .tier = .transducers },
+    .{ .name = "tflatten", .func = &t5_tflatten, .tier = .transducers },
+    .{ .name = "tdelete-neighbor-duplicates", .func = &t5_tdelete_neighbor_dups, .tier = .transducers },
+    .{ .name = "tdelete-duplicates", .func = &t5_tdelete_dups, .tier = .transducers },
+    .{ .name = "tsegment", .func = &t5_tsegment, .tier = .transducers },
+    .{ .name = "tpartition", .func = &t5_tpartition, .tier = .transducers },
+    .{ .name = "tadd-between", .func = &t5_tadd_between, .tier = .transducers },
+    .{ .name = "tenumerate", .func = &t5_tenumerate, .tier = .transducers },
+    .{ .name = "tlog", .func = &t5_tlog, .tier = .transducers },
+    .{ .name = "rcons", .func = &t5_rcons, .tier = .transducers },
+    .{ .name = "reverse-rcons", .func = &t5_reverse_rcons, .tier = .transducers },
+    .{ .name = "rcount", .func = &t5_rcount, .tier = .transducers },
+    .{ .name = "rany", .func = &t5_rany, .tier = .transducers },
+    .{ .name = "revery", .func = &t5_revery, .tier = .transducers },
+    .{ .name = "ensure-reduced", .func = &t5_ensure_reduced, .tier = .transducers },
+    .{ .name = "preserving-reduced", .func = &t5_preserving_reduced, .tier = .transducers },
+    .{ .name = "list-transduce", .func = &t5_list_transduce, .tier = .transducers },
 };
 
 pub fn initTier(env: *Env, gc: *GC, max_tier: Tier) !u16 {
@@ -822,6 +850,615 @@ pub const METACIRCULAR_EVAL =
     \\           (pairlis (first (rest f)) args env))
     \\    nil)))
 ;
+
+// ────────────────────────────────────────────────────────────────────
+// Tier 5: SRFI-171 — Transducers
+// ────────────────────────────────────────────────────────────────────
+// A transducer is a partial_fn with func=nil, bound_args[0]=keyword marker.
+// When called with (reducer), it creates a reducing-fn partial_fn.
+// The reducing-fn dispatch is handled in eval.zig's partial_fn block.
+
+fn makeTransducer(gc: *GC, marker: []const u8, captured: []const Value) !Value {
+    const obj = try gc.allocObj(.partial_fn);
+    obj.data.partial_fn.func = Value.makeNil();
+    const mk = Value.makeKeyword(try gc.internString(marker));
+    try obj.data.partial_fn.bound_args.append(gc.allocator, mk);
+    for (captured) |c| try obj.data.partial_fn.bound_args.append(gc.allocator, c);
+    return Value.makeObj(obj);
+}
+
+fn makeReducer(gc: *GC, marker: []const u8, downstream: Value, captured: []const Value) !Value {
+    const obj = try gc.allocObj(.partial_fn);
+    obj.data.partial_fn.func = Value.makeNil();
+    const mk = Value.makeKeyword(try gc.internString(marker));
+    try obj.data.partial_fn.bound_args.append(gc.allocator, mk);
+    try obj.data.partial_fn.bound_args.append(gc.allocator, downstream);
+    for (captured) |c| try obj.data.partial_fn.bound_args.append(gc.allocator, c);
+    return Value.makeObj(obj);
+}
+
+fn makeStateAtom(gc: *GC, init: Value) !Value {
+    const obj = try gc.allocObj(.atom);
+    obj.data.atom.val = init;
+    return Value.makeObj(obj);
+}
+
+pub fn isReduced(v: Value) bool {
+    if (!v.isObj()) return false;
+    const obj = v.asObj();
+    return obj.kind == .vector and obj.is_transient and obj.data.vector.items.items.len == 1;
+}
+
+pub fn derefReduced(v: Value) Value {
+    return v.asObj().data.vector.items.items[0];
+}
+
+pub fn ensureReduced(v: Value, gc: *GC) !Value {
+    if (isReduced(v)) return v;
+    const obj = try gc.allocObj(.vector);
+    obj.is_transient = true;
+    try obj.data.vector.items.append(gc.allocator, v);
+    return Value.makeObj(obj);
+}
+
+// ── Stateless transducer factories ──
+
+fn t5_tmap(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__tmap__", args[0..1]);
+}
+
+fn t5_tfilter(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__tfilter__", args[0..1]);
+}
+
+fn t5_tremove(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__tremove__", args[0..1]);
+}
+
+fn t5_tfilter_map(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__tfilter_map__", args[0..1]);
+}
+
+fn t5_treplace(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__treplace__", args[0..1]);
+}
+
+// ── Stateful transducer factories ──
+
+fn t5_tdrop(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isInt()) return error.ArityError;
+    return makeTransducer(gc, "__tdrop__", args[0..1]);
+}
+
+fn t5_ttake(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isInt()) return error.ArityError;
+    return makeTransducer(gc, "__ttake__", args[0..1]);
+}
+
+fn t5_tdrop_while(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__tdrop_while__", args[0..1]);
+}
+
+fn t5_ttake_while(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__ttake_while__", args[0..1]);
+}
+
+fn t5_tconcatenate(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return makeTransducer(gc, "__tconcatenate__", &.{});
+    if (args.len == 1) return makeReducer(gc, "__tconcatenate_rf__", args[0], &.{});
+    return error.ArityError;
+}
+
+fn t5_tappend_map(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__tappend_map__", args[0..1]);
+}
+
+fn t5_tflatten(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return makeTransducer(gc, "__tflatten__", &.{});
+    if (args.len == 1) return makeReducer(gc, "__tflatten_rf__", args[0], &.{});
+    return error.ArityError;
+}
+
+fn t5_tdelete_neighbor_dups(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return makeTransducer(gc, "__tdedup__", &.{});
+    return error.ArityError;
+}
+
+fn t5_tdelete_dups(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return makeTransducer(gc, "__tdistinct__", &.{});
+    return error.ArityError;
+}
+
+fn t5_tsegment(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isInt()) return error.ArityError;
+    return makeTransducer(gc, "__tsegment__", args[0..1]);
+}
+
+fn t5_tpartition(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__tpartition__", args[0..1]);
+}
+
+fn t5_tadd_between(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__tadd_between__", args[0..1]);
+}
+
+fn t5_tenumerate(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return makeTransducer(gc, "__tenumerate__", &.{});
+    return error.ArityError;
+}
+
+fn t5_tlog(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return makeTransducer(gc, "__tlog__", &.{});
+    return error.ArityError;
+}
+
+// ── Reducers ──
+
+fn t5_rcons(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    return switch (args.len) {
+        0 => Value.makeObj(try gc.allocObj(.list)),
+        1 => t1_reverse(args, gc, undefined),
+        2 => t1_conj(@constCast(&[_]Value{ args[0], args[1] }), gc, undefined),
+        else => error.ArityError,
+    };
+}
+
+fn t5_reverse_rcons(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    return switch (args.len) {
+        0 => Value.makeObj(try gc.allocObj(.list)),
+        1 => args[0],
+        2 => {
+            const new = try gc.allocObj(.list);
+            if (args[0].isObj()) {
+                const src = args[0].asObj();
+                if (src.kind == .list) {
+                    for (src.data.list.items.items) |item| try new.data.list.items.append(gc.allocator, item);
+                }
+            }
+            try new.data.list.items.append(gc.allocator, args[1]);
+            return Value.makeObj(new);
+        },
+        else => error.ArityError,
+    };
+}
+
+fn t5_rcount(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    return switch (args.len) {
+        0 => Value.makeInt(0),
+        1 => args[0],
+        2 => Value.makeInt((if (args[0].isInt()) args[0].asInt() else @as(i48, 0)) + 1),
+        else => error.ArityError,
+    };
+}
+
+fn t5_rany(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__rany__", args[0..1]);
+}
+
+fn t5_revery(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__revery__", args[0..1]);
+}
+
+fn t5_ensure_reduced(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return ensureReduced(args[0], gc);
+}
+
+fn t5_preserving_reduced(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return makeTransducer(gc, "__preserving_reduced__", args[0..1]);
+}
+
+fn t5_list_transduce(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    return t5_transduce(args, gc, env);
+}
+
+fn t5_transduce(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 3) return error.ArityError;
+    if (args.len == 3) {
+        const init = try eval_mod.apply(args[1], @constCast(&[_]Value{}), env, gc);
+        var new_args = [_]Value{ args[0], args[1], init, args[2] };
+        return t5_transduce(&new_args, gc, env);
+    }
+    var xf_args = [_]Value{args[1]};
+    const rf = try eval_mod.apply(args[0], &xf_args, env, gc);
+    var acc = args[2];
+    if (args[3].isNil()) {
+        // completion
+        var c_args = [_]Value{acc};
+        return eval_mod.apply(rf, &c_args, env, gc);
+    }
+    if (!args[3].isObj()) return error.TypeError;
+    const obj = args[3].asObj();
+    const items = switch (obj.kind) {
+        .list => obj.data.list.items.items,
+        .vector => obj.data.vector.items.items,
+        else => return error.TypeError,
+    };
+    for (items) |item| {
+        var step_args = [_]Value{ acc, item };
+        acc = try eval_mod.apply(rf, &step_args, env, gc);
+        if (isReduced(acc)) {
+            acc = derefReduced(acc);
+            break;
+        }
+    }
+    var complete_args = [_]Value{acc};
+    return eval_mod.apply(rf, &complete_args, env, gc);
+}
+
+// ── Transducer dispatch (called from eval.zig partial_fn block) ──
+// When a transducer partial_fn is called with (reducer), create the rf.
+// When an rf partial_fn is called with args, execute the step/init/complete.
+
+pub fn dispatchTransducer(marker: []const u8, bound: []Value, args: []const Value, gc: *GC, env: *Env) ?anyerror!Value {
+    // Factory dispatch: transducer called with (reducer) → create rf
+    if (std.mem.eql(u8, marker, "__tmap__") and args.len == 1) {
+        return makeReducer(gc, "__tmap_rf__", args[0], bound[1..]);
+    }
+    if (std.mem.eql(u8, marker, "__tfilter__") and args.len == 1) {
+        return makeReducer(gc, "__tfilter_rf__", args[0], bound[1..]);
+    }
+    if (std.mem.eql(u8, marker, "__tremove__") and args.len == 1) {
+        return makeReducer(gc, "__tremove_rf__", args[0], bound[1..]);
+    }
+    if (std.mem.eql(u8, marker, "__tfilter_map__") and args.len == 1) {
+        return makeReducer(gc, "__tfilter_map_rf__", args[0], bound[1..]);
+    }
+    if (std.mem.eql(u8, marker, "__treplace__") and args.len == 1) {
+        return makeReducer(gc, "__treplace_rf__", args[0], bound[1..]);
+    }
+    if (std.mem.eql(u8, marker, "__tdrop__") and args.len == 1) {
+        const state = makeStateAtom(gc, bound[1]) catch return error.OutOfMemory;
+        return makeReducer(gc, "__tdrop_rf__", args[0], &.{state}) catch error.OutOfMemory;
+    }
+    if (std.mem.eql(u8, marker, "__ttake__") and args.len == 1) {
+        const state = makeStateAtom(gc, bound[1]) catch return error.OutOfMemory;
+        return makeReducer(gc, "__ttake_rf__", args[0], &.{state}) catch error.OutOfMemory;
+    }
+    if (std.mem.eql(u8, marker, "__tdrop_while__") and args.len == 1) {
+        const state = makeStateAtom(gc, Value.makeBool(true)) catch return error.OutOfMemory;
+        return makeReducer(gc, "__tdrop_while_rf__", args[0], &.{ bound[1], state }) catch error.OutOfMemory;
+    }
+    if (std.mem.eql(u8, marker, "__ttake_while__") and args.len == 1) {
+        return makeReducer(gc, "__ttake_while_rf__", args[0], bound[1..]);
+    }
+    if (std.mem.eql(u8, marker, "__tconcatenate__") and args.len == 1) {
+        return makeReducer(gc, "__tconcatenate_rf__", args[0], &.{}) catch error.OutOfMemory;
+    }
+    if (std.mem.eql(u8, marker, "__tappend_map__") and args.len == 1) {
+        return makeReducer(gc, "__tappend_map_rf__", args[0], bound[1..]);
+    }
+    if (std.mem.eql(u8, marker, "__tdedup__") and args.len == 1) {
+        const sentinel = Value.makeKeyword(gc.internString("__none__") catch return error.OutOfMemory);
+        const state = makeStateAtom(gc, sentinel) catch return error.OutOfMemory;
+        return makeReducer(gc, "__tdedup_rf__", args[0], &.{state}) catch error.OutOfMemory;
+    }
+    if (std.mem.eql(u8, marker, "__tdistinct__") and args.len == 1) {
+        const seen = gc.allocObj(.set) catch return error.OutOfMemory;
+        const state = makeStateAtom(gc, Value.makeObj(seen)) catch return error.OutOfMemory;
+        return makeReducer(gc, "__tdistinct_rf__", args[0], &.{state}) catch error.OutOfMemory;
+    }
+    if (std.mem.eql(u8, marker, "__tsegment__") and args.len == 1) {
+        const buf = gc.allocObj(.vector) catch return error.OutOfMemory;
+        const state = makeStateAtom(gc, Value.makeObj(buf)) catch return error.OutOfMemory;
+        return makeReducer(gc, "__tsegment_rf__", args[0], &.{ bound[1], state }) catch error.OutOfMemory;
+    }
+    if (std.mem.eql(u8, marker, "__tadd_between__") and args.len == 1) {
+        const state = makeStateAtom(gc, Value.makeBool(true)) catch return error.OutOfMemory;
+        return makeReducer(gc, "__tadd_between_rf__", args[0], &.{ bound[1], state }) catch error.OutOfMemory;
+    }
+    if (std.mem.eql(u8, marker, "__tenumerate__") and args.len == 1) {
+        const state = makeStateAtom(gc, Value.makeInt(0)) catch return error.OutOfMemory;
+        return makeReducer(gc, "__tenumerate_rf__", args[0], &.{state}) catch error.OutOfMemory;
+    }
+
+    // Reducer dispatch: rf called with 0/1/2 args
+    return dispatchReducer(marker, bound, args, gc, env);
+}
+
+fn dispatchReducer(marker: []const u8, bound: []Value, args: []const Value, gc: *GC, env: *Env) ?anyerror!Value {
+    const downstream = if (bound.len > 1) bound[1] else return null;
+
+    // tmap reducer: 0→init, 1→complete, 2→step(f(input))
+    if (std.mem.eql(u8, marker, "__tmap_rf__")) {
+        const f = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                var fa = [_]Value{args[1]};
+                const mapped = try eval_mod.apply(f, &fa, env, gc);
+                var sa = [_]Value{ args[0], mapped };
+                break :blk eval_mod.apply(downstream, &sa, env, gc);
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tfilter reducer
+    if (std.mem.eql(u8, marker, "__tfilter_rf__")) {
+        const pred = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                var pa = [_]Value{args[1]};
+                const keep = try eval_mod.apply(pred, &pa, env, gc);
+                if (keep.isTruthy()) {
+                    break :blk eval_mod.apply(downstream, args, env, gc);
+                }
+                break :blk args[0]; // pass through accumulator unchanged
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tremove reducer (inverse of tfilter)
+    if (std.mem.eql(u8, marker, "__tremove_rf__")) {
+        const pred = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                var pa = [_]Value{args[1]};
+                const remove = try eval_mod.apply(pred, &pa, env, gc);
+                if (!remove.isTruthy()) {
+                    break :blk eval_mod.apply(downstream, args, env, gc);
+                }
+                break :blk args[0];
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tfilter-map reducer: map then filter nil
+    if (std.mem.eql(u8, marker, "__tfilter_map_rf__")) {
+        const f = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                var fa = [_]Value{args[1]};
+                const result = try eval_mod.apply(f, &fa, env, gc);
+                if (!result.isNil() and result.isTruthy()) {
+                    var sa = [_]Value{ args[0], result };
+                    break :blk eval_mod.apply(downstream, &sa, env, gc);
+                }
+                break :blk args[0];
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // ttake reducer: stateful, decrements atom counter
+    if (std.mem.eql(u8, marker, "__ttake_rf__")) {
+        const state = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                const n = state.asObj().data.atom.val.asInt();
+                if (n <= 0) break :blk ensureReduced(args[0], gc);
+                state.asObj().data.atom.val = Value.makeInt(n - 1);
+                const result = try eval_mod.apply(downstream, args, env, gc);
+                if (n - 1 <= 0) break :blk ensureReduced(result, gc);
+                break :blk result;
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tdrop reducer: stateful, skips first n
+    if (std.mem.eql(u8, marker, "__tdrop_rf__")) {
+        const state = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                const n = state.asObj().data.atom.val.asInt();
+                if (n > 0) {
+                    state.asObj().data.atom.val = Value.makeInt(n - 1);
+                    break :blk args[0]; // skip
+                }
+                break :blk eval_mod.apply(downstream, args, env, gc);
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // ttake-while reducer
+    if (std.mem.eql(u8, marker, "__ttake_while_rf__")) {
+        const pred = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                var pa = [_]Value{args[1]};
+                const keep = try eval_mod.apply(pred, &pa, env, gc);
+                if (keep.isTruthy()) {
+                    break :blk eval_mod.apply(downstream, args, env, gc);
+                }
+                break :blk ensureReduced(args[0], gc);
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tdrop-while reducer: stateful, drops until pred fails
+    if (std.mem.eql(u8, marker, "__tdrop_while_rf__")) {
+        const pred = if (bound.len > 2) bound[2] else return null;
+        const state = if (bound.len > 3) bound[3] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                if (state.asObj().data.atom.val.isTruthy()) {
+                    var pa = [_]Value{args[1]};
+                    const drop = try eval_mod.apply(pred, &pa, env, gc);
+                    if (drop.isTruthy()) break :blk args[0]; // still dropping
+                    state.asObj().data.atom.val = Value.makeBool(false);
+                }
+                break :blk eval_mod.apply(downstream, args, env, gc);
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tconcatenate reducer: flatten one level of lists
+    if (std.mem.eql(u8, marker, "__tconcatenate_rf__")) {
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                if (args[1].isObj()) {
+                    const inner_obj = args[1].asObj();
+                    const items = switch (inner_obj.kind) {
+                        .list => inner_obj.data.list.items.items,
+                        .vector => inner_obj.data.vector.items.items,
+                        else => {
+                            break :blk eval_mod.apply(downstream, args, env, gc);
+                        },
+                    };
+                    var acc = args[0];
+                    for (items) |item| {
+                        var sa = [_]Value{ acc, item };
+                        acc = try eval_mod.apply(downstream, &sa, env, gc);
+                        if (isReduced(acc)) break;
+                    }
+                    break :blk acc;
+                }
+                break :blk eval_mod.apply(downstream, args, env, gc);
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tappend-map reducer: map then concatenate
+    if (std.mem.eql(u8, marker, "__tappend_map_rf__")) {
+        const f = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                var fa = [_]Value{args[1]};
+                const mapped = try eval_mod.apply(f, &fa, env, gc);
+                if (mapped.isObj()) {
+                    const inner = mapped.asObj();
+                    const items = switch (inner.kind) {
+                        .list => inner.data.list.items.items,
+                        .vector => inner.data.vector.items.items,
+                        else => {
+                            var sa = [_]Value{ args[0], mapped };
+                            break :blk eval_mod.apply(downstream, &sa, env, gc);
+                        },
+                    };
+                    var acc = args[0];
+                    for (items) |item| {
+                        var sa = [_]Value{ acc, item };
+                        acc = try eval_mod.apply(downstream, &sa, env, gc);
+                        if (isReduced(acc)) break;
+                    }
+                    break :blk acc;
+                }
+                var sa = [_]Value{ args[0], mapped };
+                break :blk eval_mod.apply(downstream, &sa, env, gc);
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tdelete-neighbor-duplicates (dedupe) reducer
+    if (std.mem.eql(u8, marker, "__tdedup_rf__")) {
+        const state = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                const prev = state.asObj().data.atom.val;
+                if (prev.isKeyword() or !semantics.structuralEq(prev, args[1], gc)) {
+                    state.asObj().data.atom.val = args[1];
+                    break :blk eval_mod.apply(downstream, args, env, gc);
+                }
+                break :blk args[0]; // duplicate, skip
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tdelete-duplicates (distinct) reducer
+    if (std.mem.eql(u8, marker, "__tdistinct_rf__")) {
+        const state = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                const seen_obj = state.asObj().data.atom.val.asObj();
+                for (seen_obj.data.set.items.items) |existing| {
+                    if (semantics.structuralEq(existing, args[1], gc)) break :blk args[0];
+                }
+                try seen_obj.data.set.items.append(gc.allocator, args[1]);
+                break :blk eval_mod.apply(downstream, args, env, gc);
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tenumerate reducer
+    if (std.mem.eql(u8, marker, "__tenumerate_rf__")) {
+        const state = if (bound.len > 2) bound[2] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                const idx = state.asObj().data.atom.val.asInt();
+                state.asObj().data.atom.val = Value.makeInt(idx + 1);
+                const vec = try gc.allocObj(.vector);
+                try vec.data.vector.items.append(gc.allocator, Value.makeInt(idx));
+                try vec.data.vector.items.append(gc.allocator, args[1]);
+                var sa = [_]Value{ args[0], Value.makeObj(vec) };
+                break :blk eval_mod.apply(downstream, &sa, env, gc);
+            },
+            else => error.ArityError,
+        };
+    }
+
+    // tadd-between (interpose) reducer
+    if (std.mem.eql(u8, marker, "__tadd_between_rf__")) {
+        const sep = if (bound.len > 2) bound[2] else return null;
+        const state = if (bound.len > 3) bound[3] else return null;
+        return switch (args.len) {
+            0 => eval_mod.apply(downstream, args, env, gc),
+            1 => eval_mod.apply(downstream, args, env, gc),
+            2 => blk: {
+                if (state.asObj().data.atom.val.isTruthy()) {
+                    state.asObj().data.atom.val = Value.makeBool(false);
+                    break :blk eval_mod.apply(downstream, args, env, gc);
+                }
+                var sep_args = [_]Value{ args[0], sep };
+                const acc = try eval_mod.apply(downstream, &sep_args, env, gc);
+                if (isReduced(acc)) break :blk acc;
+                var sa = [_]Value{ acc, args[1] };
+                break :blk eval_mod.apply(downstream, &sa, env, gc);
+            },
+            else => error.ArityError,
+        };
+    }
+
+    return null; // not a transducer marker
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Tests
