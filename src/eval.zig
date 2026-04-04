@@ -855,24 +855,35 @@ fn mapTypeName(sym: []const u8) []const u8 {
 // THREADING MACROS
 // ============================================================================
 
+/// Wrap a value in (quote val) so it survives re-evaluation.
+/// Scalars (nil, bool, int, float, string, keyword) are self-evaluating.
+fn quoteWrap(val: Value, gc: *GC) EvalError!Value {
+    if (val.isNil() or val.isBool() or val.isInt() or val.isString() or val.isKeyword()) return val;
+    if (!val.isObj() and !val.isSymbol()) return val; // float
+    const q = gc.allocObj(.list) catch return error.OutOfMemory;
+    const quote_sym = Value.makeSymbol(gc.internString("quote") catch return error.OutOfMemory);
+    q.data.list.items.append(gc.allocator, quote_sym) catch return error.OutOfMemory;
+    q.data.list.items.append(gc.allocator, val) catch return error.OutOfMemory;
+    return Value.makeObj(q);
+}
+
 /// (-> x (f a) (g b)) => (g (f x a) b)
 fn evalThreadFirst(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     if (items.len < 2) return error.ArityError;
     var result = try eval(items[1], env, gc);
     for (items[2..]) |form| {
+        const quoted = try quoteWrap(result, gc);
         if (form.isObj() and form.asObj().kind == .list) {
-            // (f a b) => eval (f result a b)
             const parts = form.asObj().data.list.items.items;
             const call = gc.allocObj(.list) catch return error.OutOfMemory;
             call.data.list.items.append(gc.allocator, parts[0]) catch return error.OutOfMemory;
-            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, quoted) catch return error.OutOfMemory;
             for (parts[1..]) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
             result = try eval(Value.makeObj(call), env, gc);
         } else {
-            // bare symbol: (f result)
             const call = gc.allocObj(.list) catch return error.OutOfMemory;
             call.data.list.items.append(gc.allocator, form) catch return error.OutOfMemory;
-            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, quoted) catch return error.OutOfMemory;
             result = try eval(Value.makeObj(call), env, gc);
         }
     }
@@ -881,27 +892,22 @@ fn evalThreadFirst(items: []Value, env: *Env, gc: *GC) EvalError!Value {
 
 /// (->> x (f a) (g b)) => (g a (f a x))
 fn evalThreadLast(items: []Value, env: *Env, gc: *GC) EvalError!Value {
-    std.debug.print("->> THREAD_LAST items={d}\n", .{items.len});
     if (items.len < 2) return error.ArityError;
     var result = try eval(items[1], env, gc);
-    std.debug.print("->> initial: nil={} int={} obj={}\n", .{ result.isNil(), result.isInt(), result.isObj() });
-    if (result.isObj()) std.debug.print("->> initial obj kind={s}\n", .{@tagName(result.asObj().kind)});
     for (items[2..]) |form| {
         if (form.isObj() and form.asObj().kind == .list) {
             const parts = form.asObj().data.list.items.items;
             const call = gc.allocObj(.list) catch return error.OutOfMemory;
             for (parts) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
-            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
-            std.debug.print("->> step call len={d}\n", .{call.data.list.items.items.len});
-            result = eval(Value.makeObj(call), env, gc) catch |err| {
-                std.debug.print("->> step EVAL ERROR: {s}\n", .{@errorName(err)});
-                return err;
-            };
-            std.debug.print("->> step result: nil={} obj={}\n", .{ result.isNil(), result.isObj() });
+            // Wrap result in (quote result) so eval doesn't re-evaluate it as a call
+            const quoted = try quoteWrap(result, gc);
+            call.data.list.items.append(gc.allocator, quoted) catch return error.OutOfMemory;
+            result = try eval(Value.makeObj(call), env, gc);
         } else {
             const call = gc.allocObj(.list) catch return error.OutOfMemory;
             call.data.list.items.append(gc.allocator, form) catch return error.OutOfMemory;
-            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            const quoted = try quoteWrap(result, gc);
+            call.data.list.items.append(gc.allocator, quoted) catch return error.OutOfMemory;
             result = try eval(Value.makeObj(call), env, gc);
         }
     }
@@ -914,22 +920,23 @@ fn evalSomeThread(items: []Value, env: *Env, gc: *GC, first: bool) EvalError!Val
     var result = try eval(items[1], env, gc);
     for (items[2..]) |form| {
         if (result.isNil()) return Value.makeNil();
+        const quoted = try quoteWrap(result, gc);
         if (form.isObj() and form.asObj().kind == .list) {
             const parts = form.asObj().data.list.items.items;
             const call = gc.allocObj(.list) catch return error.OutOfMemory;
             if (first) {
                 call.data.list.items.append(gc.allocator, parts[0]) catch return error.OutOfMemory;
-                call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+                call.data.list.items.append(gc.allocator, quoted) catch return error.OutOfMemory;
                 for (parts[1..]) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
             } else {
                 for (parts) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
-                call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+                call.data.list.items.append(gc.allocator, quoted) catch return error.OutOfMemory;
             }
             result = try eval(Value.makeObj(call), env, gc);
         } else {
             const call = gc.allocObj(.list) catch return error.OutOfMemory;
             call.data.list.items.append(gc.allocator, form) catch return error.OutOfMemory;
-            call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+            call.data.list.items.append(gc.allocator, quoted) catch return error.OutOfMemory;
             result = try eval(Value.makeObj(call), env, gc);
         }
     }

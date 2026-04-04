@@ -274,8 +274,10 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, name, "or")) return self.compileOr(items, dest);
             if (std.mem.eql(u8, name, "when")) return self.compileWhen(items, dest);
             if (std.mem.eql(u8, name, "cond")) return self.compileCond(items, dest);
-            // -> and ->> handled by macro expansion below
-            // case/try: fall through to macro expansion or eval path
+            if (std.mem.eql(u8, name, "->")) return self.compileThreadFirst(items, dest);
+            if (std.mem.eql(u8, name, "->>")) return self.compileThreadLast(items, dest);
+            if (std.mem.eql(u8, name, "case")) return self.compileCase(items, dest);
+            if (std.mem.eql(u8, name, "try")) return self.compileTry(items, dest);
 
             // Compile-time macro expansion: check VM globals and tree-walk env for macros
             {
@@ -1404,7 +1406,8 @@ fn compileAndRunWithBuiltins(src: []const u8, allocator: std.mem.Allocator, init
     const Reader = @import("reader.zig").Reader;
     var reader = Reader.init(src, &gc);
     const form = try reader.readForm();
-    var comp = Compiler.init(allocator, &gc, null, null, null);
+    const macro_env: ?*Env = if (init_builtins) &env else null;
+    var comp = Compiler.init(allocator, &gc, null, null, macro_env);
     const dest = try comp.allocReg();
     try comp.compile(form, dest);
     try comp.emit(bc.encode_d(.ret, dest));
@@ -1413,6 +1416,13 @@ fn compileAndRunWithBuiltins(src: []const u8, allocator: std.mem.Allocator, init
     defer freeFuncDef(func_def, allocator);
     const closure = bc.Closure{ .def = func_def, .upvalues = &.{} };
     var vm = bc.VM.init(&gc, 10_000_000);
+    if (init_builtins) {
+        // Copy env bindings into VM globals so builtins resolve at runtime
+        var it = env.bindings.iterator();
+        while (it.next()) |entry| {
+            vm.globals.put(entry.key_ptr.*, entry.value_ptr.*) catch {};
+        }
+    }
     defer vm.deinit();
     return vm.execute(&closure);
 }
@@ -1688,23 +1698,23 @@ test "compiler: thread-last ->>" {
 // ── case ──
 
 test "compiler: case — match first" {
-    const result = try compileAndRun("(case 1 1 42 2 99)", std.testing.allocator);
+    const result = try compileAndRunWithBuiltins("(case 1 1 42 2 99)", std.testing.allocator, true);
     try std.testing.expectEqual(@as(i48, 42), result.asInt());
 }
 
 test "compiler: case — match second" {
-    const result = try compileAndRun("(case 2 1 42 2 99)", std.testing.allocator);
+    const result = try compileAndRunWithBuiltins("(case 2 1 42 2 99)", std.testing.allocator, true);
     try std.testing.expectEqual(@as(i48, 99), result.asInt());
 }
 
 test "compiler: case — default" {
-    const result = try compileAndRun("(case 3 1 42 2 99 0)", std.testing.allocator);
+    const result = try compileAndRunWithBuiltins("(case 3 1 42 2 99 0)", std.testing.allocator, true);
     try std.testing.expectEqual(@as(i48, 0), result.asInt());
 }
 
 // ── try ──
 
 test "compiler: try — pass-through" {
-    const result = try compileAndRun("(try 42)", std.testing.allocator);
+    const result = try compileAndRunWithBuiltins("(try 42)", std.testing.allocator, true);
     try std.testing.expectEqual(@as(i48, 42), result.asInt());
 }
