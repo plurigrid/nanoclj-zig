@@ -176,6 +176,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "mobius", &computable_sets.mobiusBuiltinFn },
         .{ "mertens", &computable_sets.mertensBuiltinFn },
         .{ "moebius-boundary", &computable_sets.moebiusBoundaryFn },
+        .{ "flip-primes", &computable_sets.flipPrimesFn },
+        .{ "morphism-graph", &computable_sets.morphismGraphFn },
         // Diophantine equations
         .{ "pythagorean-triples", &computable_sets.pythagoreanTriplesFn },
         .{ "pell-solve", &computable_sets.pellSolveFn },

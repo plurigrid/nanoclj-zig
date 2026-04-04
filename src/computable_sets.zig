@@ -815,6 +815,68 @@ pub fn moebiusBoundaryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
+/// (flip-primes n) → vector of primes p ≤ n where Mertens trit flips Π→Σ
+pub fn flipPrimesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1 or !args[0].isInt()) return error.ArityError;
+    const bound = args[0].asInt();
+    if (bound < 2) return Value.makeNil();
+    const obj = try gc.allocObj(.vector);
+    var p: i48 = 2;
+    while (p <= bound) : (p += 1) {
+        if (!isPrimeImpl(p)) continue;
+        if (mertensTritImpl(p - 1) == -1 and mertensTritImpl(p) == 1) {
+            try obj.data.vector.items.append(gc.allocator, Value.makeInt(p));
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+/// (morphism-graph) → vector of {:source s :target t :kind k :trit-sum n} for all problem pairs
+pub fn morphismGraphFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    const obj = try gc.allocObj(.vector);
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    for (&problem_table, 0..) |*src, i| {
+        for (&problem_table, 0..) |*tgt, j| {
+            if (i == j) continue;
+            const same_level = src.level.class == tgt.level.class and src.level.n == tgt.level.n;
+            var has_reduction = false;
+            if (src.reduces_from) |rf| {
+                if (std.mem.eql(u8, rf, tgt.name)) has_reduction = true;
+            }
+            if (tgt.reduces_from) |rf| {
+                if (std.mem.eql(u8, rf, src.name)) has_reduction = true;
+            }
+            // Only emit edges with a witness or same-level bridge
+            if (!has_reduction and !same_level) continue;
+            const kind: []const u8 = if (same_level and has_reduction)
+                "isomorphism"
+            else if (same_level)
+                "gf3-bridge"
+            else if (src.level.n <= tgt.level.n)
+                "embedding"
+            else
+                "collapse";
+            const trit_sum: i48 = @mod(@as(i48, src.level.trit()) + @as(i48, tgt.level.trit()) + 3, 3);
+            const edge = try gc.allocObj(.map);
+            try edge.data.map.keys.append(gc.allocator, try kw.intern(gc, "source"));
+            try edge.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(src.name)));
+            try edge.data.map.keys.append(gc.allocator, try kw.intern(gc, "target"));
+            try edge.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(tgt.name)));
+            try edge.data.map.keys.append(gc.allocator, try kw.intern(gc, "kind"));
+            try edge.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(kind)));
+            try edge.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit-sum"));
+            try edge.data.map.vals.append(gc.allocator, Value.makeInt(trit_sum));
+            try obj.data.vector.items.append(gc.allocator, Value.makeObj(edge));
+        }
+    }
+    return Value.makeObj(obj);
+}
+
 // ============================================================================
 // DIOPHANTINE EQUATIONS
 // ============================================================================

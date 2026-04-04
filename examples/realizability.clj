@@ -37,8 +37,26 @@
 (println (str "  halting<->alignment: " (detect-morphism "halting" "alignment")))
 
 ;; 7. The punchline: color trit balance (Pi) + Mertens inclusive trit (Sigma) = 0 mod 3
+;; 7. The punchline: color trit balance (Pi) + Mertens inclusive trit (Sigma) = 0 mod 3
 (def color-balance (trit-balance trits))
 (def mertens-trit (get boundary :inclusive-trit))
 (def gf3-sum (mod (+ color-balance mertens-trit 3) 3))
 (def verdict (if (= 0 gf3-sum) "GF(3) CONSERVED" "BROKEN"))
 (println (str "Color Pi(" color-balance ") + Mertens Sigma(" mertens-trit ") = " (+ color-balance mertens-trit) " mod 3 = " gf3-sum "  " verdict))
+
+;; 8. Flip primes: first 10 and last 5 Pi->Sigma flippers <= seed
+(def fps (flip-primes seed))
+(println "")
+(println (str "Flip primes (|" (count fps) "| <= " seed "):"))
+(println (str "  first 10: " (into [] (take 10 fps))))
+(println (str "  last  5:  " (into [] (drop (- (count fps) 5) fps))))
+
+;; 9. Morphism graph summary
+(def edges (morphism-graph))
+(def kinds (into [] (map (fn [e] (get e :kind)) edges)))
+(println "")
+(println (str "Morphism graph: " (count edges) " edges across " (count (list-problems)) " problems"))
+(println (str "  isomorphisms: " (count (filter (fn [k] (= k "isomorphism")) kinds))))
+(println (str "  gf3-bridges:  " (count (filter (fn [k] (= k "gf3-bridge")) kinds))))
+(println (str "  embeddings:   " (count (filter (fn [k] (= k "embedding")) kinds))))
+(println (str "  collapses:    " (count (filter (fn [k] (= k "collapse")) kinds))))
