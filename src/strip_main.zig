@@ -8,12 +8,11 @@ const substrate = @import("substrate.zig");
 
 pub fn main() !void {
     const stdout = compat.stdoutFile();
-    var args = std.process.args();
-    _ = args.skip(); // skip argv[0]
 
-    const name = args.next() orelse "bci.horse";
-    const width: u32 = if (args.next()) |w| std.fmt.parseInt(u32, w, 10) catch 80 else 80;
-    const rows: u32 = if (args.next()) |r| std.fmt.parseInt(u32, r, 10) catch 8 else 8;
+    // 0.16: no std.process.args() or std.os.argv — use defaults
+    const name: []const u8 = if (std.c.getenv("STRIP_NAME")) |p| std.mem.span(p) else "bci.horse";
+    const width: u32 = if (std.c.getenv("STRIP_WIDTH")) |p| std.fmt.parseInt(u32, std.mem.span(p), 10) catch 80 else 80;
+    const rows: u32 = if (std.c.getenv("STRIP_ROWS")) |p| std.fmt.parseInt(u32, std.mem.span(p), 10) catch 8 else 8;
 
     try color_strip.renderTritWheel(stdout, width);
     compat.fileWriteAll(stdout, "\n");

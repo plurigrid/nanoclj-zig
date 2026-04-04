@@ -372,6 +372,107 @@ pub const PadicDepth = struct {
 };
 
 // ============================================================================
+// INFORMATION SPACETIME: Spacelike/Timelike on Graph Structures
+// ============================================================================
+//
+// Matter ↔ information density (nodes per subgraph volume)
+// Energy ↔ exchange rate (edges traversed per trit-tick)
+// c ↔ information speed limit (max causal reach per tick)
+//
+// A graph node pair (u, v) is:
+//   TIMELIKE:  reachable within k ticks (inside light cone, causal)
+//   SPACELIKE: unreachable within k ticks (outside light cone, simultaneous)
+//   LIGHTLIKE: exactly at the boundary (k = distance(u, v))
+//
+// The p-adic tower gives multiple "speeds of light":
+//   c₂ = binary branching rate (2^d nodes reachable at depth d)
+//   c₃ = trit phase propagation (3^d, GF(3) wavefront)
+//   c₅ = pentatonic spread, c₇ = harmonic spread
+//   c₁₀₆₉ = glimpse-scale propagation (cognitive wavefront)
+//
+// Conservation: density × rate = constant (information E=mc²)
+// GF(3) sum = 0 already enforces this at the trit level.
+
+/// Separation type between two points in information spacetime
+pub const Separation = enum(i8) {
+    timelike = 1, // causal: path exists within budget
+    lightlike = 0, // boundary: path length = budget exactly
+    spacelike = -1, // acausal: no path within budget
+
+    /// GF(3) trit value of the separation
+    pub fn trit(self: Separation) i8 {
+        return @intFromEnum(self);
+    }
+};
+
+/// Classify separation: is (distance) within (budget) trit-ticks?
+pub fn classify(distance: u64, budget: u64) Separation {
+    if (distance < budget) return .timelike;
+    if (distance == budget) return .lightlike;
+    return .spacelike;
+}
+
+/// Information light cone: how many nodes reachable at branching factor b in k steps
+/// Volume of the cone = (b^(k+1) - 1) / (b - 1) for b > 1
+pub fn coneVolume(branching: u64, depth: u64) u64 {
+    if (branching <= 1) return depth + 1;
+    var vol: u64 = 0;
+    var layer: u64 = 1;
+    for (0..depth + 1) |_| {
+        vol +|= layer;
+        layer *|= branching;
+    }
+    return vol;
+}
+
+/// Information density: nodes / cone volume
+/// Returns fixed-point (density × 1000) to avoid float
+pub fn infoDensity(nodes: u64, volume: u64) u64 {
+    if (volume == 0) return 0;
+    return (nodes * 1000) / volume;
+}
+
+/// Exchange rate: edges traversed per trit-tick
+/// For a k-regular graph with n nodes, max rate = k * n / 2 edges per tick
+pub fn exchangeRate(edges_per_tick: u64, trit_ticks: u64) u64 {
+    if (trit_ticks == 0) return 0;
+    return edges_per_tick / trit_ticks;
+}
+
+/// Information c: the speed limit relating density and rate
+/// c² = rate / density (analog of E = mc²)
+/// Returns fixed-point × 1000
+pub fn infoC(rate: u64, density_fp: u64) u64 {
+    if (density_fp == 0) return 0;
+    return (rate * 1000) / density_fp;
+}
+
+/// Multi-scale light cone using p-adic tower
+/// Returns cone volumes at each prime's branching rate
+pub fn padicCones(depth: u64) [5]u64 {
+    var cones: [5]u64 = undefined;
+    for (TOWER_PRIMES, 0..) |p, i| {
+        cones[i] = coneVolume(p, depth);
+    }
+    return cones;
+}
+
+/// Causal depth: given a cone volume, what depth achieves it at branching b?
+/// Inverse of coneVolume — how many ticks to reach volume v
+pub fn causalDepth(branching: u64, target_volume: u64) u64 {
+    if (branching <= 1) return target_volume -| 1;
+    var vol: u64 = 0;
+    var layer: u64 = 1;
+    var d: u64 = 0;
+    while (vol < target_volume) : (d += 1) {
+        vol +|= layer;
+        layer *|= branching;
+        if (layer == 0) break; // overflow
+    }
+    return d -| 1;
+}
+
+// ============================================================================
 // STRUCTURAL EQUALITY (denotational requirement)
 // ============================================================================
 

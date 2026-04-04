@@ -1344,3 +1344,115 @@ pub fn consensusClassifyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(note)));
     return Value.makeObj(obj);
 }
+
+// ============================================================================
+// STACKS PROJECT CONNECTION
+//
+// The Stacks Project (stacks.math.columbia.edu) is the canonical reference
+// for algebraic geometry. Key tags connecting to our realizability topos:
+//
+//   00VH — Site: category + covering families (3 axioms)
+//           Our classified problems form a site under Turing reductions
+//   00VL — Sheaf: presheaf satisfying gluing (equalizer of double arrows)
+//           Ω_eff ≅ Σ⁰₁ truth values = subobject classifier of effective topos
+//   03N1 — Étale cohomology: topology on schemes via étale morphisms
+//           Over Spec(GF(3)), étale = separable = trit-valued
+//   026K — Algebraic stacks: higher categorical descent
+//           Gorard tower levels form a stack of proof-theoretic depths
+//   0238 — Descent: effective descent = gluing data → object
+//           Realizability: a realizer witnesses descent (effective = computable)
+//
+// The arithmetical hierarchy IS the filtration of the effective topos:
+//   Δ⁰₁ = decidable sheaves (classical, trit 0)
+//   Σ⁰₁ = c.e. sheaves (witnessed, trit +1)
+//   Π⁰₁ = co-c.e. sheaves (validated, trit -1)
+// ============================================================================
+
+const StacksTag = struct {
+    tag: []const u8,
+    name: []const u8,
+    chapter: []const u8,
+    connection: []const u8,
+    trit: i48,
+};
+
+const stacks_tags = [_]StacksTag{
+    .{ .tag = "00VH", .name = "Site", .chapter = "7.6",
+       .connection = "classified problems as a site under Turing reductions",
+       .trit = 0 },
+    .{ .tag = "00VL", .name = "Sheaf on a Site", .chapter = "7.7",
+       .connection = "Omega_eff = Sigma^0_1 truth values (subobject classifier)",
+       .trit = 1 },
+    .{ .tag = "03N1", .name = "Etale Cohomology", .chapter = "59",
+       .connection = "over Spec(GF(3)), etale sheaves are trit-valued",
+       .trit = -1 },
+    .{ .tag = "026K", .name = "Algebraic Stacks", .chapter = "94",
+       .connection = "Gorard tower as stack of proof-theoretic depths",
+       .trit = 0 },
+    .{ .tag = "0238", .name = "Descent", .chapter = "35",
+       .connection = "effective descent = realizer witnesses gluing",
+       .trit = 1 },
+    .{ .tag = "00ZU", .name = "Homological Algebra", .chapter = "12",
+       .connection = "derived functors = iterated Sigma/Pi quantifier alternation",
+       .trit = -1 },
+};
+
+/// (stacks-tags) → vector of {:tag "00VH" :name "Site" :connection str :trit n}
+pub fn stacksTagsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    const obj = try gc.allocObj(.vector);
+    for (&stacks_tags) |*t| {
+        const entry = try gc.allocObj(.map);
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "tag"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(t.tag)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "name"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(t.name)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "chapter"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(t.chapter)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "connection"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(t.connection)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeInt(t.trit));
+        try obj.data.vector.items.append(gc.allocator, Value.makeObj(entry));
+    }
+    return Value.makeObj(obj);
+}
+
+/// (stacks-trit-sum) → GF(3) conservation across Stacks Project connections
+pub fn stacksTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    var sum: i48 = 0;
+    for (&stacks_tags) |*t| sum += t.trit;
+    return Value.makeInt(@mod(sum + 300, 3));
+}
+
+/// (stacks-lookup tag-string) → tag entry or nil
+pub fn stacksLookupFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1 or !args[0].isString()) return error.ArityError;
+    const needle = gc.getString(args[0].asStringId());
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    for (&stacks_tags) |*t| {
+        if (std.mem.eql(u8, t.tag, needle)) {
+            const entry = try gc.allocObj(.map);
+            try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "tag"));
+            try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(t.tag)));
+            try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "name"));
+            try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(t.name)));
+            try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "connection"));
+            try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(t.connection)));
+            try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
+            try entry.data.map.vals.append(gc.allocator, Value.makeInt(t.trit));
+            return Value.makeObj(entry);
+        }
+    }
+    return Value.makeNil();
+}

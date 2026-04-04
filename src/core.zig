@@ -78,6 +78,12 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "cognitive-jerk", &cognitiveJerkFn },
         .{ "p-adic", &padicFn },
         .{ "p-adic-depth", &padicDepthFn },
+        // Information spacetime builtins
+        .{ "separation", &separationFn },
+        .{ "cone-volume", &coneVolumeFn },
+        .{ "info-density", &infoDensityFn },
+        .{ "causal-depth", &causalDepthFn },
+        .{ "padic-cones", &padicConesFn },
         // Gay Color builtins
         .{ "color-at", &substrate.colorAtFn },
         .{ "color-seed", &substrate.colorSeedFn },
@@ -988,4 +994,59 @@ fn padicDepthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         try new.data.list.items.append(gc.allocator, Value.makeInt(@intCast(vi)));
     }
     return Value.makeObj(new);
+}
+
+// ============================================================================
+// INFORMATION SPACETIME BUILTINS
+// ============================================================================
+
+/// (separation distance budget) → -1 (spacelike), 0 (lightlike), 1 (timelike)
+fn separationFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const dist: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    const budget: u64 = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    return Value.makeInt(@as(i48, transitivity.classify(dist, budget).trit()));
+}
+
+/// (cone-volume branching depth) → number of nodes reachable
+fn coneVolumeFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const b: u64 = @intCast(@max(@as(i48, 1), args[0].asInt()));
+    const d: u64 = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    const vol = transitivity.coneVolume(b, d);
+    return Value.makeInt(@intCast(@min(vol, @as(u64, @intCast(std.math.maxInt(i48))))));
+}
+
+/// (info-density nodes volume) → density × 1000 (fixed-point)
+fn infoDensityFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const nodes: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    const volume: u64 = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    return Value.makeInt(@intCast(transitivity.infoDensity(nodes, volume)));
+}
+
+/// (causal-depth branching target-volume) → ticks needed
+fn causalDepthFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const b: u64 = @intCast(@max(@as(i48, 1), args[0].asInt()));
+    const v: u64 = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    return Value.makeInt(@intCast(transitivity.causalDepth(b, v)));
+}
+
+/// (padic-cones depth) → [vol₂ vol₃ vol₅ vol₇ vol₁₀₆₉]
+fn padicConesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const d: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    const cones = transitivity.padicCones(d);
+    const obj = try gc.allocObj(.vector);
+    for (cones) |vol| {
+        const clamped = @min(vol, @as(u64, @intCast(std.math.maxInt(i48))));
+        try obj.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(clamped)));
+    }
+    return Value.makeObj(obj);
 }
