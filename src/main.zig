@@ -285,7 +285,24 @@ pub fn main() !void {
                 }
                 break;
             }
-            if (byte[0] == '\n') break;
+            if (byte[0] == '\n') {
+                // Multi-line: if parens are unbalanced, keep reading
+                var depth: i32 = 0;
+                var in_string = false;
+                for (line_buf.items) |c| {
+                    if (c == '"') in_string = !in_string;
+                    if (!in_string) {
+                        if (c == '(') depth += 1;
+                        if (c == ')') depth -= 1;
+                    }
+                }
+                if (depth > 0) {
+                    line_buf.append(allocator, ' ') catch break;
+                    compat.fileWriteAll(stdout, "  ");
+                    continue;
+                }
+                break;
+            }
             line_buf.append(allocator, byte[0]) catch break;
         }
 

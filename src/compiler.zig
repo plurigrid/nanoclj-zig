@@ -31,10 +31,16 @@ const Local = struct {
     reg: u8,
 };
 
+const Upvalue = struct {
+    name: []const u8,
+    source: bc.UpvalueSource, // how to capture from enclosing scope
+};
+
 pub const Compiler = struct {
     code: std.ArrayListUnmanaged(Inst),
     constants: std.ArrayListUnmanaged(Value),
     defs: std.ArrayListUnmanaged(*FuncDef),
+    upvalues: std.ArrayListUnmanaged(Upvalue),
     locals: [256]Local,
     local_count: u8,
     next_reg: u8,
@@ -49,6 +55,7 @@ pub const Compiler = struct {
             .code = .{ .items = &.{}, .capacity = 0 },
             .constants = .{ .items = &.{}, .capacity = 0 },
             .defs = .{ .items = &.{}, .capacity = 0 },
+            .upvalues = .{ .items = &.{}, .capacity = 0 },
             .locals = undefined,
             .local_count = 0,
             .next_reg = 0,
@@ -64,6 +71,7 @@ pub const Compiler = struct {
         self.code.deinit(self.allocator);
         self.constants.deinit(self.allocator);
         self.defs.deinit(self.allocator);
+        self.upvalues.deinit(self.allocator);
     }
 
     pub fn allocReg(self: *Compiler) CompileError!u8 {
@@ -103,6 +111,37 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, self.locals[i].name, name)) return self.locals[i].reg;
         }
         return null;
+    }
+
+    /// Resolve a variable from an enclosing scope, adding upvalue entries
+    /// through each intermediate compiler in the chain.
+    fn resolveUpvalue(self: *Compiler, name: []const u8) CompileError!?u16 {
+        const parent = self.parent orelse return null;
+
+        // Check if it's a local in the immediate parent
+        if (parent.resolveLocal(name)) |reg| {
+            return try self.addUpvalue(name, .{ .is_local = true, .index = reg });
+        }
+
+        // Recursively resolve in grandparent (will add upvalue in parent too)
+        if (try parent.resolveUpvalue(name)) |parent_uv_idx| {
+            return try self.addUpvalue(name, .{ .is_local = false, .index = @intCast(parent_uv_idx) });
+        }
+
+        return null;
+    }
+
+    fn addUpvalue(self: *Compiler, name: []const u8, source: bc.UpvalueSource) CompileError!u16 {
+        // Deduplicate: if we already capture this source, return existing index
+        for (self.upvalues.items, 0..) |uv, i| {
+            if (uv.source.is_local == source.is_local and uv.source.index == source.index) {
+                return @intCast(i);
+            }
+        }
+        if (self.upvalues.items.len >= 255) return error.TooManyLocals;
+        const idx: u16 = @intCast(self.upvalues.items.len);
+        self.upvalues.append(self.allocator, .{ .name = name, .source = source }) catch return error.OutOfMemory;
+        return idx;
     }
 
     fn addLocal(self: *Compiler, name: []const u8, reg: u8) CompileError!void {
@@ -170,7 +209,8 @@ pub const Compiler = struct {
                 if (local_reg != dest) {
                     try self.emit(bc.encode_abc(.move, dest, local_reg, 0));
                 }
-                // else: result already in dest (happens when dest == local_reg)
+            } else if (try self.resolveUpvalue(name)) |uv_idx| {
+                try self.emit(bc.encode_ae(.get_upvalue, dest, uv_idx));
             } else {
                 const sym_const = try self.addConst(Value.makeSymbol(expr.asSymbolId()));
                 try self.emit(bc.encode_ae(.get_global, dest, sym_const));
@@ -407,6 +447,16 @@ pub const Compiler = struct {
             return error.OutOfMemory;
         };
 
+        // Build upvalue sources from child's captured upvalues
+        const uv_sources = if (child.upvalues.items.len > 0) blk: {
+            const sources = self.allocator.alloc(bc.UpvalueSource, child.upvalues.items.len) catch {
+                child.deinit();
+                return error.OutOfMemory;
+            };
+            for (child.upvalues.items, 0..) |uv, i| sources[i] = uv.source;
+            break :blk sources;
+        } else &[_]bc.UpvalueSource{};
+
         // Build FuncDef from child
         const func_def = self.allocator.create(FuncDef) catch {
             child.deinit();
@@ -427,6 +477,7 @@ pub const Compiler = struct {
             }),
             .arity = @intCast(params.len),
             .num_registers = child.next_reg,
+            .upvalue_sources = uv_sources,
         };
         child.deinit();
 
@@ -633,6 +684,7 @@ fn freeFuncDef(def: *FuncDef, allocator: std.mem.Allocator) void {
     allocator.free(def.code);
     allocator.free(def.constants);
     allocator.free(def.defs);
+    if (def.upvalue_sources.len > 0) allocator.free(def.upvalue_sources);
     allocator.destroy(def);
 }
 

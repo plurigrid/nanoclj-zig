@@ -55,8 +55,9 @@ pub const Op = enum(u8) {
     tail_call,    // return call(R[A], R[A+1..A+B]) with B args
     closure,      // $A = make_closure(defs[E])
 
-    // Data movement (1)
+    // Data movement (2)
     move,         // $A = $B  (register copy)
+    get_upvalue,  // $A = upvalues[E]  (read captured variable)
 
     // Globals (2)
     get_global,   // $A = globals[constants[E]]
@@ -123,6 +124,13 @@ pub inline fn decode_es(inst: Inst) i16 {
 // FUNCTION DEFINITION (bytecode + constants + sub-defs)
 // ============================================================================
 
+/// Source of a captured upvalue: either a register in the enclosing frame
+/// or an upvalue from the enclosing closure (for multi-level capture).
+pub const UpvalueSource = struct {
+    is_local: bool, // true = from enclosing register, false = from enclosing upvalue
+    index: u8,      // register index or upvalue index
+};
+
 pub const FuncDef = struct {
     code: []const Inst,
     constants: []const Value,
@@ -131,6 +139,7 @@ pub const FuncDef = struct {
     is_variadic: bool = false,
     num_registers: u8, // max registers used in this function
     name: ?[]const u8 = null,
+    upvalue_sources: []const UpvalueSource = &.{}, // how to capture upvalues at closure creation
 };
 
 pub const Closure = struct {
@@ -451,11 +460,23 @@ pub const VM = struct {
                     const frame = self.currentFrame();
                     const sub_def = frame.closure.def.defs[e];
 
-                    // Allocate a bc_closure Obj
+                    // Capture upvalues from enclosing scope
+                    const sources = sub_def.upvalue_sources;
+                    const upvals = if (sources.len > 0) blk: {
+                        const uv = self.gc.allocator.alloc(Value, sources.len) catch return error.TypeError;
+                        for (sources, 0..) |src, i| {
+                            uv[i] = if (src.is_local)
+                                self.stack[frame.base + src.index]
+                            else
+                                frame.closure.upvalues[src.index];
+                        }
+                        break :blk uv;
+                    } else &.{};
+
                     const obj = self.gc.allocObj(.bc_closure) catch return error.TypeError;
                     obj.data.bc_closure = .{
                         .def = sub_def,
-                        .upvalues = &.{}, // TODO: capture upvalues
+                        .upvalues = @constCast(upvals),
                     };
                     self.reg(a).* = Value.makeObj(obj);
                 },
@@ -465,6 +486,12 @@ pub const VM = struct {
                     const a = decode_a(inst);
                     const b = decode_b(inst);
                     self.reg(a).* = self.reg(b).*;
+                },
+                .get_upvalue => {
+                    const a = decode_a(inst);
+                    const e = decode_e(inst);
+                    const frame = self.currentFrame();
+                    self.reg(a).* = frame.closure.upvalues[e];
                 },
 
                 // ── Globals ──
