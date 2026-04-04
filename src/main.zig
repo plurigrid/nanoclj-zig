@@ -598,4 +598,6 @@ test {
     _ = @import("colorspace.zig");
     _ = @import("persistent_vector.zig");
     _ = @import("persistent_map.zig");
+    _ = @import("ies.zig");
+    _ = @import("pattern.zig");
 }
