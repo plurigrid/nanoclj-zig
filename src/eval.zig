@@ -323,9 +323,26 @@ fn evalDo(items: []Value, env: *Env, gc: *GC) EvalError!Value {
 }
 
 fn evalFnStar(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+
+    // Multi-arity: (fn* ([x] body1) ([x y] body2) ...)
+    // Detect: items[1] is a list whose first element is a vector (params)
+    if (items[1].isObj() and items[1].asObj().kind == .list) {
+        const first_arity = items[1].asObj().data.list.items.items;
+        if (first_arity.len > 0 and first_arity[0].isObj() and first_arity[0].asObj().kind == .vector) {
+            // It's multi-arity: items[1..] are all arity clauses
+            return evalMultiArityFn(items[1..], env, gc);
+        }
+    }
+
+    // Single arity: (fn* [params] body...)
     if (items.len < 3) return error.ArityError;
-    if (!items[1].isObj()) return error.TypeError;
-    const params_obj = items[1].asObj();
+    return evalSingleArityFn(items[1..], env, gc);
+}
+
+fn evalSingleArityFn(arity_items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (!arity_items[0].isObj()) return error.TypeError;
+    const params_obj = arity_items[0].asObj();
     const params = if (params_obj.kind == .vector)
         params_obj.data.vector.items.items
     else if (params_obj.kind == .list)
@@ -344,20 +361,62 @@ fn evalFnStar(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     }
     fn_obj.data.function.is_variadic = is_variadic;
     fn_obj.data.function.env = env;
-    for (items[2..]) |body_form| {
+    for (arity_items[1..]) |body_form| {
         fn_obj.data.function.body.append(gc.allocator, body_form) catch return error.OutOfMemory;
     }
     return Value.makeObj(fn_obj);
 }
 
-/// (defn name [params] body...) => (def name (fn* [params] body...))
+/// Multi-arity fn: store each arity as a fn object in a vector,
+/// then wrap in a dispatch fn whose body contains the vector.
+fn evalMultiArityFn(clauses: []Value, env: *Env, gc: *GC) EvalError!Value {
+    const arities_vec = gc.allocObj(.vector) catch return error.OutOfMemory;
+    for (clauses) |clause| {
+        if (!clause.isObj() or clause.asObj().kind != .list) return error.TypeError;
+        const clause_items = clause.asObj().data.list.items.items;
+        if (clause_items.len < 2) return error.ArityError;
+        const arity_fn = try evalSingleArityFn(clause_items, env, gc);
+        arities_vec.data.vector.items.append(gc.allocator, arity_fn) catch return error.OutOfMemory;
+    }
+    // Wrapper fn: stores arities in body[0], dispatches by arg count
+    const wrapper = gc.allocObj(.function) catch return error.OutOfMemory;
+    wrapper.data.function.env = env;
+    wrapper.data.function.is_variadic = true;
+    wrapper.data.function.name = "__multi_arity__";
+    wrapper.data.function.body.append(gc.allocator, Value.makeObj(arities_vec)) catch return error.OutOfMemory;
+    return Value.makeObj(wrapper);
+}
+
+/// (defn name [params] body...) or (defn name ([x] ...) ([x y] ...))
 fn evalDefn(items: []Value, env: *Env, gc: *GC) EvalError!Value {
-    if (items.len < 4) return error.ArityError;
+    if (items.len < 3) return error.ArityError;
     if (!items[1].isSymbol()) return error.TypeError;
     const name = gc.getString(items[1].asSymbolId());
-    // Build synthetic fn* items
+
+    // Multi-arity defn: (defn name ([x] body1) ([x y] body2))
+    // Detect: items[2] is a list whose first element is a vector
+    if (items[2].isObj() and items[2].asObj().kind == .list) {
+        const first = items[2].asObj().data.list.items.items;
+        if (first.len > 0 and first[0].isObj() and first[0].asObj().kind == .vector) {
+            // Pass all arity clauses to evalFnStar as multi-arity
+            var fn_items: [64]Value = undefined;
+            fn_items[0] = items[0]; // placeholder
+            const clauses = items[2..];
+            if (clauses.len + 1 > fn_items.len) return error.ArityError;
+            for (clauses, 0..) |c, i| fn_items[1 + i] = c;
+            const fn_val = try evalFnStar(fn_items[0 .. 1 + clauses.len], env, gc);
+            if (fn_val.isObj()) fn_val.asObj().data.function.name = name;
+            env.set(name, fn_val) catch return error.OutOfMemory;
+            const id = gc.internString(name) catch return error.OutOfMemory;
+            env.setById(id, fn_val) catch return error.OutOfMemory;
+            return fn_val;
+        }
+    }
+
+    // Single arity: (defn name [params] body...)
+    if (items.len < 4) return error.ArityError;
     var fn_items: [64]Value = undefined;
-    fn_items[0] = items[0]; // placeholder
+    fn_items[0] = items[0];
     fn_items[1] = items[2]; // params
     const body = items[3..];
     if (body.len + 2 > fn_items.len) return error.ArityError;
@@ -370,26 +429,49 @@ fn evalDefn(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     return fn_val;
 }
 
-pub fn apply(func: Value, args: []const Value, _: *Env, gc: *GC) EvalError!Value {
+pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalError!Value {
     if (!func.isObj()) return error.NotAFunction;
     const obj = func.asObj();
 
     if (obj.kind == .function or obj.kind == .macro_fn) {
         const fn_data = if (obj.kind == .function) &obj.data.function else &obj.data.macro_fn;
+
+        // Multi-arity dispatch: name == "__multi_arity__", body[0] = vector of fn objects
+        if (fn_data.name) |n| {
+            if (std.mem.eql(u8, n, "__multi_arity__") and fn_data.body.items.len > 0) {
+                const arities_val = fn_data.body.items[0];
+                if (arities_val.isObj() and arities_val.asObj().kind == .vector) {
+                    // Try each arity: first try exact match, then variadic
+                    for (arities_val.asObj().data.vector.items.items) |arity_val| {
+                        if (!arity_val.isObj()) continue;
+                        const arity_fn = arity_val.asObj();
+                        if (arity_fn.kind != .function) continue;
+                        const ad = &arity_fn.data.function;
+                        const pcount = ad.params.items.len;
+                        if (!ad.is_variadic and pcount == args.len) {
+                            return apply(arity_val, args, caller_env, gc);
+                        }
+                        if (ad.is_variadic and args.len >= pcount - 1) {
+                            return apply(arity_val, args, caller_env, gc);
+                        }
+                    }
+                    return error.ArityError;
+                }
+            }
+        }
+
         const fn_env = fn_data.env orelse return error.EvalFailed;
         const child = fn_env.createChild() catch return error.OutOfMemory;
         gc.trackEnv(child) catch return error.OutOfMemory;
 
         const params = fn_data.params.items;
         if (fn_data.is_variadic) {
-            // last param gets rest
             const required = params.len - 1;
             if (args.len < required) return error.ArityError;
             for (params[0..required], 0..) |p, i| {
-                const name = gc.getString(p.asSymbolId());
-                child.set(name, args[i]) catch return error.OutOfMemory;
+                const pname = gc.getString(p.asSymbolId());
+                child.set(pname, args[i]) catch return error.OutOfMemory;
             }
-            // rest as list
             const rest_obj = gc.allocObj(.list) catch return error.OutOfMemory;
             for (args[required..]) |a| {
                 rest_obj.data.list.items.append(gc.allocator, a) catch return error.OutOfMemory;
@@ -399,8 +481,8 @@ pub fn apply(func: Value, args: []const Value, _: *Env, gc: *GC) EvalError!Value
         } else {
             if (args.len != params.len) return error.ArityError;
             for (params, 0..) |p, i| {
-                const name = gc.getString(p.asSymbolId());
-                child.set(name, args[i]) catch return error.OutOfMemory;
+                const pname = gc.getString(p.asSymbolId());
+                child.set(pname, args[i]) catch return error.OutOfMemory;
             }
         }
 
