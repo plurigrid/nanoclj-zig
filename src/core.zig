@@ -19,6 +19,7 @@ const peval_mod = @import("peval.zig");
 const ibc_denom = @import("ibc_denom.zig");
 const church_turing = @import("church_turing.zig");
 const kanren = @import("kanren.zig");
+const regex = @import("regex.zig");
 const gorj_bridge = @import("gorj_bridge.zig");
 const computable_sets = @import("computable_sets.zig");
 const avalon_api_example = @import("avalon_api_example.zig");
@@ -510,6 +511,11 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "force", &forceFn },
         .{ "add-watch", &addWatchFn },
         .{ "remove-watch", &removeWatchFn },
+        // Regex
+        .{ "re-pattern", &rePatternFn },
+        .{ "re-find", &reFindFn },
+        .{ "re-matches", &reMatchesFn },
+        .{ "re-seq", &reSeqFn },
         // Dense f64 (Neanderthal-compatible)
         .{ "fv", &fvFn },
         .{ "fv-get", &fvGetFn },

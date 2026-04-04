@@ -620,4 +620,5 @@ test {
     _ = @import("ies.zig");
     _ = @import("pattern.zig");
     _ = @import("sector.zig");
+    _ = @import("regex.zig");
 }
