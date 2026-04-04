@@ -1,0 +1,16 @@
+# Cloned language repos (large, don't commit)
+shen/
+carp/
+jank/
+ferret/
+hy/
+fennel/
+janet/
+lfe/
+chialisp/
+geb/
+juvix/
+
+# Embedding outputs (large, regenerable)
+embeddings.jsonl
+*.jsonl

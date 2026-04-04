@@ -355,6 +355,25 @@ fn loadMacroPrelude(env: *Env, gc: *GC) void {
         \\  (list 'let* bindings
         \\    (cons 'when (cons (first bindings) body))))
         ,
+        // run*: (run* [q] goal...) → run-goal with fresh q
+        \\(defmacro run* [vars & goals]
+        \\  (let* [q (first vars)]
+        \\    (list 'let* [q '(lvar)]
+        \\      (list 'run-goal 0 q (cons 'conj-goal goals)))))
+        ,
+        // run: (run n [q] goal...) → limited results
+        \\(defmacro run [n vars & goals]
+        \\  (let* [q (first vars)]
+        \\    (list 'let* [q '(lvar)]
+        \\      (list 'run-goal n q (cons 'conj-goal goals)))))
+        ,
+        // fresh: (fresh [a b] goal...) → introduce fresh lvars and conjoin goals
+        \\(defmacro fresh [vars & goals]
+        \\  (if (zero? (count vars))
+        \\    (cons 'conj-goal goals)
+        \\    (list 'let* [(first vars) '(lvar)]
+        \\      (cons 'fresh (cons (vec (rest vars)) goals)))))
+        ,
     };
 
     for (macros) |src| {

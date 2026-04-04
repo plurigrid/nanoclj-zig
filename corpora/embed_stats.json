@@ -1,0 +1,57 @@
+{
+  "model": "gemini-embedding-001",
+  "dimensions": 768,
+  "total_chunks": 5119,
+  "total_embedded": 0,
+  "languages": {
+    "shen": {
+      "files": 139,
+      "chunks": 423
+    },
+    "carp": {
+      "files": 237,
+      "chunks": 601
+    },
+    "jank": {
+      "files": 841,
+      "chunks": 807
+    },
+    "ferret": {
+      "files": 1,
+      "chunks": 213
+    },
+    "hy": {
+      "files": 76,
+      "chunks": 170
+    },
+    "fennel": {
+      "files": 93,
+      "chunks": 326
+    },
+    "janet": {
+      "files": 99,
+      "chunks": 330
+    },
+    "lfe": {
+      "files": 69,
+      "chunks": 252
+    },
+    "chialisp": {
+      "files": 28,
+      "chunks": 80
+    },
+    "geb": {
+      "files": 81,
+      "chunks": 313
+    },
+    "juvix": {
+      "files": 905,
+      "chunks": 938
+    },
+    "nanoclj": {
+      "files": 49,
+      "chunks": 666
+    }
+  },
+  "comparison_note": "CLVM (Chia) = minimal untyped Lisp VM, tree-rewriting, ~40 opcodes. Geb (Anoma) = categorical IR (bicartesian closed), STLC\u2192VampIR circuits. Juvix = Haskell-like frontend \u2192 Geb/Nock/Cairo/WASM/native. nanoclj-zig = Clojure dialect in Zig, persistent data, miniKanren, bytecode VM."
+}
