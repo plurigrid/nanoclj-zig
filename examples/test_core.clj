@@ -71,4 +71,50 @@
     (is= 10 x)
     (is= 2 (count rest))))
 
+(deftest test-macros
+  (testing "when/when-not"
+    (is= 42 (when true 42))
+    (is (nil? (when false 42)))
+    (is= 42 (when-not false 42))
+    (is (nil? (when-not true 42))))
+  (testing "and/or"
+    (is= 3 (and 1 2 3))
+    (is= false (and true false))
+    (is= true (and))
+    (is= 42 (or nil false 42))
+    (is (nil? (or nil nil)))
+    (is (nil? (or))))
+  (testing "cond"
+    (is= 3 (cond false 1 false 2 true 3))
+    (is (nil? (cond false 1))))
+  (testing "threading"
+    (is= 9 (-> 1 (+ 2) (* 3)))
+    (is= 15 (->> (list 1 2 3 4 5) (filter odd?) (map inc) (reduce + 0))))
+  (testing "if-let/when-let"
+    (is= 42 (if-let [x 42] x 0))
+    (is= 0 (if-let [x nil] x 0))
+    (is= 6 (when-let [x 5] (+ x 1)))))
+
+(deftest test-defmacro
+  (defmacro my-unless [test & body]
+    (list 'if test nil (cons 'do body)))
+  (is= 42 (my-unless false 42))
+  (is (nil? (my-unless true 42))))
+
+(deftest test-hof-extra
+  (testing "comp"
+    (is= 5 ((comp inc inc inc) 2)))
+  (testing "map/filter/reduce"
+    (is= (list 1 4 9) (map (fn* [x] (* x x)) (list 1 2 3)))
+    (is= (list 2 4) (filter even? (list 1 2 3 4 5)))
+    (is= 15 (reduce + 0 (list 1 2 3 4 5))))
+  (testing "sort"
+    (is= (list 1 2 3 4 5) (sort (list 3 1 4 1 5)))))
+
+(deftest test-nested-maps
+  (testing "get-in"
+    (is= 3 (get-in {:a {:b 3}} [:a :b])))
+  (testing "assoc-in"
+    (is= {:a {:b 42}} (assoc-in {:a {:b 3}} [:a :b] 42))))
+
 (run-tests)
