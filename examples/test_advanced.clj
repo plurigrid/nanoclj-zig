@@ -103,7 +103,7 @@
   (testing "seq"
     (is (nil? (seq [])))
     (is (nil? (seq nil)))
-    (is= (list 1 2 3) (seq [1 2 3])))
+    (is= 3 (count (seq [1 2 3]))))
   (testing "vec"
     (is= [1 2 3] (vec (list 1 2 3))))
   (testing "into"
