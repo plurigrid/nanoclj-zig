@@ -777,3 +777,194 @@ pub fn moebiusBoundaryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     try obj.data.map.vals.append(gc.allocator, Value.makeBool(excl_trit != incl_trit));
     return Value.makeObj(obj);
 }
+
+// ============================================================================
+// DIOPHANTINE EQUATIONS
+// ============================================================================
+
+fn isqrt(n: u64) u64 {
+    if (n == 0) return 0;
+    var x = std.math.sqrt(n);
+    while (x * x > n) x -= 1;
+    while ((x + 1) * (x + 1) <= n) x += 1;
+    return x;
+}
+
+/// (pythagorean-triples bound) → vector of [a b c] triples with a≤b, c≤bound
+pub fn pythagoreanTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return Value.makeNil();
+    const bound_val = args[0].toI48() orelse return Value.makeNil();
+    if (bound_val <= 0) return Value.makeNil();
+    const bound: u32 = @intCast(@min(bound_val, 10000));
+
+    const obj = try gc.allocObj(.vector);
+    var m: u32 = 2;
+    while (m * m < bound) : (m += 1) {
+        var n: u32 = 1;
+        while (n < m) : (n += 1) {
+            if ((m - n) % 2 == 1 and std.math.gcd(m, n) == 1) {
+                const a = m * m - n * n;
+                const b = 2 * m * n;
+                const c = m * m + n * n;
+                if (c <= bound) {
+                    const triple = try gc.allocObj(.vector);
+                    const a_min = @min(a, b);
+                    const b_max = @max(a, b);
+                    try triple.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(a_min)));
+                    try triple.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(b_max)));
+                    try triple.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(c)));
+                    try obj.data.vector.items.append(gc.allocator, Value.makeObj(triple));
+                }
+            }
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+/// (pell-solve D) → {:x n :y m} fundamental solution of x²-Dy²=1, or nil
+pub fn pellSolveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return Value.makeNil();
+    const d_val = args[0].toI48() orelse return Value.makeNil();
+    if (d_val < 2) return Value.makeNil();
+    const D: u64 = @intCast(d_val);
+
+    const sqrt_D = isqrt(D);
+    if (sqrt_D * sqrt_D == D) return Value.makeNil(); // perfect square
+
+    // Continued fraction expansion of √D
+    var m: u64 = 0;
+    var d: u64 = 1;
+    var a: u64 = sqrt_D;
+    const a0 = a;
+    var p_prev: u64 = 1;
+    var p_curr: u64 = a;
+    var q_prev: u64 = 0;
+    var q_curr: u64 = 1;
+
+    for (0..2000) |_| {
+        m = d * a - m;
+        d = (D - m * m) / d;
+        if (d == 0) return Value.makeNil();
+        a = (a0 + m) / d;
+
+        const p_next = a * p_curr + p_prev;
+        const q_next = a * q_curr + q_prev;
+        p_prev = p_curr;
+        p_curr = p_next;
+        q_prev = q_curr;
+        q_curr = q_next;
+
+        if (p_curr * p_curr == D * q_curr * q_curr + 1) {
+            const obj = try gc.allocObj(.map);
+            const kw = struct {
+                fn intern(g: *GC, s: []const u8) !Value {
+                    return Value.makeKeyword(try g.internString(s));
+                }
+            };
+            try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "x"));
+            try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(p_curr)));
+            try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "y"));
+            try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(q_curr)));
+            try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "D"));
+            try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(D)));
+            try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "verify"));
+            const verify: i48 = @intCast(p_curr * p_curr - D * q_curr * q_curr);
+            try obj.data.map.vals.append(gc.allocator, Value.makeInt(verify));
+            return Value.makeObj(obj);
+        }
+    }
+    return Value.makeNil();
+}
+
+/// (markov-triples bound) → vector of [a b c] with a²+b²+c²=3abc, a≤b≤c≤bound
+pub fn markovTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return Value.makeNil();
+    const bound_val = args[0].toI48() orelse return Value.makeNil();
+    if (bound_val <= 0) return Value.makeNil();
+    const bound: u32 = @intCast(@min(bound_val, 500));
+
+    const obj = try gc.allocObj(.vector);
+    var a: u64 = 1;
+    while (a <= bound) : (a += 1) {
+        var b: u64 = a;
+        while (b <= bound) : (b += 1) {
+            var c: u64 = b;
+            while (c <= bound) : (c += 1) {
+                const lhs = a * a + b * b + c * c;
+                const rhs = 3 * a * b * c;
+                if (lhs == rhs) {
+                    const triple = try gc.allocObj(.vector);
+                    try triple.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(a)));
+                    try triple.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(b)));
+                    try triple.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(c)));
+                    try obj.data.vector.items.append(gc.allocator, Value.makeObj(triple));
+                }
+            }
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+/// (rh-check bound) → vector of {:x n :pi π(n) :li Li(n) :error |π-Li| :bound C√n·ln(n) :ok? bool}
+pub fn rhCheckFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return Value.makeNil();
+    const bound_val = args[0].toI48() orelse return Value.makeNil();
+    if (bound_val < 10) return Value.makeNil();
+    const bound: u32 = @intCast(@min(bound_val, 1000000));
+
+    // Sieve primes
+    const sieve = try gc.allocator.alloc(bool, bound + 1);
+    defer gc.allocator.free(sieve);
+    @memset(sieve, true);
+    sieve[0] = false;
+    if (bound >= 1) sieve[1] = false;
+    var i: u32 = 2;
+    while (i * i <= bound) : (i += 1) {
+        if (sieve[i]) {
+            var j = i * i;
+            while (j <= bound) : (j += i) sieve[j] = false;
+        }
+    }
+
+    // Count primes up to each checkpoint
+    const checkpoints = [_]u32{ 100, 1000, 5000, 10000, 50000, 100000, 500000, 1000000 };
+    const obj = try gc.allocObj(.vector);
+
+    var pi_count: u32 = 0;
+    var cp_idx: usize = 0;
+    var n: u32 = 2;
+    while (n <= bound and cp_idx < checkpoints.len) : (n += 1) {
+        if (sieve[n]) pi_count += 1;
+        if (n == checkpoints[cp_idx]) {
+            if (checkpoints[cp_idx] <= bound) {
+                // Li(x) ≈ x/ln(x) * (1 + 1/ln(x)) — simple approximation
+                const x_f: f64 = @floatFromInt(n);
+                const ln_x = @log(x_f);
+                const li_approx = x_f / ln_x * (1.0 + 1.0 / ln_x);
+                const pi_f: f64 = @floatFromInt(pi_count);
+                const err = @abs(pi_f - li_approx);
+                const rh_bound = @sqrt(x_f) * ln_x;
+
+                const entry = try gc.allocObj(.map);
+                const kw = struct {
+                    fn intern(g: *GC, s: []const u8) !Value {
+                        return Value.makeKeyword(try g.internString(s));
+                    }
+                };
+                try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "x"));
+                try entry.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(n)));
+                try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "pi"));
+                try entry.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(pi_count)));
+                try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "error"));
+                try entry.data.map.vals.append(gc.allocator, Value.makeFloat(err));
+                try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "rh-bound"));
+                try entry.data.map.vals.append(gc.allocator, Value.makeFloat(rh_bound));
+                try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "ok?"));
+                try entry.data.map.vals.append(gc.allocator, Value.makeBool(err < rh_bound));
+                try obj.data.vector.items.append(gc.allocator, Value.makeObj(entry));
+            }
+            cp_idx += 1;
+        }
+    }
+    return Value.makeObj(obj);
+}

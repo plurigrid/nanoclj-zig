@@ -135,6 +135,26 @@ pub fn compile(net: *Net, val: Value, gc: *GC, scope: *Scope) CompileError!Port 
             const cell = try net.addCell(.gamma, 0, items[1]);
             return Port.principal(cell);
         }
+
+        // (if cond then else) → σ(then, else) connected to cond
+        // Level 5: both branches compile into the net and reduce in parallel.
+        // When cond reduces to γ(bool), the σ-γ rule selects one branch.
+        if (std.mem.eql(u8, name, "if") and items.len >= 3) {
+            const cond_port = try compile(net, items[1], gc, scope);
+            const then_port = try compile(net, items[2], gc, scope);
+            const else_port = if (items.len >= 4)
+                try compile(net, items[3], gc, scope)
+            else
+                Port.principal(try net.addCell(.gamma, 0, Value.makeNil()));
+
+            // σ cell: arity 2, aux[0]=then, aux[1]=else
+            const sup = try net.addCell(.sup, 2, Value.makeNil());
+            try net.connect(Port.aux(sup, 0), then_port);
+            try net.connect(Port.aux(sup, 1), else_port);
+            // Active pair: σ principal meets condition
+            try net.connect(Port.principal(sup), cond_port);
+            return Port.principal(sup);
+        }
     }
 
     // Application: (f arg1 arg2 ...)

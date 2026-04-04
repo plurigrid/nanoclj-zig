@@ -176,6 +176,11 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "mobius", &computable_sets.mobiusBuiltinFn },
         .{ "mertens", &computable_sets.mertensBuiltinFn },
         .{ "moebius-boundary", &computable_sets.moebiusBoundaryFn },
+        // Diophantine equations
+        .{ "pythagorean-triples", &computable_sets.pythagoreanTriplesFn },
+        .{ "pell-solve", &computable_sets.pellSolveFn },
+        .{ "markov-triples", &computable_sets.markovTriplesFn },
+        .{ "rh-check", &computable_sets.rhCheckFn },
         // Avalon integration API sample spec
         .{ "avalon-api-spec", &avalon_api_example.avalonApiSpecFn },
         .{ "avalon-api-example", &avalon_api_example.avalonApiExampleFn },

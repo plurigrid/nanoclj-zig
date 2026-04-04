@@ -420,19 +420,43 @@ pub const Compiler = struct {
     fn compileCall(self: *Compiler, items: []Value, dest: u8) CompileError!void {
         const argc: u8 = @intCast(items.len - 1);
 
-        // Compile function into dest+1
-        const func_reg = try self.allocReg();
-        try self.compile(items[0], func_reg);
+        // Phase 1: compile all sub-expressions into wherever they land
+        var compiled_regs: [64]u8 = undefined;
+        const func_tmp = try self.allocReg();
+        try self.compile(items[0], func_tmp);
+        compiled_regs[0] = func_tmp;
 
-        // Compile args into consecutive registers after func
-        var arg_regs: [64]u8 = undefined;
         for (items[1..], 0..) |arg, i| {
-            arg_regs[i] = try self.allocReg();
-            try self.compile(arg, arg_regs[i]);
+            const tmp = try self.allocReg();
+            try self.compile(arg, tmp);
+            compiled_regs[1 + i] = tmp;
+        }
+
+        // Phase 2: allocate contiguous block [func_reg, arg0, arg1, ...]
+        const func_reg = try self.allocReg();
+        var contiguous: [65]u8 = undefined;
+        contiguous[0] = func_reg;
+        for (0..argc) |i| {
+            contiguous[1 + i] = try self.allocReg();
+        }
+
+        // Phase 3: move compiled values into contiguous block
+        // func
+        if (compiled_regs[0] != func_reg) {
+            try self.emit(bc.encode_ae(.load_int, func_reg, 0));
+            try self.emit(bc.encode_abc(.add, func_reg, compiled_regs[0], func_reg));
+        }
+        // args
+        for (0..argc) |i| {
+            const src = compiled_regs[1 + i];
+            const dst = contiguous[1 + i];
+            if (src != dst) {
+                try self.emit(bc.encode_ae(.load_int, dst, 0));
+                try self.emit(bc.encode_abc(.add, dst, src, dst));
+            }
         }
 
         // CALL: dest = call(func_reg, argc args starting at func_reg+1)
-        // We encode: A=dest, B=argc, C=func_reg
         try self.emit(bc.encode_abc(.call, dest, argc, func_reg));
     }
 

@@ -32,6 +32,13 @@ pub const CellKind = enum(u8) {
     epsilon = 2,
     /// ι: identity — wire passthrough (administrative). Trit charge 0.
     iota = 3,
+    /// σ: superposition — holds two branches (then/else). Trit charge 0.
+    /// aux[0] = then branch, aux[1] = else branch.
+    /// When σ meets γ(bool), select one branch and erase the other.
+    sup = 4,
+    /// ν: numeric operator — holds an op tag in payload. Trit charge 0.
+    /// aux[0] = left operand, aux[1] = right operand.
+    num_op = 5,
 };
 
 /// A port is (cell_index, port_number). Port 0 = principal.
@@ -68,6 +75,8 @@ pub const Cell = struct {
             .delta => -1,
             .epsilon => 0,
             .iota => 0,
+            .sup => 0,
+            .num_op => 0,
         };
     }
 };
@@ -208,7 +217,41 @@ pub const Net = struct {
         self.cells.items[bi].alive = false;
 
         // Dispatch on cell kinds
-        if (ak == .epsilon and bk == .epsilon) {
+
+        // Level 5: σ-γ superposition selection
+        // σ(then, else) >< γ(bool) → select then or else, erase other
+        if ((ak == .sup and bk == .gamma) or (ak == .gamma and bk == .sup)) {
+            const sup_idx = if (ak == .sup) ai else bi;
+            const cond_idx = if (ak == .sup) bi else ai;
+            const cond_payload = if (ak == .sup) b_payload else a_payload;
+
+            // Determine which branch: truthy → aux[0] (then), falsy → aux[1] (else)
+            const select_then = cond_payload.isTruthy();
+            const keep_port: u8 = if (select_then) 1 else 2;
+            const erase_port: u8 = if (select_then) 2 else 1;
+
+            // Rewire kept branch to wherever the sup's principal was connected
+            const kept_target = self.findConnected(.{ .cell = sup_idx, .port = keep_port });
+            const erased_target = self.findConnected(.{ .cell = sup_idx, .port = erase_port });
+
+            self.removeWiresTo(.{ .cell = sup_idx, .port = keep_port });
+            self.removeWiresTo(.{ .cell = sup_idx, .port = erase_port });
+
+            // Wire kept branch to the cond's connections (pass-through)
+            if (kept_target) |kt| {
+                const cond_connected = self.findConnected(Port.principal(cond_idx));
+                if (cond_connected) |cc| {
+                    self.removeWiresTo(Port.principal(cond_idx));
+                    self.connect(kt, cc) catch {};
+                }
+            }
+
+            // Erase the discarded branch
+            if (erased_target) |et| {
+                const eps = try self.addCell(.epsilon, 0, Value.makeNil());
+                self.connect(Port.principal(eps), et) catch {};
+            }
+        } else if (ak == .epsilon and bk == .epsilon) {
             // ε-ε: both already dead, done
         } else if (ak == .epsilon or bk == .epsilon) {
             // X-ε or ε-X: eraser propagates — spawn erasers on other's aux ports
@@ -422,4 +465,42 @@ test "inet: reduce to normal form" {
     // Step 2: ε-ε kills both
     try std.testing.expectEqual(@as(usize, 2), steps);
     try std.testing.expectEqual(@as(usize, 0), net.liveCells());
+}
+
+test "inet: superposition select truthy" {
+    var net = Net.init(std.testing.allocator);
+    defer net.deinit();
+
+    // σ(then=γ(42), else=γ(99)) >< γ(true) → keep γ(42), erase γ(99)
+    const then_cell = try net.addCell(.gamma, 0, Value.makeInt(42));
+    const else_cell = try net.addCell(.gamma, 0, Value.makeInt(99));
+    const cond = try net.addCell(.gamma, 0, Value.makeBool(true));
+    const sup = try net.addCell(.sup, 2, Value.makeNil());
+
+    try net.connect(Port.aux(sup, 0), Port.principal(then_cell));
+    try net.connect(Port.aux(sup, 1), Port.principal(else_cell));
+    try net.connect(Port.principal(sup), Port.principal(cond));
+
+    var res = Resources.initDefault();
+    _ = try net.reduceAll(&res);
+    try std.testing.expect(net.cells.items[then_cell].alive);
+}
+
+test "inet: superposition select falsy" {
+    var net = Net.init(std.testing.allocator);
+    defer net.deinit();
+
+    // σ(then=γ(42), else=γ(99)) >< γ(false) → keep γ(99), erase γ(42)
+    const then_cell = try net.addCell(.gamma, 0, Value.makeInt(42));
+    const else_cell = try net.addCell(.gamma, 0, Value.makeInt(99));
+    const cond = try net.addCell(.gamma, 0, Value.makeBool(false));
+    const sup = try net.addCell(.sup, 2, Value.makeNil());
+
+    try net.connect(Port.aux(sup, 0), Port.principal(then_cell));
+    try net.connect(Port.aux(sup, 1), Port.principal(else_cell));
+    try net.connect(Port.principal(sup), Port.principal(cond));
+
+    var res = Resources.initDefault();
+    _ = try net.reduceAll(&res);
+    try std.testing.expect(net.cells.items[else_cell].alive);
 }

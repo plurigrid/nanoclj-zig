@@ -7,12 +7,13 @@ The expander maps each compression step to specific file changes.
 
 ---
 
-## Level 1: Fuel Fork/Join (K≈820, parallelism≈30%)
+## Level 1: Fuel Fork/Join (K≈820, parallelism≈30%) ✓ IMPLEMENTED
 
 **What**: Split `Resources` across independent arg evaluations.
-**Where**: `src/transitivity.zig` (Resources) + `src/transduction.zig` (evalBoundedBuiltin)
+**Where**: `src/transitivity.zig` (Resources.fork/join) + `src/thread_peval.zig` (OS threads) + `src/transduction.zig` (peval special form)
 **From**: `.topos/repos/ringmpsc/` (lock-free channel primitive)
 **From**: `papers/resource-bounded-type-theory-graded-modalities.md` (graded comonad)
+**Status**: `(peval expr1 expr2 ...)` dispatches to real OS threads via `thread_peval.zig`. Mutex-protected GC. Fork/join fuel conservation verified by tests.
 
 ```zig
 // Resources gets fork/join
@@ -32,11 +33,12 @@ Each fork costs 0 (reversible). Join costs kT·ln(n) to merge n results.
 
 ---
 
-## Level 2: let* DAG Analysis (K≈850, parallelism≈45%)
+## Level 2: let* DAG Analysis (K≈850, parallelism≈45%) ✓ IMPLEMENTED
 
 **What**: Analyze `let*` bindings for independence, eval independent ones in parallel.
-**Where**: `src/transduction.zig` (evalBoundedLet)
+**Where**: `src/transduction.zig` (evalBoundedLet + scanDeps)
 **From**: `papers/elixir-lazy-bdds-eager-intersections.md` (lazy BDD dep analysis)
+**Status**: `scanDeps` builds u32 bitmask of symbol references per binding. Topological layer assignment groups independent bindings. Each layer evals with forked fuel. ≤32 bindings supported (bitmask width).
 
 ```zig
 fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
@@ -70,13 +72,14 @@ pub fn evalFile(path: []const u8, env: *Env, gc: *GC) !void {
 
 ---
 
-## Level 4: Interaction Net Cells (K≈200, parallelism≈80%)
+## Level 4: Interaction Net Cells (K≈200, parallelism≈80%) ✓ IMPLEMENTED
 
 **What**: Replace tree-walking eval with interaction net reduction.
-**Where**: NEW `src/inet.zig`
+**Where**: `src/inet.zig` (Net, Cell, rewrite rules) + `src/inet_compile.zig` (Lamping compiler + readback) + `src/inet_builtins.zig`
 **From**: `.topos/repos/deltanets/` (reference TypeScript impl)
 **From**: `.topos/repos/optiscope/` (reference C impl, Lévy-optimal)
 **From**: `.topos/repos/interaction-net-resources/` (theory)
+**Status**: γ/δ/ε cells with Lafont's 3 rules (annihilation, commutation, erasure). GF(3) charge conservation. Full compile→reduce→readback pipeline via `(inet-eval 'expr)`. 8 tests passing.
 
 ```zig
 // 6 cell types, each fits in 64 bits (NaN-box compatible)
@@ -108,11 +111,12 @@ fn rewrite(net: *Net, a: CellId, b: CellId) void {
 
 ---
 
-## Level 5: Superposition (K≈220, parallelism≈92%)
+## Level 5: Superposition (K≈220, parallelism≈92%) ✓ IMPLEMENTED
 
-**What**: `if` creates SUP node; both branches reduce in parallel.
-**Where**: `src/inet.zig` (add SUP/DUP interaction)
+**What**: `if` creates σ (SUP) node; both branches compile into net, condition selects via σ-γ rule.
+**Where**: `src/inet.zig` (CellKind.sup + σ-γ reduction rule) + `src/inet_compile.zig` (if → SUP compilation)
 **From**: `papers/linear-logic-negative-connectives.md` (Section 3: parallel rule application)
+**Status**: σ cell with arity 2 (then/else). σ-γ(bool) active pair selects one branch, erases other. Both branches reduce speculatively until condition resolves.
 
 ```zig
 // if-then-else becomes:

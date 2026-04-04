@@ -224,12 +224,16 @@ pub fn inetDotFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
             .delta => "invtriangle",
             .epsilon => "point",
             .iota => "diamond",
+            .sup => "hexagon",
+            .num_op => "box",
         };
         const label: []const u8 = switch (cell.kind) {
             .gamma => "γ",
             .delta => "δ",
             .epsilon => "ε",
             .iota => "ι",
+            .sup => "⊔",
+            .num_op => "op",
         };
         const line = std.fmt.bufPrint(&fmt_buf, "  c{d} [shape={s} label=\"{s}{d}\"];\n", .{ i, shape, label, i }) catch continue;
         try buf.appendSlice(gc.allocator, line);
