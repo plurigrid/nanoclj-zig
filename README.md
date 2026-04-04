@@ -227,23 +227,24 @@ Benchmarks on Apple Silicon (ReleaseFast, Zig 0.15.2). Compared against Janet 1.
 
 | Benchmark | nanoclj-zig | Janet 1.40.1 | Ratio |
 |-----------|-------------|--------------|-------|
-| fib(20) | <0.01s | <0.01s | ~1x |
+| fib(20) | 0.005s | <0.01s | ~1x |
 | fib(25) | 0.02s | <0.01s | ~2x |
-| fib(28) | 0.13s | 0.01s | ~13x |
+| fib(28) | 0.08s | 0.01s | ~8x |
 | fib(30) | fuel limit* | 0.04s | — |
-| tak(18,12,6) | 0.02s | <0.01s | ~2x |
-| startup | <0.01s | <0.01s | ~1x |
+| tak(18,12,6) | 0.006s | <0.01s | ~1x |
+| startup | 0.001s | <0.01s | ~1x |
 | binary size | 1.1 MB | 71 KB | 15x |
 
 \* nanoclj-zig's fuel limit (10B steps) caps very deep recursion.
 
-**Optimizations applied (v0.2):** Lazy fork (sequential eval skips fork/join),
-comptime depthFuelCost LUT (eliminates ~10M float ops), symbol-ID special form
-dispatch (u48 compare instead of string compare). Combined ~2.2x speedup over v0.1.
+**Optimizations (v0.2 -> v0.3, 3.7x cumulative speedup):**
+1. Lazy fork — sequential eval skips fork/join (peval retains its own fork path)
+2. Comptime depthFuelCost LUT — 512-entry table eliminates ~10M float ops
+3. Symbol-ID special form dispatch — u48 compare instead of string compare
+4. SmallEnv fast path — array-backed bindings for functions with <=8 params (no heap alloc)
+5. Worklist-based GC mark — no recursion, bounded stack usage
 
-The remaining ~13x gap vs Janet is the fundamental tree-walking vs bytecode-VM
-difference: Janet compiles to bytecodes with a tight switch loop; nanoclj-zig
-re-traverses the AST on every eval.
+The remaining ~8x gap vs Janet is the tree-walking vs bytecode-VM difference.
 
 ## Dependencies
 
