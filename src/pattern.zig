@@ -137,16 +137,14 @@ pub const ThompsonNfa = struct {
     }
 
     fn addEpsilon(self: *const ThompsonNfa, states: *[MAX_STATES]bool, s: u8) void {
-        if (s >= self.len or states.*[s]) return;
-        // Don't set states[s] = true here, it's already set by caller
+        if (s >= self.len) return;
+        if (states.*[s]) return; // cycle guard
+        states.*[s] = true;
         const inst = self.insts[s];
         if (inst.op == .split) {
-            states.*[inst.out1] = true;
             self.addEpsilon(states, inst.out1);
-            states.*[inst.out2] = true;
             self.addEpsilon(states, inst.out2);
         } else if (inst.op == .jump) {
-            states.*[inst.out1] = true;
             self.addEpsilon(states, inst.out1);
         }
     }

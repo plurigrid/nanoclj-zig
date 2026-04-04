@@ -289,6 +289,83 @@ fn loadBcPrelude(gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) void {
     }
 }
 
+/// Load standard Clojure macros into the tree-walk environment.
+fn loadMacroPrelude(env: *Env, gc: *GC) void {
+    const eval_mod = @import("eval.zig");
+    const macros = [_][]const u8{
+        // when: (when test body...)
+        \\(defmacro when [test & body]
+        \\  (list 'if test (cons 'do body)))
+        ,
+        // when-not: (when-not test body...)
+        \\(defmacro when-not [test & body]
+        \\  (list 'if test nil (cons 'do body)))
+        ,
+        // cond: (cond test1 expr1 test2 expr2 ...)
+        \\(defmacro cond [& clauses]
+        \\  (when (> (count clauses) 0)
+        \\    (list 'if (first clauses)
+        \\      (first (rest clauses))
+        \\      (cons 'cond (rest (rest clauses))))))
+        ,
+        // ->: thread-first
+        \\(defmacro -> [x & forms]
+        \\  (reduce (fn* [acc form]
+        \\    (if (list? form)
+        \\      (cons (first form) (cons acc (rest form)))
+        \\      (list form acc)))
+        \\    x forms))
+        ,
+        // ->>: thread-last
+        \\(defmacro ->> [x & forms]
+        \\  (reduce (fn* [acc form]
+        \\    (if (list? form)
+        \\      (conj form acc)
+        \\      (list form acc)))
+        \\    x forms))
+        ,
+        // and: short-circuit and
+        \\(defmacro and [& xs]
+        \\  (cond
+        \\    (zero? (count xs)) true
+        \\    (= 1 (count xs)) (first xs)
+        \\    (list 'if (first xs) (cons 'and (rest xs)) false)))
+        ,
+        // or: short-circuit or (simplified — no let binding)
+        \\(defmacro or [& xs]
+        \\  (cond
+        \\    (zero? (count xs)) nil
+        \\    (= 1 (count xs)) (first xs)
+        \\    (list 'let* ['__or__ (first xs)]
+        \\      (list 'if '__or__ '__or__ (cons 'or (rest xs))))))
+        ,
+        // doto: (doto x (f args...) (g args...))
+        \\(defmacro doto [x & forms]
+        \\  (let* [gx '__doto__]
+        \\    (cons 'let* (cons [gx x]
+        \\      (conj (map (fn* [f] (cons (first f) (cons gx (rest f)))) forms) gx)))))
+        ,
+        // if-let: (if-let [x expr] then else)
+        \\(defmacro if-let [bindings then & else-forms]
+        \\  (list 'let* bindings
+        \\    (list 'if (first bindings)
+        \\      then
+        \\      (if (> (count else-forms) 0) (first else-forms) nil))))
+        ,
+        // when-let: (when-let [x expr] body...)
+        \\(defmacro when-let [bindings & body]
+        \\  (list 'let* bindings
+        \\    (cons 'when (cons (first bindings) body))))
+        ,
+    };
+
+    for (macros) |src| {
+        var reader = Reader.init(src, gc);
+        const form = reader.readForm() catch continue;
+        _ = eval_mod.eval(form, env, gc) catch {};
+    }
+}
+
 pub fn main() !void {
     const compat = @import("compat.zig");
     var gpa = compat.makeDebugAllocator();

@@ -100,6 +100,11 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
             },
             .lazy_seq => try buf.appendSlice(gc.allocator, "#<lazy-seq>"),
             .partial_fn => try buf.appendSlice(gc.allocator, "#<partial>"),
+            .multimethod => {
+                try buf.appendSlice(gc.allocator, "#<multimethod ");
+                try buf.appendSlice(gc.allocator, obj.data.multimethod.name);
+                try buf.appendSlice(gc.allocator, ">");
+            },
         }
     } else {
         // float

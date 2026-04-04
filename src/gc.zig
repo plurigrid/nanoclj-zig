@@ -241,6 +241,9 @@ pub const GC = struct {
             .partial_fn => {
                 obj.data.partial_fn.bound_args.deinit(self.allocator);
             },
+            .multimethod => {
+                obj.data.multimethod.methods.deinit(self.allocator);
+            },
         }
         self.allocator.destroy(obj);
         self.bytes_allocated -|= @sizeOf(Obj);
