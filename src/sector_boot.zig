@@ -51,29 +51,34 @@ var IF_ATOM: i16 = 0;
 // Global environment (alist of (symbol . value) pairs)
 var global_env: i16 = 0; // NIL initially
 
-// ── BIOS I/O ─────────────────────────────────────────────────────
+// ── BIOS I/O (freestanding only) ─────────────────────────────────
+const is_freestanding = @import("builtin").os.tag == .freestanding;
 
 fn putchar(c: u8) void {
-    asm volatile (
-        \\ mov $0x0E, %%ah
-        \\ int $0x10
-        :
-        : [al] "{al}" (c),
-        : "ah"
-    );
+    if (is_freestanding) {
+        asm volatile (
+            \\ mov $0x0E, %%ah
+            \\ int $0x10
+            :
+            : [al] "{al}" (c),
+            : "ah"
+        );
+    } else {
+        _ = c;
+    }
 }
 
 fn getchar() u8 {
-    var result: u8 = undefined;
-    asm volatile (
-        \\ xor %%ah, %%ah
-        \\ int $0x16
-        : [ret] "={al}" (result),
-        :
-        : "ah"
-    );
-    _ = &result;
-    return result;
+    if (is_freestanding) {
+        return asm volatile (
+            \\ xor %%ah, %%ah
+            \\ int $0x16
+            : [ret] "={al}" (-> u8),
+            :
+            : "ah"
+        );
+    }
+    return 0;
 }
 
 fn puts(s: [*]const u8) void {
@@ -472,7 +477,13 @@ fn main_loop() void {
 
 // ── Boot entry ───────────────────────────────────────────────────
 
-export fn _start() callconv(.naked) noreturn {
+comptime {
+    if (is_freestanding) {
+        @export(&_start_impl, .{ .name = "_start" });
+    }
+}
+
+fn _start_impl() callconv(.naked) noreturn {
     asm volatile (
         \\ cli
         \\ xor %%ax, %%ax
@@ -488,11 +499,12 @@ export fn _start() callconv(.naked) noreturn {
     );
 }
 
-// ── Panic handler (required for freestanding) ────────────────────
-
 pub fn panic(_: []const u8, _: ?*@import("std").builtin.StackTrace, _: ?usize) noreturn {
-    puts("PANIC\r\n");
-    while (true) asm volatile ("hlt");
+    if (is_freestanding) {
+        puts("PANIC\r\n");
+        while (true) asm volatile ("hlt");
+    }
+    while (true) {}
 }
 
 // ── Compile-time tests (run in host mode, not freestanding) ──────
