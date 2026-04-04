@@ -25,8 +25,11 @@ pub const structuralEq = transitivity.structuralEq;
 pub const valueTrit = transitivity.valueTrit;
 pub const checkSoundness = transitivity.checkSoundness;
 
+pub const transcendental = @import("transcendental.zig");
+
 test {
     _ = transclusion;
     _ = transduction;
     _ = transitivity;
+    _ = transcendental;
 }
