@@ -89,7 +89,7 @@
     (is (nil? (cond false 1))))
   (testing "threading"
     (is= 9 (-> 1 (+ 2) (* 3)))
-    (is= 15 (->> (list 1 2 3 4 5) (filter odd?) (map inc) (reduce + 0))))
+    (is= 12 (->> (list 1 2 3 4 5) (filter odd?) (map inc) (reduce + 0))))
   (testing "if-let/when-let"
     (is= 42 (if-let [x 42] x 0))
     (is= 0 (if-let [x nil] x 0))
@@ -109,7 +109,7 @@
     (is= (list 2 4) (filter even? (list 1 2 3 4 5)))
     (is= 15 (reduce + 0 (list 1 2 3 4 5))))
   (testing "sort"
-    (is= (list 1 2 3 4 5) (sort (list 3 1 4 1 5)))))
+    (is= [1 1 3 4 5] (sort (list 3 1 4 1 5)))))
 
 (deftest test-nested-maps
   (testing "get-in"

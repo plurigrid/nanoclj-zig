@@ -151,6 +151,14 @@ pub const GC = struct {
             const cur = worklist.items[worklist.items.len - 1];
             worklist.items.len -= 1; // pop
 
+            // Mark metadata if present
+            if (cur.meta) |m| {
+                if (!m.marked) {
+                    m.marked = true;
+                    worklist.append(self.allocator, m) catch {};
+                }
+            }
+
             switch (cur.kind) {
                 .list => for (cur.data.list.items.items) |v| self.enqueueVal(v, &worklist),
                 .vector => for (cur.data.vector.items.items) |v| self.enqueueVal(v, &worklist),

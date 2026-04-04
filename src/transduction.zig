@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const value = @import("value.zig");
+const semantics = @import("semantics.zig");
 const Value = value.Value;
 const Obj = value.Obj;
 const ObjKind = value.ObjKind;
@@ -136,6 +137,91 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
             }
             if (std.mem.eql(u8, sname, "try")) return evalBoundedTry(items, env, gc, res);
             if (std.mem.eql(u8, sname, "ns") or std.mem.eql(u8, sname, "in-ns")) return Domain.pure(Value.makeNil());
+            if (std.mem.eql(u8, sname, "comment")) return Domain.pure(Value.makeNil());
+            // and: short-circuit, return first falsy or last value
+            if (std.mem.eql(u8, sname, "and")) {
+                var result = Domain.pure(Value.makeBool(true));
+                for (items[1..]) |form| {
+                    result = evalBounded(form, env, gc, res);
+                    if (!result.isValue()) return result;
+                    if (!result.value.isTruthy()) return result;
+                }
+                return result;
+            }
+            // or: short-circuit, return first truthy or last value
+            if (std.mem.eql(u8, sname, "or")) {
+                var result = Domain.pure(Value.makeNil());
+                for (items[1..]) |form| {
+                    result = evalBounded(form, env, gc, res);
+                    if (!result.isValue()) return result;
+                    if (result.value.isTruthy()) return result;
+                }
+                return result;
+            }
+            // when: (when test body...) = if test is truthy, eval body
+            if (std.mem.eql(u8, sname, "when")) {
+                if (items.len < 2) return Domain.pure(Value.makeNil());
+                const test_d = evalBounded(items[1], env, gc, res);
+                if (!test_d.isValue()) return test_d;
+                if (!test_d.value.isTruthy()) return Domain.pure(Value.makeNil());
+                var result = Domain.pure(Value.makeNil());
+                for (items[2..]) |form| {
+                    result = evalBounded(form, env, gc, res);
+                    if (!result.isValue()) return result;
+                }
+                return result;
+            }
+            if (std.mem.eql(u8, sname, "when-not")) {
+                if (items.len < 2) return Domain.pure(Value.makeNil());
+                const test_d = evalBounded(items[1], env, gc, res);
+                if (!test_d.isValue()) return test_d;
+                if (test_d.value.isTruthy()) return Domain.pure(Value.makeNil());
+                var result = Domain.pure(Value.makeNil());
+                for (items[2..]) |form| {
+                    result = evalBounded(form, env, gc, res);
+                    if (!result.isValue()) return result;
+                }
+                return result;
+            }
+            // case: (case expr val1 result1 val2 result2 ... default)
+            if (std.mem.eql(u8, sname, "case")) {
+                if (items.len < 3) return Domain.fail(.arity_error);
+                const expr_d = evalBounded(items[1], env, gc, res);
+                if (!expr_d.isValue()) return expr_d;
+                var i: usize = 2;
+                while (i + 1 < items.len) : (i += 2) {
+                    if (semantics.structuralEq(expr_d.value, items[i], gc))
+                        return evalBounded(items[i + 1], env, gc, res);
+                }
+                // Odd remaining item = default
+                if (i < items.len) return evalBounded(items[i], env, gc, res);
+                return Domain.pure(Value.makeNil());
+            }
+            // doseq: (doseq [x coll] body...) — eval body for side effects
+            if (std.mem.eql(u8, sname, "doseq")) {
+                if (items.len < 3) return Domain.fail(.arity_error);
+                if (!items[1].isObj()) return Domain.fail(.type_error);
+                const bindings = switch (items[1].asObj().kind) {
+                    .vector => items[1].asObj().data.vector.items.items,
+                    .list => items[1].asObj().data.list.items.items,
+                    else => return Domain.fail(.type_error),
+                };
+                if (bindings.len < 2 or !bindings[0].isSymbol()) return Domain.fail(.type_error);
+                const sym_name = gc.getString(bindings[0].asSymbolId());
+                const coll_d = evalBounded(bindings[1], env, gc, res);
+                if (!coll_d.isValue()) return coll_d;
+                const coll_items = getItemsDomain(coll_d.value) orelse return Domain.pure(Value.makeNil());
+                for (coll_items) |item| {
+                    const child = env.createChild() catch return Domain.fail(.type_error);
+                    gc.trackEnv(child) catch return Domain.fail(.type_error);
+                    child.set(sym_name, item) catch return Domain.fail(.type_error);
+                    for (items[2..]) |form| {
+                        const d = evalBounded(form, child, gc, res);
+                        if (!d.isValue()) return d;
+                    }
+                }
+                return Domain.pure(Value.makeNil());
+            }
         }
         if (!sf_initialized) {
             const fname = gc.getString(sym_id);
@@ -551,6 +637,16 @@ fn evalBoundedTry(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
         }
     }
     return result;
+}
+
+fn getItemsDomain(val: Value) ?[]Value {
+    if (!val.isObj()) return null;
+    return switch (val.asObj().kind) {
+        .list => val.asObj().data.list.items.items,
+        .vector => val.asObj().data.vector.items.items,
+        .set => val.asObj().data.set.items.items,
+        else => null,
+    };
 }
 
 fn evalBoundedPeval(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {

@@ -51,6 +51,7 @@ pub const Reader = struct {
                 self.pos -= 1;
                 break :blk self.readWrapped("unquote");
             },
+            '^' => self.readMeta(),
             '#' => self.readDispatch(),
             '"' => self.readString(),
             ':' => self.readKeyword(),
@@ -156,8 +157,68 @@ pub const Reader = struct {
                 obj.data.list.items.append(self.gc.allocator, sym) catch return error.OutOfMemory;
                 return Value.makeObj(obj);
             },
-            else => error.UnexpectedChar,
+            else => blk: {
+                // Tagged literals: #tag form → {:tag tag :value form}
+                // Handles #inst "..." and #uuid "..." etc.
+                if (std.ascii.isAlphabetic(c)) {
+                    const start = self.pos;
+                    while (self.pos < self.src.len and (std.ascii.isAlphanumeric(self.src[self.pos]) or self.src[self.pos] == '-' or self.src[self.pos] == '_' or self.src[self.pos] == '.')) {
+                        self.pos += 1;
+                    }
+                    const tag_name = self.src[start..self.pos];
+                    const form = self.readForm() catch return error.UnexpectedChar;
+                    // Build {:tag "tag" :value form}
+                    const m = self.gc.allocObj(.map) catch return error.OutOfMemory;
+                    const tag_kw = self.gc.internString("tag") catch return error.OutOfMemory;
+                    const val_kw = self.gc.internString("value") catch return error.OutOfMemory;
+                    m.data.map.keys.append(self.gc.allocator, Value.makeKeyword(tag_kw)) catch return error.OutOfMemory;
+                    const tag_str_id = self.gc.internString(tag_name) catch return error.OutOfMemory;
+                    m.data.map.vals.append(self.gc.allocator, Value.makeString(tag_str_id)) catch return error.OutOfMemory;
+                    m.data.map.keys.append(self.gc.allocator, Value.makeKeyword(val_kw)) catch return error.OutOfMemory;
+                    m.data.map.vals.append(self.gc.allocator, form) catch return error.OutOfMemory;
+                    break :blk Value.makeObj(m);
+                }
+                break :blk error.UnexpectedChar;
+            },
         };
+    }
+
+    /// ^meta form → (with-meta form meta)
+    /// ^{:k v} form, ^:keyword form → {:keyword true}, ^Type form → {:tag Type}
+    fn readMeta(self: *Reader) ReadError!Value {
+        self.pos += 1; // skip ^
+        // Read the metadata
+        const meta_val = try self.readForm();
+        // Read the target form
+        const target = try self.readForm();
+        // Normalize metadata:
+        // - map → use as-is
+        // - keyword → {:keyword true}
+        // - symbol → {:tag symbol}
+        var meta_map: Value = undefined;
+        if (meta_val.isObj() and meta_val.asObj().kind == .map) {
+            meta_map = meta_val;
+        } else if (meta_val.isKeyword()) {
+            const m = self.gc.allocObj(.map) catch return error.OutOfMemory;
+            m.data.map.keys.append(self.gc.allocator, meta_val) catch return error.OutOfMemory;
+            m.data.map.vals.append(self.gc.allocator, Value.makeBool(true)) catch return error.OutOfMemory;
+            meta_map = Value.makeObj(m);
+        } else if (meta_val.isSymbol()) {
+            const m = self.gc.allocObj(.map) catch return error.OutOfMemory;
+            const tag_kw = self.gc.internString("tag") catch return error.OutOfMemory;
+            m.data.map.keys.append(self.gc.allocator, Value.makeKeyword(tag_kw)) catch return error.OutOfMemory;
+            m.data.map.vals.append(self.gc.allocator, meta_val) catch return error.OutOfMemory;
+            meta_map = Value.makeObj(m);
+        } else {
+            meta_map = meta_val; // fallback
+        }
+        // Build (with-meta target meta-map)
+        const wm_sym = self.gc.internString("with-meta") catch return error.OutOfMemory;
+        const obj = self.gc.allocObj(.list) catch return error.OutOfMemory;
+        obj.data.list.items.append(self.gc.allocator, Value.makeSymbol(wm_sym)) catch return error.OutOfMemory;
+        obj.data.list.items.append(self.gc.allocator, target) catch return error.OutOfMemory;
+        obj.data.list.items.append(self.gc.allocator, meta_map) catch return error.OutOfMemory;
+        return Value.makeObj(obj);
     }
 
     /// #"pattern" => (re-pattern "pattern")

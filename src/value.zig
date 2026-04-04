@@ -42,6 +42,7 @@ pub const Obj = struct {
     kind: ObjKind,
     marked: bool = false,
     is_transient: bool = false, // true = mutable (conj!/assoc!/dissoc! allowed)
+    meta: ?*Obj = null, // optional metadata map
     data: ObjData,
 };
 
