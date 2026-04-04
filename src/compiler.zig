@@ -1,0 +1,553 @@
+//! COMPILER: AST (Value) -> Bytecode (FuncDef)
+//!
+//! Single-pass register-allocating compiler. Walks the parsed AST
+//! and emits 32-bit instructions for the bytecode VM.
+//!
+//! Register allocation is trivial: a monotonic counter. Each new
+//! temporary or local gets the next register. This wastes registers
+//! but keeps the compiler simple and correct.
+
+const std = @import("std");
+const value = @import("value.zig");
+const Value = value.Value;
+const Obj = value.Obj;
+const ObjKind = value.ObjKind;
+const GC = @import("gc.zig").GC;
+const bc = @import("bytecode.zig");
+const Op = bc.Op;
+const Inst = bc.Inst;
+const FuncDef = bc.FuncDef;
+
+pub const CompileError = error{
+    OutOfMemory,
+    InvalidSyntax,
+    TooManyConstants,
+    TooManyRegisters,
+    TooManyLocals,
+};
+
+const Local = struct {
+    name: []const u8,
+    reg: u8,
+};
+
+pub const Compiler = struct {
+    code: std.ArrayListUnmanaged(Inst),
+    constants: std.ArrayListUnmanaged(Value),
+    defs: std.ArrayListUnmanaged(*FuncDef),
+    locals: [256]Local,
+    local_count: u8,
+    next_reg: u8,
+    gc: *GC,
+    allocator: std.mem.Allocator,
+    parent: ?*Compiler, // for nested fn* compilation
+
+    pub fn init(allocator: std.mem.Allocator, gc: *GC, parent: ?*Compiler) Compiler {
+        return .{
+            .code = .{},
+            .constants = .{},
+            .defs = .{},
+            .locals = undefined,
+            .local_count = 0,
+            .next_reg = 0,
+            .gc = gc,
+            .allocator = allocator,
+            .parent = parent,
+        };
+    }
+
+    pub fn deinit(self: *Compiler) void {
+        self.code.deinit(self.allocator);
+        self.constants.deinit(self.allocator);
+        self.defs.deinit(self.allocator);
+    }
+
+    fn allocReg(self: *Compiler) CompileError!u8 {
+        if (self.next_reg == 255) return error.TooManyRegisters;
+        const r = self.next_reg;
+        self.next_reg += 1;
+        return r;
+    }
+
+    fn addConst(self: *Compiler, val: Value) CompileError!u16 {
+        // Deduplicate
+        for (self.constants.items, 0..) |c, i| {
+            if (c.eql(val)) return @intCast(i);
+        }
+        if (self.constants.items.len >= 65535) return error.TooManyConstants;
+        const idx: u16 = @intCast(self.constants.items.len);
+        self.constants.append(self.allocator, val) catch return error.OutOfMemory;
+        return idx;
+    }
+
+    fn emit(self: *Compiler, inst: Inst) CompileError!void {
+        self.code.append(self.allocator, inst) catch return error.OutOfMemory;
+    }
+
+    fn emitAt(self: *Compiler, idx: usize, inst: Inst) void {
+        self.code.items[idx] = inst;
+    }
+
+    fn codeLen(self: *const Compiler) usize {
+        return self.code.items.len;
+    }
+
+    fn resolveLocal(self: *const Compiler, name: []const u8) ?u8 {
+        var i: u8 = self.local_count;
+        while (i > 0) {
+            i -= 1;
+            if (std.mem.eql(u8, self.locals[i].name, name)) return self.locals[i].reg;
+        }
+        return null;
+    }
+
+    fn addLocal(self: *Compiler, name: []const u8, reg: u8) CompileError!void {
+        if (self.local_count == 255) return error.TooManyLocals;
+        self.locals[self.local_count] = .{ .name = name, .reg = reg };
+        self.local_count += 1;
+    }
+
+    // ========================================================================
+    // COMPILE: Value -> register containing result
+    // ========================================================================
+
+    /// Compile an expression, placing the result in `dest` register.
+    pub fn compile(self: *Compiler, expr: Value, dest: u8) CompileError!void {
+        // nil
+        if (expr.isNil()) {
+            try self.emit(bc.encode_d(.load_nil, dest));
+            return;
+        }
+        // bool
+        if (expr.isBool()) {
+            if (expr.asBool()) {
+                try self.emit(bc.encode_d(.load_true, dest));
+            } else {
+                try self.emit(bc.encode_d(.load_false, dest));
+            }
+            return;
+        }
+        // integer
+        if (expr.isInt()) {
+            const i = expr.asInt();
+            if (i >= -32768 and i <= 32767) {
+                try self.emit(bc.encode_ae(.load_int, dest, @bitCast(@as(i16, @intCast(i)))));
+            } else {
+                const ci = try self.addConst(expr);
+                try self.emit(bc.encode_ae(.load_const, dest, ci));
+            }
+            return;
+        }
+        // string/keyword -> constant
+        if (expr.isString() or expr.isKeyword()) {
+            const ci = try self.addConst(expr);
+            try self.emit(bc.encode_ae(.load_const, dest, ci));
+            return;
+        }
+        // symbol -> local or global lookup
+        if (expr.isSymbol()) {
+            const name = self.gc.getString(expr.asSymbolId());
+            if (self.resolveLocal(name)) |local_reg| {
+                if (local_reg != dest) {
+                    // Move from local register to dest (encode as add with 0)
+                    // We need a MOVE instruction -- use load_const with the local value
+                    // Actually, just read from local_reg directly via get_global fallback
+                    // Simplest: emit load_int 0 to a scratch, then add dest = local + scratch
+                    // Better: use the register directly. If caller can accept any register,
+                    // we'd return the register. But our API puts result in dest.
+                    // For now: store local in dest via a self-add trick if different.
+                    // TODO: add MOVE opcode or let compile() return the register instead
+                    try self.emit(bc.encode_ae(.load_int, dest, 0));
+                    try self.emit(bc.encode_abc(.add, dest, local_reg, dest));
+                }
+                // else: result already in dest (happens when dest == local_reg)
+            } else {
+                const sym_const = try self.addConst(Value.makeSymbol(expr.asSymbolId()));
+                try self.emit(bc.encode_ae(.get_global, dest, sym_const));
+            }
+            return;
+        }
+
+        // Not an object -> constant
+        if (!expr.isObj()) {
+            const ci = try self.addConst(expr);
+            try self.emit(bc.encode_ae(.load_const, dest, ci));
+            return;
+        }
+
+        const obj = expr.asObj();
+        if (obj.kind != .list) {
+            // vectors, maps -> constant for now
+            const ci = try self.addConst(expr);
+            try self.emit(bc.encode_ae(.load_const, dest, ci));
+            return;
+        }
+
+        const items = obj.data.list.items.items;
+        if (items.len == 0) {
+            const ci = try self.addConst(expr);
+            try self.emit(bc.encode_ae(.load_const, dest, ci));
+            return;
+        }
+
+        // Special forms
+        if (items[0].isSymbol()) {
+            const name = self.gc.getString(items[0].asSymbolId());
+
+            if (std.mem.eql(u8, name, "quote")) {
+                if (items.len != 2) return error.InvalidSyntax;
+                const ci = try self.addConst(items[1]);
+                try self.emit(bc.encode_ae(.load_const, dest, ci));
+                return;
+            }
+            if (std.mem.eql(u8, name, "if")) return self.compileIf(items, dest);
+            if (std.mem.eql(u8, name, "def")) return self.compileDef(items, dest);
+            if (std.mem.eql(u8, name, "let*")) return self.compileLet(items, dest);
+            if (std.mem.eql(u8, name, "do")) return self.compileDo(items, dest);
+            if (std.mem.eql(u8, name, "fn*")) return self.compileFnStar(items, dest);
+
+            // Inline arithmetic/comparison for known builtins
+            if (items.len == 3) {
+                if (self.tryCompileBinop(name, items[1], items[2], dest)) |_| return;
+            }
+        }
+
+        // General function application: (f arg1 arg2 ...)
+        return self.compileCall(items, dest);
+    }
+
+    // ========================================================================
+    // SPECIAL FORMS
+    // ========================================================================
+
+    fn compileIf(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 3 or items.len > 4) return error.InvalidSyntax;
+
+        // Compile test into dest
+        try self.compile(items[1], dest);
+
+        // jump_if_not -> else branch
+        const jump_else = self.codeLen();
+        try self.emit(0); // placeholder
+
+        // Compile then branch
+        try self.compile(items[2], dest);
+
+        if (items.len == 4) {
+            // jump past else
+            const jump_end = self.codeLen();
+            try self.emit(0); // placeholder
+
+            // Patch jump_else to here
+            const else_offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_else)) - 1);
+            self.emitAt(jump_else, bc.encode_ae(.jump_if_not, dest, @bitCast(else_offset)));
+
+            // Compile else branch
+            try self.compile(items[3], dest);
+
+            // Patch jump_end
+            const end_offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_end)) - 1);
+            self.emitAt(jump_end, bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(@as(i24, @intCast(end_offset)))))));
+        } else {
+            // No else: jump_if_not past, then load nil
+            const else_offset: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_else)));
+            self.emitAt(jump_else, bc.encode_ae(.jump_if_not, dest, @bitCast(else_offset)));
+            try self.emit(bc.encode_d(.load_nil, dest));
+        }
+    }
+
+    fn compileDef(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len != 3) return error.InvalidSyntax;
+        if (!items[1].isSymbol()) return error.InvalidSyntax;
+
+        try self.compile(items[2], dest);
+
+        const sym_const = try self.addConst(Value.makeSymbol(items[1].asSymbolId()));
+        try self.emit(bc.encode_ae(.set_global, dest, sym_const));
+    }
+
+    fn compileLet(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 3) return error.InvalidSyntax;
+        if (!items[1].isObj()) return error.InvalidSyntax;
+
+        const bindings_obj = items[1].asObj();
+        const bindings = if (bindings_obj.kind == .vector)
+            bindings_obj.data.vector.items.items
+        else if (bindings_obj.kind == .list)
+            bindings_obj.data.list.items.items
+        else
+            return error.InvalidSyntax;
+
+        if (bindings.len % 2 != 0) return error.InvalidSyntax;
+
+        const saved_local_count = self.local_count;
+
+        var i: usize = 0;
+        while (i < bindings.len) : (i += 2) {
+            if (!bindings[i].isSymbol()) return error.InvalidSyntax;
+            const name = self.gc.getString(bindings[i].asSymbolId());
+            const reg = try self.allocReg();
+            try self.compile(bindings[i + 1], reg);
+            try self.addLocal(name, reg);
+        }
+
+        // Compile body forms
+        for (items[2..]) |form| {
+            try self.compile(form, dest);
+        }
+
+        // Restore locals (let scope ends)
+        self.local_count = saved_local_count;
+    }
+
+    fn compileDo(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 2) {
+            try self.emit(bc.encode_d(.load_nil, dest));
+            return;
+        }
+        for (items[1..]) |form| {
+            try self.compile(form, dest);
+        }
+    }
+
+    fn compileFnStar(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 3) return error.InvalidSyntax;
+        if (!items[1].isObj()) return error.InvalidSyntax;
+
+        const params_obj = items[1].asObj();
+        const params = if (params_obj.kind == .vector)
+            params_obj.data.vector.items.items
+        else if (params_obj.kind == .list)
+            params_obj.data.list.items.items
+        else
+            return error.InvalidSyntax;
+
+        // Compile body in a child compiler
+        var child = Compiler.init(self.allocator, self.gc, self);
+
+        // Params become locals in registers 0..n-1
+        for (params) |p| {
+            if (!p.isSymbol()) {
+                child.deinit();
+                return error.InvalidSyntax;
+            }
+            const name = self.gc.getString(p.asSymbolId());
+            const reg = child.allocReg() catch {
+                child.deinit();
+                return error.TooManyRegisters;
+            };
+            child.addLocal(name, reg) catch {
+                child.deinit();
+                return error.TooManyLocals;
+            };
+        }
+
+        // Compile body into return register
+        const body_dest = child.allocReg() catch {
+            child.deinit();
+            return error.TooManyRegisters;
+        };
+        for (items[2..]) |form| {
+            child.compile(form, body_dest) catch {
+                child.deinit();
+                return error.InvalidSyntax;
+            };
+        }
+        child.emit(bc.encode_d(.ret, body_dest)) catch {
+            child.deinit();
+            return error.OutOfMemory;
+        };
+
+        // Build FuncDef from child
+        const func_def = self.allocator.create(FuncDef) catch {
+            child.deinit();
+            return error.OutOfMemory;
+        };
+        func_def.* = .{
+            .code = (self.allocator.dupe(Inst, child.code.items) catch {
+                child.deinit();
+                return error.OutOfMemory;
+            }),
+            .constants = (self.allocator.dupe(Value, child.constants.items) catch {
+                child.deinit();
+                return error.OutOfMemory;
+            }),
+            .defs = (self.allocator.dupe(*FuncDef, child.defs.items) catch {
+                child.deinit();
+                return error.OutOfMemory;
+            }),
+            .arity = @intCast(params.len),
+            .num_registers = child.next_reg,
+        };
+        child.deinit();
+
+        // Add to parent's defs table
+        const def_idx: u16 = @intCast(self.defs.items.len);
+        self.defs.append(self.allocator, func_def) catch return error.OutOfMemory;
+
+        try self.emit(bc.encode_ae(.closure, dest, def_idx));
+    }
+
+    // ========================================================================
+    // INLINE BINARY OPERATIONS
+    // ========================================================================
+
+    fn tryCompileBinop(self: *Compiler, name: []const u8, lhs: Value, rhs: Value, dest: u8) ?void {
+        const op: Op = if (std.mem.eql(u8, name, "+")) .add
+        else if (std.mem.eql(u8, name, "-")) .sub
+        else if (std.mem.eql(u8, name, "*")) .mul
+        else if (std.mem.eql(u8, name, "/")) .div
+        else if (std.mem.eql(u8, name, "=")) .eq
+        else if (std.mem.eql(u8, name, "<")) .lt
+        else if (std.mem.eql(u8, name, "<=")) .lte
+        else return null;
+
+        const r_lhs = self.allocReg() catch return null;
+        self.compile(lhs, r_lhs) catch return null;
+        const r_rhs = self.allocReg() catch return null;
+        self.compile(rhs, r_rhs) catch return null;
+        self.emit(bc.encode_abc(op, dest, r_lhs, r_rhs)) catch return null;
+        return {};
+    }
+
+    // ========================================================================
+    // GENERAL FUNCTION CALL
+    // ========================================================================
+
+    fn compileCall(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        const argc: u8 = @intCast(items.len - 1);
+
+        // Compile function into dest+1
+        const func_reg = try self.allocReg();
+        try self.compile(items[0], func_reg);
+
+        // Compile args into consecutive registers after func
+        var arg_regs: [64]u8 = undefined;
+        for (items[1..], 0..) |arg, i| {
+            arg_regs[i] = try self.allocReg();
+            try self.compile(arg, arg_regs[i]);
+        }
+
+        // CALL: dest = call(func_reg, argc args starting at func_reg+1)
+        // We encode: A=dest, B=argc, C=func_reg
+        try self.emit(bc.encode_abc(.call, dest, argc, func_reg));
+    }
+
+    // ========================================================================
+    // FINALIZE: produce a FuncDef for the top-level expression
+    // ========================================================================
+
+    pub fn finalize(self: *Compiler) CompileError!*FuncDef {
+        const func_def = self.allocator.create(FuncDef) catch return error.OutOfMemory;
+        func_def.* = .{
+            .code = self.allocator.dupe(Inst, self.code.items) catch return error.OutOfMemory,
+            .constants = self.allocator.dupe(Value, self.constants.items) catch return error.OutOfMemory,
+            .defs = self.allocator.dupe(*FuncDef, self.defs.items) catch return error.OutOfMemory,
+            .arity = 0,
+            .num_registers = self.next_reg,
+        };
+        return func_def;
+    }
+};
+
+// ============================================================================
+// TESTS
+// ============================================================================
+
+test "compiler: integer literal" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var c = Compiler.init(std.testing.allocator, &gc, null);
+    defer c.deinit();
+
+    const dest = try c.allocReg();
+    try c.compile(Value.makeInt(42), dest);
+    try c.emit(bc.encode_d(.ret, dest));
+
+    try std.testing.expectEqual(@as(usize, 2), c.code.items.len);
+    try std.testing.expectEqual(Op.load_int, bc.decode_op(c.code.items[0]));
+}
+
+test "compiler: if expression" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    // Build: (if true 1 2)
+    const list = try gc.allocObj(.list);
+    const if_sym = try gc.internString("if");
+    try list.data.list.items.append(gc.allocator, Value.makeSymbol(if_sym));
+    try list.data.list.items.append(gc.allocator, Value.makeBool(true));
+    try list.data.list.items.append(gc.allocator, Value.makeInt(1));
+    try list.data.list.items.append(gc.allocator, Value.makeInt(2));
+
+    var c = Compiler.init(std.testing.allocator, &gc, null);
+    defer c.deinit();
+
+    const dest = try c.allocReg();
+    try c.compile(Value.makeObj(list), dest);
+    try c.emit(bc.encode_d(.ret, dest));
+
+    // Should have: load_true, jump_if_not, load_int 1, jump, load_int 2, ret
+    try std.testing.expect(c.code.items.len >= 5);
+}
+
+test "compiler: add expression -> inline binop" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    // Build: (+ 10 20)
+    const list = try gc.allocObj(.list);
+    const plus_sym = try gc.internString("+");
+    try list.data.list.items.append(gc.allocator, Value.makeSymbol(plus_sym));
+    try list.data.list.items.append(gc.allocator, Value.makeInt(10));
+    try list.data.list.items.append(gc.allocator, Value.makeInt(20));
+
+    var c = Compiler.init(std.testing.allocator, &gc, null);
+    defer c.deinit();
+
+    const dest = try c.allocReg();
+    try c.compile(Value.makeObj(list), dest);
+    try c.emit(bc.encode_d(.ret, dest));
+
+    // Should contain an ADD instruction
+    var found_add = false;
+    for (c.code.items) |inst| {
+        if (bc.decode_op(inst) == .add) found_add = true;
+    }
+    try std.testing.expect(found_add);
+}
+
+test "compiler: compile + execute roundtrip" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    // Build: (+ 10 20)
+    const list = try gc.allocObj(.list);
+    const plus_sym = try gc.internString("+");
+    try list.data.list.items.append(gc.allocator, Value.makeSymbol(plus_sym));
+    try list.data.list.items.append(gc.allocator, Value.makeInt(10));
+    try list.data.list.items.append(gc.allocator, Value.makeInt(20));
+
+    var c = Compiler.init(std.testing.allocator, &gc, null);
+    const dest = try c.allocReg();
+    try c.compile(Value.makeObj(list), dest);
+    try c.emit(bc.encode_d(.ret, dest));
+
+    const func_def = try c.finalize();
+    defer {
+        gc.allocator.free(func_def.code);
+        gc.allocator.free(func_def.constants);
+        gc.allocator.free(func_def.defs);
+        gc.allocator.destroy(func_def);
+    }
+    c.deinit();
+
+    const closure = bc.Closure{ .def = func_def, .upvalues = &.{} };
+    var vm = bc.VM.init(&gc, 1000);
+    defer vm.deinit();
+
+    const result = try vm.execute(&closure);
+    try std.testing.expect(result.isInt());
+    try std.testing.expectEqual(@as(i48, 30), result.asInt());
+}

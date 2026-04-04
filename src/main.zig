@@ -184,4 +184,5 @@ test {
     _ = @import("thread_peval.zig");
     _ = @import("peval.zig");
     _ = @import("bytecode.zig");
+    _ = @import("compiler.zig");
 }
