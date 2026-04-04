@@ -751,8 +751,11 @@ pub fn moebiusBoundaryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const seed: i48 = @intCast(substrate.CANONICAL_SEED);
     const excl = mertens_impl(seed - 1);
     const incl = mertens_impl(seed);
-    const excl_trit = @mod(excl + 300, 3) - 1; // map to {-1,0,1}
-    const incl_trit = @mod(incl + 300, 3) - 1;
+    // Map mod 3 to GF(3): {0→0, 1→+1, 2→-1}
+    const excl_r = @mod(excl + 300, 3);
+    const excl_trit: i48 = if (excl_r == 2) -1 else excl_r;
+    const incl_r = @mod(incl + 300, 3);
+    const incl_trit: i48 = if (incl_r == 2) -1 else incl_r;
 
     const obj = try gc.allocObj(.map);
     const kw = struct {

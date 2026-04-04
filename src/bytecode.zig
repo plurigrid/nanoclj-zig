@@ -37,11 +37,13 @@ pub const Op = enum(u8) {
     load_int,     // $A = ES (16-bit signed immediate)
     load_const,   // $A = constants[E]
 
-    // Arithmetic (4)
+    // Arithmetic (6)
     add,          // $A = $B + $C
     sub,          // $A = $B - $C
     mul,          // $A = $B * $C
-    div,          // $A = $B / $C
+    div,          // $A = $B / $C (float division)
+    quot,         // $A = $B ÷ $C (integer truncating division)
+    rem,          // $A = $B % $C (integer remainder)
 
     // Comparison (3)
     eq,           // $A = ($B == $C)
@@ -324,6 +326,32 @@ pub const VM = struct {
                     const bf = if (bv.isInt()) @as(f64, @floatFromInt(bv.asInt())) else bv.asFloat();
                     const cf = if (cv.isInt()) @as(f64, @floatFromInt(cv.asInt())) else cv.asFloat();
                     self.reg(a).* = Value.makeFloat(bf / cf);
+                },
+                .quot => {
+                    const a = decode_a(inst);
+                    const b = decode_b(inst);
+                    const c = decode_c(inst);
+                    const bv = self.reg(b).*;
+                    const cv = self.reg(c).*;
+                    if (bv.isInt() and cv.isInt()) {
+                        const bi = bv.asInt();
+                        const ci = cv.asInt();
+                        if (ci == 0) return error.TypeError;
+                        self.reg(a).* = Value.makeInt(@divTrunc(bi, ci));
+                    } else return error.TypeError;
+                },
+                .rem => {
+                    const a = decode_a(inst);
+                    const b = decode_b(inst);
+                    const c = decode_c(inst);
+                    const bv = self.reg(b).*;
+                    const cv = self.reg(c).*;
+                    if (bv.isInt() and cv.isInt()) {
+                        const bi = bv.asInt();
+                        const ci = cv.asInt();
+                        if (ci == 0) return error.TypeError;
+                        self.reg(a).* = Value.makeInt(@rem(bi, ci));
+                    } else return error.TypeError;
                 },
 
                 // ── Comparison ──

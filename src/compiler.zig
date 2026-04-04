@@ -400,6 +400,9 @@ pub const Compiler = struct {
         else if (std.mem.eql(u8, name, "=")) .eq
         else if (std.mem.eql(u8, name, "<")) .lt
         else if (std.mem.eql(u8, name, "<=")) .lte
+        else if (std.mem.eql(u8, name, "quot")) .quot
+        else if (std.mem.eql(u8, name, "mod")) .rem
+        else if (std.mem.eql(u8, name, "rem")) .rem
         else return null;
 
         const r_lhs = self.allocReg() catch return null;
