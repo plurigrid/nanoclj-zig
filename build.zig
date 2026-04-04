@@ -107,6 +107,31 @@ pub fn build(b: *std.Build) void {
     const demo_step = b.step("world", "Run world showcase");
     demo_step.dependOn(&demo_run.step);
 
+    // SectorClojure freestanding x86 boot image
+    const sector_target = b.resolveTargetQuery(.{
+        .cpu_arch = .x86,
+        .os_tag = .freestanding,
+        .abi = .none,
+    });
+    const sector_exe = b.addExecutable(.{
+        .name = "sector.elf",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/sector_boot.zig"),
+            .target = sector_target,
+            .optimize = .ReleaseSmall,
+            .strip = true,
+            .unwind_tables = .none,
+            .red_zone = false,
+        }),
+    });
+    sector_exe.setLinkerScript(b.path("src/linker.ld"));
+    b.installArtifact(sector_exe);
+
+    const sector_bin = sector_exe.addObjCopy(.{ .format = .bin });
+    const sector_install = b.addInstallBinFile(sector_bin.getOutput(), "sector.bin");
+    const sector_step = b.step("sector", "Build SectorClojure freestanding boot image");
+    sector_step.dependOn(&sector_install.step);
+
     // Tests
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{

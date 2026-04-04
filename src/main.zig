@@ -520,6 +520,102 @@ pub fn main() !void {
             continue;
         }
 
+        // SectorClojure tier introspection: (sector-tier), (sector-tier N), (sector-builtins)
+        if (std.mem.eql(u8, line, "(sector-builtins)")) {
+            const sector = @import("sector.zig");
+            var tier_idx: u4 = 0;
+            while (tier_idx <= @intFromEnum(sector.Tier.full)) : (tier_idx += 1) {
+                const tier: sector.Tier = @enumFromInt(tier_idx);
+                const spec = sector.TIER_SPECS[tier_idx];
+                var buf2: [256]u8 = undefined;
+                const hdr = std.fmt.bufPrint(&buf2, "Tier {d} ({s}): {d} builtins — {s}\n", .{
+                    tier_idx, spec.name, sector.countBuiltinsAtTier(tier), spec.description,
+                }) catch continue;
+                compat.fileWriteAll(stdout, hdr);
+            }
+            continue;
+        }
+        if (std.mem.eql(u8, line, "(sector-tier)")) {
+            compat.fileWriteAll(stdout, "8 (full nanoclj-zig)\n");
+            continue;
+        }
+        if (std.mem.startsWith(u8, line, "(sector-tier ") and line[line.len - 1] == ')') {
+            const sector = @import("sector.zig");
+            const inner = line[13 .. line.len - 1];
+            const tier_num = std.fmt.parseInt(u4, std.mem.trim(u8, inner, " "), 10) catch {
+                compat.fileWriteAll(stdout, "Error: tier must be 0-8\n");
+                continue;
+            };
+            if (tier_num > @intFromEnum(sector.Tier.full)) {
+                compat.fileWriteAll(stdout, "Error: tier must be 0-8\n");
+                continue;
+            }
+            const tier: sector.Tier = @enumFromInt(tier_num);
+            const spec = sector.TIER_SPECS[tier_num];
+
+            // Create a fresh restricted environment
+            var sector_env = Env.init(allocator, null);
+            sector_env.is_root = true;
+            defer sector_env.deinit();
+
+            const n = sector.initTier(&sector_env, &gc, tier) catch {
+                compat.fileWriteAll(stdout, "Error: failed to init sector tier\n");
+                continue;
+            };
+            sector.loadTierMacros(tier, &sector_env, &gc);
+
+            var buf2: [256]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf2, "SectorClojure Tier {d} ({s}): {d} builtins loaded\n{s}\n", .{
+                tier_num, spec.name, n, spec.description,
+            }) catch "ok\n";
+            compat.fileWriteAll(stdout, msg);
+
+            // Enter sector sub-REPL
+            compat.fileWriteAll(stdout, "Entering sector REPL (type (exit) to return)\n");
+            while (true) {
+                var pbuf: [128]u8 = undefined;
+                const sprompt = std.fmt.bufPrint(&pbuf, "\x1b[33msc/{s}\x1b[0m=> ", .{spec.name}) catch "sc=> ";
+                compat.fileWriteAll(stdout, sprompt);
+
+                var sbuf = @import("compat.zig").emptyList(u8);
+                defer sbuf.deinit(allocator);
+                while (true) {
+                    var byte2: [1]u8 = undefined;
+                    const n2 = compat.fileRead(stdin_file, &byte2);
+                    if (n2 == 0) break;
+                    if (byte2[0] == '\n') {
+                        var depth2: i32 = 0;
+                        var in_str = false;
+                        for (sbuf.items) |ch| {
+                            if (ch == '"') in_str = !in_str;
+                            if (!in_str) {
+                                if (ch == '(') depth2 += 1;
+                                if (ch == ')') depth2 -= 1;
+                            }
+                        }
+                        if (depth2 > 0) {
+                            sbuf.append(allocator, ' ') catch break;
+                            compat.fileWriteAll(stdout, "  ");
+                            continue;
+                        }
+                        break;
+                    }
+                    sbuf.append(allocator, byte2[0]) catch break;
+                }
+                const sline = sbuf.items;
+                if (sline.len == 0) continue;
+                if (std.mem.eql(u8, sline, "(exit)") or std.mem.eql(u8, sline, "(quit)")) break;
+
+                const sresult = rep(sline, &sector_env, &gc) catch "Error: internal error";
+                if (!std.mem.eql(u8, sresult, "nil") or !isCommentOnly(sline)) {
+                    compat.fileWriteAll(stdout, sresult);
+                    compat.fileWriteAll(stdout, "\n");
+                }
+            }
+            compat.fileWriteAll(stdout, "Returned to full nanoclj-zig\n");
+            continue;
+        }
+
         // Bytecode eval: (bc <expr>)
         if (std.mem.startsWith(u8, line, "(bc ") and line[line.len - 1] == ')') {
             const inner = line[4 .. line.len - 1];
