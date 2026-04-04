@@ -143,6 +143,20 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
             if (std.mem.eql(u8, fname, "peval")) return evalBoundedPeval(items, env, gc, res);
         }
 
+        // Macro expansion: check if symbol resolves to a macro
+        {
+            const sym_name = gc.getString(sym_id);
+            if (env.get(sym_name)) |head_val| {
+                if (head_val.isObj() and head_val.asObj().kind == .macro_fn) {
+                    // Pass unevaluated args to macro, then eval result
+                    const eval_mod = @import("eval.zig");
+                    const expanded = eval_mod.apply(head_val, items[1..], env, gc) catch
+                        return Domain.fail(.type_error);
+                    return evalBounded(expanded, env, gc, res);
+                }
+            }
+        }
+
         const core = @import("core.zig");
         const name = gc.getString(sym_id);
         if (core.lookupBuiltin(name)) |builtin| {
@@ -153,9 +167,17 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
     const func_d = evalBounded(items[0], env, gc, res);
     if (!func_d.isValue()) return func_d;
 
+    // Macro expansion for non-symbol heads that resolve to macros
+    if (func_d.value.isObj() and func_d.value.asObj().kind == .macro_fn) {
+        const eval_mod = @import("eval.zig");
+        const expanded = eval_mod.apply(func_d.value, items[1..], env, gc) catch
+            return Domain.fail(.type_error);
+        return evalBounded(expanded, env, gc, res);
+    }
+
     const core = @import("core.zig");
-    if (core.isBuiltinSentinel(func_d.value, gc)) |name| {
-        if (core.lookupBuiltin(name)) |builtin| {
+    if (core.isBuiltinSentinel(func_d.value, gc)) |bname| {
+        if (core.lookupBuiltin(bname)) |builtin| {
             return evalBoundedBuiltin(builtin, items[1..], env, gc, res);
         }
     }
