@@ -422,6 +422,18 @@ pub const VM = struct {
                         for (0..b) |i| {
                             args_buf[i] = self.stack[base + c + 1 + i];
                         }
+                        // Debug: print builtin name and arg types
+                        {
+                            const compat = @import("compat.zig");
+                            var dbg: [256]u8 = undefined;
+                            const msg = std.fmt.bufPrint(&dbg, "DBG builtin '{s}' argc={d} base={d} c={d} frame={d}\n", .{ builtin.name, b, base, c, self.frame_count }) catch "?";
+                            compat.fileWriteAll(compat.stderrFile(), msg);
+                            for (0..b) |i| {
+                                const av = args_buf[i];
+                                const amsg = std.fmt.bufPrint(&dbg, "  arg[{d}]: isObj={} isInt={} isNil={} bits=0x{x}\n", .{ i, av.isObj(), av.isInt(), av.isNil(), av.bits }) catch "?";
+                                compat.fileWriteAll(compat.stderrFile(), amsg);
+                            }
+                        }
                         // builtins need GC and Env — use a dummy env for now
                         var dummy_env = @import("env.zig").Env.init(self.gc.allocator, null);
                         defer dummy_env.deinit();

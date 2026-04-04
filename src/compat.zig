@@ -117,6 +117,14 @@ pub fn stdoutFile() File {
     }
 }
 
+pub fn stderrFile() File {
+    if (has_fs_file) {
+        return std.fs.File{ .handle = std.posix.STDERR_FILENO };
+    } else {
+        return std.Io.File.stderr();
+    }
+}
+
 pub fn stdinFile() File {
     if (has_fs_file) {
         return std.fs.File{ .handle = std.posix.STDIN_FILENO };

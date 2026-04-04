@@ -316,6 +316,28 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "antinomy", &transcendental.antinomyFn },
         .{ "phenomenon", &transcendental.phenomenonFn },
         .{ "noumenon", &transcendental.noumenonFn },
+        // HOF combinators (using partial_fn ObjKind)
+        .{ "partial", &partialFn },
+        .{ "comp", &compFn },
+        .{ "juxt", &juxtFn },
+        .{ "complement", &complementFn },
+        .{ "constantly", &constantlyFn },
+        // Lazy sequences
+        .{ "lazy-seq", &lazySeqFn },
+        .{ "iterate", &iterateFn },
+        .{ "repeat", &repeatFn },
+        .{ "repeatedly", &repeatedlyFn },
+        .{ "take-while", &takeWhileFn },
+        .{ "drop-while", &dropWhileFn },
+        .{ "zipmap", &zipmapFn },
+        // Additional predicates
+        .{ "realized?", &realizedFn },
+        .{ "integer?", &isIntegerP },
+        .{ "float?", &isFloatP },
+        .{ "pos?", &isPosP },
+        .{ "neg?", &isNegP },
+        .{ "even?", &isEvenP },
+        .{ "odd?", &isOddP },
     };
 
     inline for (builtins) |b| {
@@ -2478,4 +2500,198 @@ fn matchAllFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         try obj.data.vector.items.append(gc.allocator, Value.makeObj(entry));
     }
     return Value.makeObj(obj);
+}
+
+// ============================================================================
+// HOF COMBINATORS (using partial_fn ObjKind)
+// ============================================================================
+
+fn partialFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    const obj = try gc.allocObj(.partial_fn);
+    obj.data.partial_fn.func = args[0];
+    for (args[1..]) |a| {
+        try obj.data.partial_fn.bound_args.append(gc.allocator, a);
+    }
+    return Value.makeObj(obj);
+}
+
+fn compFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return error.ArityError;
+    if (args.len == 1) return args[0];
+    const obj = try gc.allocObj(.partial_fn);
+    obj.data.partial_fn.func = Value.makeNil(); // sentinel for comp
+    const marker = Value.makeKeyword(try gc.internString("__comp__"));
+    try obj.data.partial_fn.bound_args.append(gc.allocator, marker);
+    for (args) |a| try obj.data.partial_fn.bound_args.append(gc.allocator, a);
+    return Value.makeObj(obj);
+}
+
+fn juxtFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return error.ArityError;
+    const obj = try gc.allocObj(.partial_fn);
+    obj.data.partial_fn.func = Value.makeNil();
+    const marker = Value.makeKeyword(try gc.internString("__juxt__"));
+    try obj.data.partial_fn.bound_args.append(gc.allocator, marker);
+    for (args) |a| try obj.data.partial_fn.bound_args.append(gc.allocator, a);
+    return Value.makeObj(obj);
+}
+
+fn complementFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try gc.allocObj(.partial_fn);
+    obj.data.partial_fn.func = Value.makeNil();
+    const marker = Value.makeKeyword(try gc.internString("__complement__"));
+    try obj.data.partial_fn.bound_args.append(gc.allocator, marker);
+    try obj.data.partial_fn.bound_args.append(gc.allocator, args[0]);
+    return Value.makeObj(obj);
+}
+
+fn constantlyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try gc.allocObj(.partial_fn);
+    obj.data.partial_fn.func = Value.makeNil();
+    const marker = Value.makeKeyword(try gc.internString("__constantly__"));
+    try obj.data.partial_fn.bound_args.append(gc.allocator, marker);
+    try obj.data.partial_fn.bound_args.append(gc.allocator, args[0]);
+    return Value.makeObj(obj);
+}
+
+// ============================================================================
+// LAZY SEQUENCES
+// ============================================================================
+
+fn iterateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const obj = try gc.allocObj(.lazy_seq);
+    const payload = try gc.allocObj(.vector);
+    const marker = Value.makeKeyword(try gc.internString("__iterate__"));
+    try payload.data.vector.items.append(gc.allocator, marker);
+    try payload.data.vector.items.append(gc.allocator, args[0]);
+    try payload.data.vector.items.append(gc.allocator, args[1]);
+    obj.data.lazy_seq.thunk = Value.makeObj(payload);
+    return Value.makeObj(obj);
+}
+
+fn repeatFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 and args.len != 2) return error.ArityError;
+    const obj = try gc.allocObj(.lazy_seq);
+    const payload = try gc.allocObj(.vector);
+    const marker = Value.makeKeyword(try gc.internString("__repeat__"));
+    try payload.data.vector.items.append(gc.allocator, marker);
+    try payload.data.vector.items.append(gc.allocator, args[0]);
+    if (args.len == 2) try payload.data.vector.items.append(gc.allocator, args[1]);
+    obj.data.lazy_seq.thunk = Value.makeObj(payload);
+    return Value.makeObj(obj);
+}
+
+fn repeatedlyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try gc.allocObj(.lazy_seq);
+    const payload = try gc.allocObj(.vector);
+    const marker = Value.makeKeyword(try gc.internString("__repeatedly__"));
+    try payload.data.vector.items.append(gc.allocator, marker);
+    try payload.data.vector.items.append(gc.allocator, args[0]);
+    obj.data.lazy_seq.thunk = Value.makeObj(payload);
+    return Value.makeObj(obj);
+}
+
+fn lazySeqFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try gc.allocObj(.lazy_seq);
+    obj.data.lazy_seq.thunk = args[0];
+    return Value.makeObj(obj);
+}
+
+fn realizedFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj()) return Value.makeBool(true);
+    if (args[0].asObj().kind != .lazy_seq) return Value.makeBool(true);
+    return Value.makeBool(args[0].asObj().data.lazy_seq.cached != null);
+}
+
+// ============================================================================
+// ADDITIONAL SEQUENCE OPS
+// ============================================================================
+
+fn takeWhileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const f = args[0];
+    const items = try seqItems(args[1], gc);
+    const obj = try gc.allocObj(.vector);
+    for (items) |item| {
+        var a = [_]Value{item};
+        const r = try eval_mod.apply(f, &a, env, gc);
+        if (!r.isTruthy()) break;
+        try obj.data.vector.items.append(gc.allocator, item);
+    }
+    return Value.makeObj(obj);
+}
+
+fn dropWhileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const f = args[0];
+    const items = try seqItems(args[1], gc);
+    const obj = try gc.allocObj(.vector);
+    var dropping = true;
+    for (items) |item| {
+        if (dropping) {
+            var a = [_]Value{item};
+            const r = try eval_mod.apply(f, &a, env, gc);
+            if (!r.isTruthy()) dropping = false;
+        }
+        if (!dropping) try obj.data.vector.items.append(gc.allocator, item);
+    }
+    return Value.makeObj(obj);
+}
+
+fn zipmapFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const keys = try seqItems(args[0], gc);
+    const vals = try seqItems(args[1], gc);
+    const obj = try gc.allocObj(.map);
+    const n = @min(keys.len, vals.len);
+    for (0..n) |i| {
+        try obj.data.map.keys.append(gc.allocator, keys[i]);
+        try obj.data.map.vals.append(gc.allocator, vals[i]);
+    }
+    return Value.makeObj(obj);
+}
+
+// ============================================================================
+// ADDITIONAL PREDICATES
+// ============================================================================
+
+fn isIntegerP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return Value.makeBool(args[0].isInt());
+}
+
+fn isFloatP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return Value.makeBool(args[0].isFloat());
+}
+
+fn isPosP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isInt()) return Value.makeBool(args[0].asInt() > 0);
+    if (args[0].isFloat()) return Value.makeBool(args[0].asFloat() > 0);
+    return error.TypeError;
+}
+
+fn isNegP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isInt()) return Value.makeBool(args[0].asInt() < 0);
+    if (args[0].isFloat()) return Value.makeBool(args[0].asFloat() < 0);
+    return error.TypeError;
+}
+
+fn isEvenP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isInt()) return error.TypeError;
+    return Value.makeBool(@rem(args[0].asInt(), 2) == 0);
+}
+
+fn isOddP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isInt()) return error.TypeError;
+    return Value.makeBool(@rem(args[0].asInt(), 2) != 0);
 }

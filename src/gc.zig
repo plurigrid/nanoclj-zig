@@ -229,7 +229,9 @@ pub const GC = struct {
             },
             .builtin_ref => {},
             .lazy_seq => {},
-            .partial_fn => {},
+            .partial_fn => {
+                obj.data.partial_fn.bound_args.deinit(self.allocator);
+            },
         }
         self.allocator.destroy(obj);
         self.bytes_allocated -|= @sizeOf(Obj);

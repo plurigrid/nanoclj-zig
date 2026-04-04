@@ -493,5 +493,55 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
         return result;
     }
 
+    // partial_fn dispatch
+    if (obj.kind == .partial_fn) {
+        const pf = &obj.data.partial_fn;
+        const bound = pf.bound_args.items;
+
+        // Special dispatch: func == nil means comp/juxt/complement/constantly
+        if (pf.func.isNil() and bound.len > 0 and bound[0].isKeyword()) {
+            const marker = gc.getString(bound[0].asKeywordId());
+            if (std.mem.eql(u8, marker, "__comp__")) {
+                // (comp f g h) x = f(g(h(x)))
+                const fns = bound[1..];
+                var result = args;
+                var tmp: [16]Value = undefined;
+                var ri: usize = fns.len;
+                while (ri > 0) {
+                    ri -= 1;
+                    const r = try apply(fns[ri], result, caller_env, gc);
+                    tmp[0] = r;
+                    result = tmp[0..1];
+                }
+                return result[0];
+            }
+            if (std.mem.eql(u8, marker, "__juxt__")) {
+                // (juxt f g h) x = [(f x) (g x) (h x)]
+                const fns = bound[1..];
+                const vec = gc.allocObj(.vector) catch return error.OutOfMemory;
+                for (fns) |f| {
+                    const r = try apply(f, args, caller_env, gc);
+                    vec.data.vector.items.append(gc.allocator, r) catch return error.OutOfMemory;
+                }
+                return Value.makeObj(vec);
+            }
+            if (std.mem.eql(u8, marker, "__complement__")) {
+                const r = try apply(bound[1], args, caller_env, gc);
+                return Value.makeBool(!r.isTruthy());
+            }
+            if (std.mem.eql(u8, marker, "__constantly__")) {
+                return bound[1];
+            }
+        }
+
+        // Normal partial: prepend bound args
+        const total_len = bound.len + args.len;
+        if (total_len > 16) return error.ArityError;
+        var combined: [16]Value = undefined;
+        for (bound, 0..) |b, i| combined[i] = b;
+        for (args, 0..) |a, i| combined[bound.len + i] = a;
+        return apply(pf.func, combined[0..total_len], caller_env, gc);
+    }
+
     return error.NotAFunction;
 }
