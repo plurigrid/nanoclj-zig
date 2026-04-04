@@ -97,22 +97,25 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
             if (sym_id == sf_fn or sym_id == sf_fn_bare) return evalBoundedFnStar(items, env, gc, res);
             if (sym_id == sf_peval) return evalBoundedPeval(items, env, gc, res);
             if (sym_id == sf_defn) return evalBoundedDefn(items, env, gc, res);
-        } else {
-            // Fallback to string compare if interning failed
+            // Fall through to string compare for deftest/testing/try/ns
+        }
+        {
             const name = gc.getString(sym_id);
-            if (std.mem.eql(u8, name, "quote")) return if (items.len == 2) Domain.pure(items[1]) else Domain.fail(.arity_error);
-            if (std.mem.eql(u8, name, "def")) return evalBoundedDef(items, env, gc, res);
-            if (std.mem.eql(u8, name, "let*") or std.mem.eql(u8, name, "let")) return evalBoundedLet(items, env, gc, res);
-            if (std.mem.eql(u8, name, "if")) return evalBoundedIf(items, env, gc, res);
-            if (std.mem.eql(u8, name, "do")) return evalBoundedDo(items, env, gc, res);
-            if (std.mem.eql(u8, name, "fn*") or std.mem.eql(u8, name, "fn")) return evalBoundedFnStar(items, env, gc, res);
-            if (std.mem.eql(u8, name, "defn")) return evalBoundedDefn(items, env, gc, res);
-            if (std.mem.eql(u8, name, "deftest")) return evalBoundedDo(items, env, gc, res); // deftest = do + name
-            if (std.mem.eql(u8, name, "testing")) return evalBoundedDo(items, env, gc, res); // testing = do + label
+            if (std.mem.eql(u8, name, "deftest")) return evalBoundedDo(items, env, gc, res);
+            if (std.mem.eql(u8, name, "testing")) return evalBoundedDo(items, env, gc, res);
             if (std.mem.eql(u8, name, "try")) return evalBoundedTry(items, env, gc, res);
-            if (std.mem.eql(u8, name, "ns")) return Domain.pure(Value.makeNil()); // ns = noop for now
-            if (std.mem.eql(u8, name, "in-ns")) return Domain.pure(Value.makeNil());
-            if (std.mem.eql(u8, name, "peval")) return evalBoundedPeval(items, env, gc, res);
+            if (std.mem.eql(u8, name, "ns") or std.mem.eql(u8, name, "in-ns")) return Domain.pure(Value.makeNil());
+        }
+        if (!sf_initialized) {
+            const fname = gc.getString(sym_id);
+            if (std.mem.eql(u8, fname, "quote")) return if (items.len == 2) Domain.pure(items[1]) else Domain.fail(.arity_error);
+            if (std.mem.eql(u8, fname, "def")) return evalBoundedDef(items, env, gc, res);
+            if (std.mem.eql(u8, fname, "let*") or std.mem.eql(u8, fname, "let")) return evalBoundedLet(items, env, gc, res);
+            if (std.mem.eql(u8, fname, "if")) return evalBoundedIf(items, env, gc, res);
+            if (std.mem.eql(u8, fname, "do")) return evalBoundedDo(items, env, gc, res);
+            if (std.mem.eql(u8, fname, "fn*") or std.mem.eql(u8, fname, "fn")) return evalBoundedFnStar(items, env, gc, res);
+            if (std.mem.eql(u8, fname, "defn")) return evalBoundedDefn(items, env, gc, res);
+            if (std.mem.eql(u8, fname, "peval")) return evalBoundedPeval(items, env, gc, res);
         }
 
         const core = @import("core.zig");
