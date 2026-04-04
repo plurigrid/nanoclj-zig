@@ -60,8 +60,10 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "in-ns")) return evalInNs(items, env, gc);
         if (std.mem.eql(u8, name, "defmacro")) return evalDefmacro(items, env, gc);
         if (std.mem.eql(u8, name, "macroexpand-1")) return evalMacroexpand1(items, env, gc);
-        if (std.mem.eql(u8, name, "defmulti")) return Value.makeNil(); // stub
-        if (std.mem.eql(u8, name, "defmethod")) return Value.makeNil(); // stub
+        if (std.mem.eql(u8, name, "defmulti")) return Value.makeNil();
+        if (std.mem.eql(u8, name, "defmethod")) return Value.makeNil();
+        if (std.mem.eql(u8, name, "defprotocol")) return Value.makeNil();
+        if (std.mem.eql(u8, name, "extend-type")) return Value.makeNil();
         if (std.mem.eql(u8, name, "colorspace")) return evalColorspace(items, env, gc);
         if (std.mem.eql(u8, name, "blend")) return evalBlend(items, env, gc);
         if (std.mem.eql(u8, name, "try")) return evalTry(items, env, gc);
@@ -695,6 +697,130 @@ fn evalDefmethod(items: []Value, env: *Env, gc: *GC) EvalError!Value {
         .impl_fn = impl_fn,
     }) catch return error.OutOfMemory;
     return mm_val;
+}
+
+/// (defprotocol Name (method-name [args]) ...)
+fn evalDefprotocol(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    if (!items[1].isSymbol()) return error.TypeError;
+    const name = gc.getString(items[1].asSymbolId());
+    const obj = gc.allocObj(.protocol) catch return error.OutOfMemory;
+    const compat = @import("compat.zig");
+    const value_mod = @import("value.zig");
+    obj.data.protocol = .{
+        .name = name,
+        .method_names = compat.emptyList([]const u8),
+        .impls = compat.emptyList(value_mod.TypeImpl),
+    };
+    // Parse method signatures: each is a list (method-name [params])
+    for (items[2..]) |sig| {
+        if (sig.isObj() and sig.asObj().kind == .list) {
+            const sig_items = sig.asObj().data.list.items.items;
+            if (sig_items.len > 0 and sig_items[0].isSymbol()) {
+                const mname = gc.getString(sig_items[0].asSymbolId());
+                obj.data.protocol.method_names.append(gc.allocator, mname) catch return error.OutOfMemory;
+            }
+        } else if (sig.isSymbol()) {
+            // Bare symbol = method name without signature
+            obj.data.protocol.method_names.append(gc.allocator, gc.getString(sig.asSymbolId())) catch return error.OutOfMemory;
+        }
+    }
+    const val = Value.makeObj(obj);
+    env.set(name, val) catch return error.OutOfMemory;
+    const id = gc.internString(name) catch return error.OutOfMemory;
+    env.setById(id, val) catch return error.OutOfMemory;
+    // Also define each method name as a function that dispatches through the protocol
+    for (obj.data.protocol.method_names.items) |mname| {
+        const mm_obj = gc.allocObj(.multimethod) catch return error.OutOfMemory;
+        // Dispatch fn = type (first arg)
+        const type_builtin = env.get("type") orelse Value.makeNil();
+        mm_obj.data.multimethod = .{
+            .name = mname,
+            .dispatch_fn = type_builtin,
+            .methods = compat.emptyList(value_mod.MethodEntry),
+            .default_method = null,
+        };
+        const mm_val = Value.makeObj(mm_obj);
+        env.set(mname, mm_val) catch return error.OutOfMemory;
+        const mid = gc.internString(mname) catch return error.OutOfMemory;
+        env.setById(mid, mm_val) catch return error.OutOfMemory;
+    }
+    return val;
+}
+
+/// (extend-type TypeName Protocol (method-name [params] body) ...)
+fn evalExtendType(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isSymbol()) return error.TypeError;
+    const type_name_sym = gc.getString(items[1].asSymbolId());
+    // Map symbol names to type names: Vector → "vector", HashMap → "map", etc.
+    const type_name = mapTypeName(type_name_sym);
+    // items[2] = protocol name (ignored for dispatch, we use the method name)
+    // items[3..] = (method-name [params] body...) groups
+    var i: usize = 3;
+    while (i < items.len) {
+        const form = items[i];
+        if (form.isObj() and form.asObj().kind == .list) {
+            const parts = form.asObj().data.list.items.items;
+            if (parts.len >= 3 and parts[0].isSymbol()) {
+                const mname = gc.getString(parts[0].asSymbolId());
+                // Build a fn from [params] + body
+                var fn_items = @import("compat.zig").emptyList(Value);
+                defer fn_items.deinit(gc.allocator);
+                const fn_star = gc.internString("fn*") catch return error.OutOfMemory;
+                fn_items.append(gc.allocator, Value.makeSymbol(fn_star)) catch return error.OutOfMemory;
+                for (parts[1..]) |p| {
+                    fn_items.append(gc.allocator, p) catch return error.OutOfMemory;
+                }
+                const fn_list = gc.allocObj(.list) catch return error.OutOfMemory;
+                fn_list.data.list.items.appendSlice(gc.allocator, fn_items.items) catch return error.OutOfMemory;
+                const impl_fn = try eval(Value.makeObj(fn_list), env, gc);
+                // Register as a method on the multimethod named mname
+                const mm_val = env.get(mname) orelse {
+                    i += 1;
+                    continue;
+                };
+                if (mm_val.isObj() and mm_val.asObj().kind == .multimethod) {
+                    const mm = &mm_val.asObj().data.multimethod;
+                    const dispatch_val = Value.makeString(gc.internString(type_name) catch return error.OutOfMemory);
+                    const semantics = @import("semantics.zig");
+                    var found = false;
+                    for (mm.methods.items, 0..) |m, j| {
+                        if (semantics.structuralEq(m.dispatch_val, dispatch_val, gc)) {
+                            mm.methods.items[j].impl_fn = impl_fn;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        mm.methods.append(gc.allocator, .{
+                            .dispatch_val = dispatch_val,
+                            .impl_fn = impl_fn,
+                        }) catch return error.OutOfMemory;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    return Value.makeNil();
+}
+
+fn mapTypeName(sym: []const u8) []const u8 {
+    if (std.mem.eql(u8, sym, "PersistentVector") or std.mem.eql(u8, sym, "Vector")) return "vector";
+    if (std.mem.eql(u8, sym, "PersistentHashMap") or std.mem.eql(u8, sym, "HashMap")) return "map";
+    if (std.mem.eql(u8, sym, "PersistentList") or std.mem.eql(u8, sym, "List")) return "list";
+    if (std.mem.eql(u8, sym, "PersistentHashSet") or std.mem.eql(u8, sym, "Set")) return "set";
+    if (std.mem.eql(u8, sym, "String")) return "string";
+    if (std.mem.eql(u8, sym, "Number") or std.mem.eql(u8, sym, "Long")) return "integer";
+    if (std.mem.eql(u8, sym, "Double") or std.mem.eql(u8, sym, "Float")) return "float";
+    if (std.mem.eql(u8, sym, "Keyword")) return "keyword";
+    if (std.mem.eql(u8, sym, "Symbol")) return "symbol";
+    if (std.mem.eql(u8, sym, "Atom")) return "atom";
+    if (std.mem.eql(u8, sym, "nil")) return "nil";
+    if (std.mem.eql(u8, sym, "Object")) return "object"; // catch-all
+    // Lowercase pass-through (already a type name)
+    return sym;
 }
 
 /// (macroexpand-1 form) — expand one level of macro without evaluating

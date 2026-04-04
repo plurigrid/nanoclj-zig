@@ -124,8 +124,10 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
                 return result;
             }
             if (std.mem.eql(u8, sname, "defmacro")) return evalBoundedDefmacro(items, env, gc, res);
-            if (std.mem.eql(u8, sname, "defmulti")) return evalBoundedDo(items, env, gc, res); // stub
-            if (std.mem.eql(u8, sname, "defmethod")) return evalBoundedDo(items, env, gc, res); // stub
+            if (std.mem.eql(u8, sname, "defmulti")) return evalBoundedDo(items, env, gc, res);
+            if (std.mem.eql(u8, sname, "defmethod")) return evalBoundedDo(items, env, gc, res);
+            if (std.mem.eql(u8, sname, "defprotocol")) return Domain.pure(Value.makeNil());
+            if (std.mem.eql(u8, sname, "extend-type")) return Domain.pure(Value.makeNil());
             if (std.mem.eql(u8, sname, "macroexpand-1")) {
                 if (items.len < 2) return Domain.fail(.arity_error);
                 const form_d = evalBounded(items[1], env, gc, res);

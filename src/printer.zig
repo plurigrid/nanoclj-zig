@@ -105,6 +105,11 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
                 try buf.appendSlice(gc.allocator, obj.data.multimethod.name);
                 try buf.appendSlice(gc.allocator, ">");
             },
+            .protocol => {
+                try buf.appendSlice(gc.allocator, "#<protocol ");
+                try buf.appendSlice(gc.allocator, obj.data.protocol.name);
+                try buf.appendSlice(gc.allocator, ">");
+            },
         }
     } else {
         // float

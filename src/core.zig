@@ -2204,6 +2204,7 @@ fn typeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         .lazy_seq => "lazy-seq",
         .partial_fn => "function",
         .multimethod => "multimethod",
+        .protocol => "protocol",
     }
     else "unknown";
     return Value.makeString(try gc.internString(t));

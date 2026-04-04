@@ -88,6 +88,7 @@ pub const GC = struct {
                 .lazy_seq => .{ .lazy_seq = .{ .thunk = Value.makeNil() } },
                 .partial_fn => .{ .partial_fn = .{ .func = Value.makeNil(), .bound_args = compat.emptyList(Value) } },
                 .multimethod => .{ .multimethod = .{ .name = "", .dispatch_fn = Value.makeNil(), .methods = compat.emptyList(value.MethodEntry), .default_method = null } },
+                .protocol => .{ .protocol = .{ .name = "", .method_names = compat.emptyList([]const u8), .impls = compat.emptyList(value.TypeImpl) } },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -186,6 +187,13 @@ pub const GC = struct {
                     }
                     if (cur.data.multimethod.default_method) |d| self.enqueueVal(d, &worklist);
                 },
+                .protocol => {
+                    for (cur.data.protocol.impls.items) |impl| {
+                        for (impl.methods.items) |m| {
+                            self.enqueueVal(m.func, &worklist);
+                        }
+                    }
+                },
             }
         }
     }
@@ -243,6 +251,13 @@ pub const GC = struct {
             },
             .multimethod => {
                 obj.data.multimethod.methods.deinit(self.allocator);
+            },
+            .protocol => {
+                obj.data.protocol.method_names.deinit(self.allocator);
+                for (obj.data.protocol.impls.items) |*impl| {
+                    impl.methods.deinit(self.allocator);
+                }
+                obj.data.protocol.impls.deinit(self.allocator);
             },
         }
         self.allocator.destroy(obj);
