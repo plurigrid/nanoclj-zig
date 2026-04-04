@@ -221,16 +221,27 @@ pub const VM = struct {
                 // ── Control flow ──
                 .ret => {
                     const d = decode_d(inst);
-                    const result = self.stack[self.currentFrame().base + @as(u32, d)];
+                    const frame = self.currentFrame();
+                    const result = self.stack[frame.base + @as(u32, d)];
+                    // Read return-dest marker (stored by caller after args)
+                    const ret_dest_val = self.stack[frame.base + frame.closure.def.num_registers];
                     self.frame_count -= 1;
                     if (self.frame_count == 0) return result;
-                    // Store return value in caller's dest register
-                    continue;
+                    // Store result in caller's dest register
+                    if (ret_dest_val.isInt()) {
+                        const caller_dest: u8 = @intCast(ret_dest_val.asInt());
+                        self.reg(caller_dest).* = result;
+                    }
                 },
                 .ret_nil => {
+                    const frame = self.currentFrame();
+                    const ret_dest_val = self.stack[frame.base + frame.closure.def.num_registers];
                     self.frame_count -= 1;
                     if (self.frame_count == 0) return Value.makeNil();
-                    continue;
+                    if (ret_dest_val.isInt()) {
+                        const caller_dest: u8 = @intCast(ret_dest_val.asInt());
+                        self.reg(caller_dest).* = Value.makeNil();
+                    }
                 },
                 .jump => {
                     const offset = decode_ds(inst);
@@ -352,23 +363,88 @@ pub const VM = struct {
                 },
 
                 // ── Function calls ──
+                // CALL A, B, C: dest=A, argc=B, func_reg=C
+                // Callee's args are in R[C+1..C+B]
                 .call => {
                     const a = decode_a(inst);
-                    const b = decode_b(inst);
-                    // R[a+1] = function, R[a+2..a+1+b] = args
-                    const func_val = self.stack[self.currentFrame().base + a + 1];
+                    const b = decode_b(inst); // argc
+                    const c = decode_c(inst); // func_reg
+                    const base = self.currentFrame().base;
+                    const func_val = self.stack[base + c];
+
+                    // Resolve bc_closure
                     if (!func_val.isObj()) return error.TypeError;
-                    // TODO: resolve closure from value, push frame, execute
-                    _ = b;
-                    self.reg(a).* = Value.makeNil(); // placeholder
+                    const func_obj = func_val.asObj();
+                    if (func_obj.kind != .bc_closure) return error.TypeError;
+                    const callee = &func_obj.data.bc_closure;
+
+                    if (b != callee.def.arity) return error.ArityError;
+                    if (self.frame_count >= 64) return error.StackOverflow;
+
+                    // Set up new frame
+                    const new_base = base + self.currentFrame().closure.def.num_registers;
+                    // Copy args into callee's register space (R0..Rn-1 = params)
+                    for (0..b) |i| {
+                        self.stack[new_base + i] = self.stack[base + c + 1 + i];
+                    }
+
+                    // Save return info: where to put the result
+                    // We store dest in the frame's base calculation
+                    const ret_frame = self.currentFrame();
+                    _ = ret_frame;
+
+                    self.frames[self.frame_count] = .{
+                        .closure = callee,
+                        .ip = 0,
+                        .base = new_base,
+                    };
+                    self.frame_count += 1;
+
+                    // When callee returns, we need to store result in R[a]
+                    // We'll handle this in the .ret opcode by peeking at caller
+                    // For now, store dest register index in a known location
+                    // Use stack slot just before new_base as return-dest marker
+                    self.stack[new_base + callee.def.num_registers] = Value.makeInt(@intCast(a));
                 },
+                // TAIL_CALL A, B: func_reg=A, argc=B — reuse current frame
                 .tail_call => {
-                    // TODO: reuse current frame for TCO
-                    self.reg(decode_a(inst)).* = Value.makeNil();
+                    const a = decode_a(inst);
+                    const b = decode_b(inst); // argc
+                    const base = self.currentFrame().base;
+                    const func_val = self.stack[base + a];
+
+                    if (!func_val.isObj()) return error.TypeError;
+                    const func_obj = func_val.asObj();
+                    if (func_obj.kind != .bc_closure) return error.TypeError;
+                    const callee = &func_obj.data.bc_closure;
+
+                    if (b != callee.def.arity) return error.ArityError;
+
+                    // Copy args to base (overwrite current frame's registers)
+                    for (0..b) |i| {
+                        self.stack[base + i] = self.stack[base + a + 1 + i];
+                    }
+
+                    // Reuse current frame slot
+                    const frame = self.currentFrame();
+                    frame.closure = callee;
+                    frame.ip = 0;
+                    // base stays the same — that's the TCO magic
                 },
+                // CLOSURE A, E: $A = make_closure(defs[E])
                 .closure => {
-                    // TODO: capture upvalues from parent frame
-                    self.reg(decode_a(inst)).* = Value.makeNil();
+                    const a = decode_a(inst);
+                    const e = decode_e(inst);
+                    const frame = self.currentFrame();
+                    const sub_def = frame.closure.def.defs[e];
+
+                    // Allocate a bc_closure Obj
+                    const obj = self.gc.allocObj(.bc_closure) catch return error.TypeError;
+                    obj.data.bc_closure = .{
+                        .def = sub_def,
+                        .upvalues = &.{}, // TODO: capture upvalues
+                    };
+                    self.reg(a).* = Value.makeObj(obj);
                 },
 
                 // ── Globals ──
@@ -511,4 +587,54 @@ test "bytecode: fuel exhaustion" {
 
     const result = vm.execute(&closure);
     try std.testing.expectError(VM.VMError.FuelExhausted, result);
+}
+
+test "bytecode: function call and return" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    // Inner function: (fn [x] (+ x 1))
+    // R0 = param x, R1 = scratch, R2 = result
+    const inner_code = [_]Inst{
+        encode_ae(.load_int, 1, @bitCast(@as(i16, 1))), // R1 = 1
+        encode_abc(.add, 2, 0, 1),                       // R2 = R0 + R1
+        encode_d(.ret, 2),                                // return R2
+    };
+
+    const inner_def = FuncDef{
+        .code = &inner_code,
+        .constants = &.{},
+        .defs = &.{},
+        .arity = 1,
+        .num_registers = 3,
+    };
+
+    // Outer: create closure, load arg 10, call, return result
+    // R0 = dest for result
+    // R1 = closure (func_reg for call)
+    // R2 = arg (10)
+    const inner_def_ptr: *const FuncDef = &inner_def;
+    const outer_defs = [_]*FuncDef{@constCast(inner_def_ptr)};
+    const outer_code = [_]Inst{
+        encode_ae(.closure, 1, 0),                        // R1 = closure(defs[0])
+        encode_ae(.load_int, 2, @bitCast(@as(i16, 10))), // R2 = 10
+        encode_abc(.call, 0, 1, 1),                       // R0 = call(R1, 1 arg)
+        encode_d(.ret, 0),                                 // return R0
+    };
+
+    const outer_def = FuncDef{
+        .code = &outer_code,
+        .constants = &.{},
+        .defs = &outer_defs,
+        .arity = 0,
+        .num_registers = 4, // need extra slot for return-dest marker
+    };
+
+    const closure = Closure{ .def = &outer_def, .upvalues = &.{} };
+    var vm = VM.init(&gc, 1000);
+    defer vm.deinit();
+
+    const result = try vm.execute(&closure);
+    try std.testing.expect(result.isInt());
+    try std.testing.expectEqual(@as(i48, 11), result.asInt());
 }
