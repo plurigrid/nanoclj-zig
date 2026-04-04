@@ -121,6 +121,13 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
                 }
                 return result;
             }
+            if (std.mem.eql(u8, sname, "defmacro")) return evalBoundedDefmacro(items, env, gc, res);
+            if (std.mem.eql(u8, sname, "macroexpand-1")) {
+                if (items.len < 2) return Domain.fail(.arity_error);
+                const form_d = evalBounded(items[1], env, gc, res);
+                if (!form_d.isValue()) return form_d;
+                return Domain.pure(form_d.value);
+            }
             if (std.mem.eql(u8, sname, "try")) return evalBoundedTry(items, env, gc, res);
             if (std.mem.eql(u8, sname, "ns") or std.mem.eql(u8, sname, "in-ns")) return Domain.pure(Value.makeNil());
         }
@@ -486,6 +493,20 @@ fn evalBoundedPeval(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain 
     return thread_peval.threadPeval(@constCast(exprs), env, gc, res);
 }
 
+/// Apply any callable: function objects, builtin sentinels, or partial_fn
+fn applyAny(func: Value, args: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+    // Try as object first
+    if (func.isObj()) return applyBounded(func, args, env, gc, res);
+    // Builtin sentinel
+    const core = @import("core.zig");
+    if (core.isBuiltinSentinel(func, gc)) |bname| {
+        if (core.lookupBuiltin(bname)) |builtin| {
+            return evalBoundedBuiltin(builtin, args, env, gc, res);
+        }
+    }
+    return Domain.fail(.not_a_function);
+}
+
 fn applyBounded(func: Value, args: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     if (!func.isObj()) return Domain.fail(.not_a_function);
     const obj = func.asObj();
@@ -505,7 +526,7 @@ fn applyBounded(func: Value, args: []Value, env: *Env, gc: *GC, res: *Resources)
                 const fns = bound[1..];
                 const vec = gc.allocObj(.vector) catch return Domain.fail(.type_error);
                 for (fns) |f| {
-                    const d = applyBounded(f, args, env, gc, res);
+                    const d = applyAny(f, args, env, gc, res);
                     if (!d.isValue()) return d;
                     vec.data.vector.items.append(gc.allocator, d.value) catch return Domain.fail(.type_error);
                 }
@@ -518,7 +539,7 @@ fn applyBounded(func: Value, args: []Value, env: *Env, gc: *GC, res: *Resources)
                 var ri: usize = fns.len;
                 while (ri > 0) {
                     ri -= 1;
-                    const d = applyBounded(fns[ri], result, env, gc, res);
+                    const d = applyAny(fns[ri], result, env, gc, res);
                     if (!d.isValue()) return d;
                     tmp[0] = d.value;
                     result = tmp[0..1];
@@ -526,7 +547,7 @@ fn applyBounded(func: Value, args: []Value, env: *Env, gc: *GC, res: *Resources)
                 return Domain.pure(result[0]);
             }
             if (std.mem.eql(u8, marker, "__complement__")) {
-                const d = applyBounded(bound[1], args, env, gc, res);
+                const d = applyAny(bound[1], args, env, gc, res);
                 if (!d.isValue()) return d;
                 return Domain.pure(Value.makeBool(!d.value.isTruthy()));
             }

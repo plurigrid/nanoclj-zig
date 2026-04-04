@@ -85,8 +85,15 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         }
     }
 
-    // Function application
+    // Macro expansion: resolve head, if it's a macro, expand then eval result
     const func = try eval(items[0], env, gc);
+    if (func.isObj() and func.asObj().kind == .macro_fn) {
+        // Pass unevaluated args to macro
+        const expanded = try apply(func, items[1..], env, gc);
+        return eval(expanded, env, gc);
+    }
+
+    // Function application
     var args = @import("compat.zig").emptyList(Value);
     defer args.deinit(gc.allocator);
     for (items[1..]) |arg| {
@@ -591,6 +598,58 @@ fn evalDefn(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     const id = gc.internString(name) catch return error.OutOfMemory;
     env.setById(id, fn_val) catch return error.OutOfMemory;
     return fn_val;
+}
+
+/// (defmacro name [params] body...)
+fn evalDefmacro(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 4) return error.ArityError;
+    if (!items[1].isSymbol()) return error.TypeError;
+    const name = gc.getString(items[1].asSymbolId());
+
+    // Build fn* from params + body, then change kind to macro_fn
+    if (!items[2].isObj()) return error.TypeError;
+    const params_obj = items[2].asObj();
+    const params = if (params_obj.kind == .vector)
+        params_obj.data.vector.items.items
+    else if (params_obj.kind == .list)
+        params_obj.data.list.items.items
+    else
+        return error.TypeError;
+
+    const macro_obj = gc.allocObj(.macro_fn) catch return error.OutOfMemory;
+    var is_variadic = false;
+    for (params) |p| {
+        if (p.isSymbol() and std.mem.eql(u8, gc.getString(p.asSymbolId()), "&")) {
+            is_variadic = true;
+            continue;
+        }
+        macro_obj.data.macro_fn.params.append(gc.allocator, p) catch return error.OutOfMemory;
+    }
+    macro_obj.data.macro_fn.is_variadic = is_variadic;
+    macro_obj.data.macro_fn.env = env;
+    macro_obj.data.macro_fn.name = name;
+    for (items[3..]) |body_form| {
+        macro_obj.data.macro_fn.body.append(gc.allocator, body_form) catch return error.OutOfMemory;
+    }
+    const val = Value.makeObj(macro_obj);
+    env.set(name, val) catch return error.OutOfMemory;
+    const id = gc.internString(name) catch return error.OutOfMemory;
+    env.setById(id, val) catch return error.OutOfMemory;
+    return val;
+}
+
+/// (macroexpand-1 form) — expand one level of macro without evaluating
+fn evalMacroexpand1(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len != 2) return error.ArityError;
+    const form = try eval(items[1], env, gc);
+    if (!form.isObj() or form.asObj().kind != .list) return form;
+    const list_items = form.asObj().data.list.items.items;
+    if (list_items.len == 0) return form;
+    if (!list_items[0].isSymbol()) return form;
+    const head_name = gc.getString(list_items[0].asSymbolId());
+    const head_val = env.get(head_name) orelse return form;
+    if (!head_val.isObj() or head_val.asObj().kind != .macro_fn) return form;
+    return apply(head_val, list_items[1..], env, gc);
 }
 
 pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalError!Value {
