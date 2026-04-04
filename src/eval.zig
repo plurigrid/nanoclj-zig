@@ -188,6 +188,26 @@ fn evalFnStar(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     return Value.makeObj(fn_obj);
 }
 
+/// (defn name [params] body...) => (def name (fn* [params] body...))
+fn evalDefn(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 4) return error.ArityError;
+    if (!items[1].isSymbol()) return error.TypeError;
+    const name = gc.getString(items[1].asSymbolId());
+    // Build synthetic fn* items
+    var fn_items: [64]Value = undefined;
+    fn_items[0] = items[0]; // placeholder
+    fn_items[1] = items[2]; // params
+    const body = items[3..];
+    if (body.len + 2 > fn_items.len) return error.ArityError;
+    for (body, 0..) |b, i| fn_items[2 + i] = b;
+    const fn_val = try evalFnStar(fn_items[0 .. 2 + body.len], env, gc);
+    if (fn_val.isObj()) fn_val.asObj().data.function.name = name;
+    env.set(name, fn_val) catch return error.OutOfMemory;
+    const id = gc.internString(name) catch return error.OutOfMemory;
+    env.setById(id, fn_val) catch return error.OutOfMemory;
+    return fn_val;
+}
+
 pub fn apply(func: Value, args: []const Value, _: *Env, gc: *GC) EvalError!Value {
     if (!func.isObj()) return error.NotAFunction;
     const obj = func.asObj();

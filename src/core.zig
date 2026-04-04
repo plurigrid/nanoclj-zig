@@ -22,6 +22,7 @@ const gorj_bridge = @import("gorj_bridge.zig");
 const computable_sets = @import("computable_sets.zig");
 const avalon_api_example = @import("avalon_api_example.zig");
 const simd_str = @import("simd_str.zig");
+const transcendental = @import("transcendental.zig");
 
 fn getSeedMs() i64 {
     var ts: std.c.timespec = undefined;
@@ -309,6 +310,12 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // String extras (SIMD-backed)
         .{ "re-find", &reFindFn },
         .{ "count-str", &countStrFn },
+        // Transcendental idealism (Kantian categories)
+        .{ "judge", &transcendental.judgeFn },
+        .{ "categories", &transcendental.categoriesFn },
+        .{ "antinomy", &transcendental.antinomyFn },
+        .{ "phenomenon", &transcendental.phenomenonFn },
+        .{ "noumenon", &transcendental.noumenonFn },
     };
 
     inline for (builtins) |b| {
