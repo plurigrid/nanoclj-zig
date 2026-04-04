@@ -516,7 +516,7 @@ fn structuralEqObj(a: *Obj, b: *Obj, gc: *GC) bool {
         .vector => structuralEqSeq(a.data.vector.items.items, b.data.vector.items.items, gc),
         .map => structuralEqMap(a, b, gc),
         .set => structuralEqSeq(a.data.set.items.items, b.data.set.items.items, gc),
-        .function, .macro_fn, .bc_closure => false,
+        .function, .macro_fn, .bc_closure, .builtin_ref => false,
         .atom => structuralEq(a.data.atom.val, b.data.atom.val, gc),
     };
 }

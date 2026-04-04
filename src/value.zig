@@ -31,6 +31,7 @@ pub const ObjKind = enum(u8) {
     macro_fn,
     atom,
     bc_closure, // bytecode VM closure
+    builtin_ref, // reference to a core builtin function
 };
 
 pub const Obj = struct {
@@ -48,6 +49,10 @@ pub const ObjData = union {
     macro_fn: FnData,
     atom: struct { val: Value },
     bc_closure: @import("bytecode.zig").Closure,
+    builtin_ref: struct {
+        func: *const fn (args: []Value, gc: *@import("gc.zig").GC, env: *@import("env.zig").Env) anyerror!Value,
+        name: []const u8,
+    },
 };
 
 pub const FnData = struct {

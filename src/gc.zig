@@ -84,6 +84,7 @@ pub const GC = struct {
                 } },
                 .atom => .{ .atom = .{ .val = Value.makeNil() } },
                 .bc_closure => .{ .bc_closure = .{ .def = undefined, .upvalues = &.{} } },
+                .builtin_ref => .{ .builtin_ref = .{ .func = undefined, .name = "" } },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -216,6 +217,7 @@ pub const GC = struct {
                     self.allocator.free(obj.data.bc_closure.upvalues);
                 }
             },
+            .builtin_ref => {},
         }
         self.allocator.destroy(obj);
         self.bytes_allocated -|= @sizeOf(Obj);

@@ -13,6 +13,8 @@ const Value = value.Value;
 const Obj = value.Obj;
 const ObjKind = value.ObjKind;
 const GC = @import("gc.zig").GC;
+const Env = @import("env.zig").Env;
+const core = @import("core.zig");
 const bc = @import("bytecode.zig");
 const Op = bc.Op;
 const Inst = bc.Inst;
@@ -517,13 +519,33 @@ pub const Compiler = struct {
     // GENERAL FUNCTION CALL
     // ========================================================================
 
+    /// Try to resolve a symbol to a builtin_ref constant.
+    fn tryResolveBuiltin(self: *Compiler, sym: Value) CompileError!?u16 {
+        if (!sym.isSymbol()) return null;
+        const name = self.gc.getString(sym.asSymbolId());
+        // Don't resolve if it shadows a local or upvalue
+        if (self.resolveLocal(name) != null) return null;
+        if ((try self.resolveUpvalue(name)) != null) return null;
+        const builtin_fn = core.lookupBuiltin(name) orelse return null;
+        // Create builtin_ref Obj as constant
+        const obj = self.gc.allocObj(.builtin_ref) catch return error.OutOfMemory;
+        obj.data.builtin_ref = .{ .func = builtin_fn, .name = name };
+        return try self.addConst(Value.makeObj(obj));
+    }
+
     fn compileCall(self: *Compiler, items: []Value, dest: u8) CompileError!void {
         const argc: u8 = @intCast(items.len - 1);
 
         // Phase 1: compile all sub-expressions into wherever they land
         var compiled_regs: [64]u8 = undefined;
         const func_tmp = try self.allocReg();
-        try self.compile(items[0], func_tmp);
+
+        // Try to resolve function to a builtin at compile time
+        if (try self.tryResolveBuiltin(items[0])) |bi_const| {
+            try self.emit(bc.encode_ae(.load_const, func_tmp, bi_const));
+        } else {
+            try self.compile(items[0], func_tmp);
+        }
         compiled_regs[0] = func_tmp;
 
         for (items[1..], 0..) |arg, i| {
@@ -689,8 +711,15 @@ fn freeFuncDef(def: *FuncDef, allocator: std.mem.Allocator) void {
 }
 
 fn compileAndRun(src: []const u8, allocator: std.mem.Allocator) !Value {
+    return compileAndRunWithBuiltins(src, allocator, false);
+}
+
+fn compileAndRunWithBuiltins(src: []const u8, allocator: std.mem.Allocator, init_builtins: bool) !Value {
     var gc = GC.init(allocator);
     defer gc.deinit();
+    var env = Env.init(allocator, null);
+    defer env.deinit();
+    if (init_builtins) try core.initCore(&env, &gc);
     const Reader = @import("reader.zig").Reader;
     var reader = Reader.init(src, &gc);
     const form = try reader.readForm();
@@ -816,4 +845,47 @@ test "compiler: closure with recur still works" {
         \\(let* [base 1000 sum (fn* [n acc] (if (<= n 0) (+ acc base) (recur (- n 1) (+ acc n))))] (sum 10 0))
     , std.testing.allocator);
     try std.testing.expectEqual(@as(i48, 1055), result.asInt());
+}
+
+test "compiler: builtin inc called from bytecode" {
+    const result = try compileAndRunWithBuiltins("(inc 41)", std.testing.allocator, true);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: builtin dec called from bytecode" {
+    const result = try compileAndRunWithBuiltins("(dec 43)", std.testing.allocator, true);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: builtin zero? from bytecode" {
+    const r1 = try compileAndRunWithBuiltins("(zero? 0)", std.testing.allocator, true);
+    try std.testing.expect(r1.isBool());
+    try std.testing.expect(r1.asBool());
+    const r2 = try compileAndRunWithBuiltins("(zero? 5)", std.testing.allocator, true);
+    try std.testing.expect(r2.isBool());
+    try std.testing.expect(!r2.asBool());
+}
+
+test "compiler: builtin not from bytecode" {
+    const r1 = try compileAndRunWithBuiltins("(not false)", std.testing.allocator, true);
+    try std.testing.expect(r1.isBool());
+    try std.testing.expect(r1.asBool());
+    const r2 = try compileAndRunWithBuiltins("(not true)", std.testing.allocator, true);
+    try std.testing.expect(r2.isBool());
+    try std.testing.expect(!r2.asBool());
+}
+
+test "compiler: builtin in recursive loop" {
+    // Use inc as a builtin inside a recur loop
+    const result = try compileAndRunWithBuiltins(
+        \\(let* [count-up (fn* [n acc] (if (= n 0) acc (recur (- n 1) (inc acc))))]
+        \\  (count-up 100 0))
+    , std.testing.allocator, true);
+    try std.testing.expectEqual(@as(i48, 100), result.asInt());
+}
+
+test "compiler: chained builtins" {
+    // (inc (inc (dec 42)))  =>  43
+    const result = try compileAndRunWithBuiltins("(inc (inc (dec 42)))", std.testing.allocator, true);
+    try std.testing.expectEqual(@as(i48, 43), result.asInt());
 }

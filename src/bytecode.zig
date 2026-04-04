@@ -404,29 +404,38 @@ pub const VM = struct {
                     const base = self.currentFrame().base;
                     const func_val = self.stack[base + c];
 
-                    // Resolve bc_closure
                     if (!func_val.isObj()) return error.TypeError;
                     const func_obj = func_val.asObj();
-                    if (func_obj.kind != .bc_closure) return error.TypeError;
-                    const callee = &func_obj.data.bc_closure;
 
-                    if (b != callee.def.arity) return error.ArityError;
-                    if (self.frame_count >= 64) return error.StackOverflow;
+                    // Dispatch: bc_closure (bytecode) or builtin_ref (native)
+                    if (func_obj.kind == .builtin_ref) {
+                        const builtin = func_obj.data.builtin_ref;
+                        var args_buf: [64]Value = undefined;
+                        for (0..b) |i| {
+                            args_buf[i] = self.stack[base + c + 1 + i];
+                        }
+                        // builtins need GC and Env — use a dummy env for now
+                        var dummy_env = @import("env.zig").Env.init(self.gc.allocator, null);
+                        defer dummy_env.deinit();
+                        self.reg(a).* = builtin.func(args_buf[0..b], self.gc, &dummy_env) catch return error.TypeError;
+                    } else if (func_obj.kind == .bc_closure) {
+                        const callee = &func_obj.data.bc_closure;
+                        if (b != callee.def.arity) return error.ArityError;
+                        if (self.frame_count >= 64) return error.StackOverflow;
 
-                    // Set up new frame
-                    const new_base = base + self.currentFrame().closure.def.num_registers;
-                    // Copy args into callee's register space (R0..Rn-1 = params)
-                    for (0..b) |i| {
-                        self.stack[new_base + i] = self.stack[base + c + 1 + i];
-                    }
+                        const new_base = base + self.currentFrame().closure.def.num_registers;
+                        for (0..b) |i| {
+                            self.stack[new_base + i] = self.stack[base + c + 1 + i];
+                        }
 
-                    self.frames[self.frame_count] = .{
-                        .closure = callee,
-                        .ip = 0,
-                        .base = new_base,
-                        .ret_dest = a, // caller's register for return value
-                    };
-                    self.frame_count += 1;
+                        self.frames[self.frame_count] = .{
+                            .closure = callee,
+                            .ip = 0,
+                            .base = new_base,
+                            .ret_dest = a,
+                        };
+                        self.frame_count += 1;
+                    } else return error.TypeError;
                 },
                 // TAIL_CALL A, B: func_reg=A, argc=B — reuse current frame
                 .tail_call => {

@@ -93,6 +93,11 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
                 try buf.append(gc.allocator, ')');
             },
             .bc_closure => try buf.appendSlice(gc.allocator, "#<bc-fn>"),
+            .builtin_ref => {
+                try buf.appendSlice(gc.allocator, "#<builtin ");
+                try buf.appendSlice(gc.allocator, obj.data.builtin_ref.name);
+                try buf.append(gc.allocator, '>');
+            },
         }
     } else {
         // float

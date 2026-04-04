@@ -84,6 +84,13 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "info-density", &infoDensityFn },
         .{ "causal-depth", &causalDepthFn },
         .{ "padic-cones", &padicConesFn },
+        // Jepsen builtins
+        .{ "jepsen/nemesis!", &jepsenNemesisFn },
+        .{ "jepsen/gen", &jepsenGenFn },
+        .{ "jepsen/record!", &jepsenRecordFn },
+        .{ "jepsen/check", &jepsenCheckFn },
+        .{ "jepsen/reset!", &jepsenResetFn },
+        .{ "jepsen/history", &jepsenHistoryFn },
         // Gay Color builtins
         .{ "color-at", &substrate.colorAtFn },
         .{ "color-seed", &substrate.colorSeedFn },
@@ -924,6 +931,7 @@ fn isSequentialP(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // ── Trit-tick time quantum builtins ──────────────────────────────
 
 const transitivity = @import("transitivity.zig");
+const jepsen = @import("jepsen.zig");
 
 /// (trit-phase n) → -1, 0, or 1 — GF(3) phase of tick count n
 fn tritPhaseFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
@@ -1056,6 +1064,138 @@ fn padicConesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     for (cones) |vol| {
         const clamped = @min(vol, @as(u64, @intCast(std.math.maxInt(i48))));
         try obj.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(clamped)));
+    }
+    return Value.makeObj(obj);
+}
+
+// ============================================================================
+// JEPSEN BUILTINS: embedded linearizability testing
+// ============================================================================
+
+/// (jepsen/nemesis! kind) → previous-kind
+/// Kinds: :none :trit-corrupt :trit-duplicate :version-rewind :eval-drop :causal-invert
+fn jepsenNemesisFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const kind: jepsen.NemesisKind = if (args[0].isKeyword()) blk: {
+        const name = gc.getString(args[0].asKeywordId());
+        if (std.mem.eql(u8, name, "none")) break :blk .none
+        else if (std.mem.eql(u8, name, "trit-corrupt")) break :blk .trit_corrupt
+        else if (std.mem.eql(u8, name, "trit-duplicate")) break :blk .trit_duplicate
+        else if (std.mem.eql(u8, name, "version-rewind")) break :blk .version_rewind
+        else if (std.mem.eql(u8, name, "eval-drop")) break :blk .eval_drop
+        else if (std.mem.eql(u8, name, "causal-invert")) break :blk .causal_invert
+        else break :blk .none;
+    } else if (args[0].isInt()) blk: {
+        const v = args[0].asInt();
+        break :blk if (v >= 0 and v <= 5) @enumFromInt(@as(u8, @intCast(v))) else .none;
+    } else return error.TypeError;
+
+    const prev = jepsen.activateNemesis(kind);
+    return Value.makeInt(@as(i48, @intFromEnum(prev)));
+}
+
+/// (jepsen/gen n seed) → vector of [op-kind detail] pairs
+fn jepsenGenFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const n: usize = @intCast(@max(@as(i48, 1), args[0].asInt()));
+    const seed: u64 = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    const clamped_n = @min(n, 1000); // safety cap
+
+    var buf: [1000]jepsen.HistoryEntry = undefined;
+    const gen_count = jepsen.generatePlan(seed, clamped_n, &buf);
+
+    const obj = try gc.allocObj(.vector);
+    for (0..gen_count) |i| {
+        const entry_obj = try gc.allocObj(.vector);
+        const op_name: []const u8 = switch (buf[i].op) {
+            .eval => "eval",
+            .nemesis => "nemesis",
+            .recover => "recover",
+            .check => "check",
+        };
+        try entry_obj.data.vector.items.append(gc.allocator, Value.makeKeyword(try gc.internString(op_name)));
+        try entry_obj.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(buf[i].detail)));
+        try obj.data.vector.items.append(gc.allocator, Value.makeObj(entry_obj));
+    }
+    return Value.makeObj(obj);
+}
+
+/// (jepsen/record! op-kind result trit-before trit-after version-id) → causal-ts
+fn jepsenRecordFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = gc;
+    if (args.len < 4) return error.ArityError;
+    const op: jepsen.OpKind = if (args[0].isInt())
+        @enumFromInt(@as(u8, @intCast(@max(@as(i48, 0), args[0].asInt()))))
+    else
+        .eval;
+    const result_kind: jepsen.OpResult = if (args[1].isInt())
+        @enumFromInt(@as(u8, @intCast(@max(@as(i48, 0), args[1].asInt()))))
+    else
+        .ok;
+    const trit_before: i8 = if (args[2].isInt()) @intCast(@max(@as(i48, -1), @min(args[2].asInt(), 1))) else 0;
+    const trit_after: i8 = if (args[3].isInt()) @intCast(@max(@as(i48, -1), @min(args[3].asInt(), 1))) else 0;
+    const version_id: u64 = if (args.len > 4 and args[4].isInt()) @intCast(@max(@as(i48, 0), args[4].asInt())) else 0;
+
+    jepsen.record(op, result_kind, trit_before, trit_after, version_id, 0);
+    return Value.makeInt(@intCast(jepsen.causal_clock));
+}
+
+/// (jepsen/check) → {:valid? bool :violations N :ops-checked N :nemesis-events N :max-trit-drift N}
+fn jepsenCheckFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    const result = jepsen.check();
+
+    const obj = try gc.allocObj(.map);
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("valid?")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(result.valid));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("violations")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(result.violation_count)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("ops-checked")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(result.ops_checked)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("nemesis-events")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(result.nemesis_events)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("max-trit-drift")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@as(i48, result.max_trit_drift)));
+    return Value.makeObj(obj);
+}
+
+/// (jepsen/reset!) → nil
+fn jepsenResetFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    jepsen.resetHistory();
+    return Value.makeNil();
+}
+
+/// (jepsen/history) → vector of maps (recent history entries)
+fn jepsenHistoryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    const hist = jepsen.getHistory();
+    const obj = try gc.allocObj(.vector);
+    const limit = @min(hist.len, 100); // cap at 100 entries for display
+    for (0..limit) |i| {
+        const entry = hist[i];
+        const entry_obj = try gc.allocObj(.map);
+        try entry_obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("op")));
+        const op_name: []const u8 = switch (entry.op) {
+            .eval => "eval",
+            .nemesis => "nemesis",
+            .recover => "recover",
+            .check => "check",
+        };
+        try entry_obj.data.map.vals.append(gc.allocator, Value.makeKeyword(try gc.internString(op_name)));
+        try entry_obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("result")));
+        const res_name: []const u8 = switch (entry.result) {
+            .ok => "ok",
+            .fail => "fail",
+            .info => "info",
+        };
+        try entry_obj.data.map.vals.append(gc.allocator, Value.makeKeyword(try gc.internString(res_name)));
+        try entry_obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("ts")));
+        try entry_obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(entry.causal_ts)));
+        try entry_obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("trit")));
+        try entry_obj.data.map.vals.append(gc.allocator, Value.makeInt(@as(i48, entry.trit_after)));
+        try obj.data.vector.items.append(gc.allocator, Value.makeObj(entry_obj));
     }
     return Value.makeObj(obj);
 }
