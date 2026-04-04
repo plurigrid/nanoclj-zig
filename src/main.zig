@@ -619,4 +619,5 @@ test {
     _ = @import("persistent_map.zig");
     _ = @import("ies.zig");
     _ = @import("pattern.zig");
+    _ = @import("sector.zig");
 }
