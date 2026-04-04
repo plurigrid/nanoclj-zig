@@ -347,6 +347,15 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "ns-name", &nsNameFn },
         .{ "all-ns", &allNsFn },
         .{ "require", &requireFn },
+        // Colorspace ops
+        .{ "*cs*", &currentCsFn },
+        .{ "cs-color", &csColorFn },
+        .{ "cs-complement", &csComplementFn },
+        .{ "cs-distance", &csDistanceFn },
+        .{ "cs-hue", &csHueFn },
+        .{ "cs-chroma", &csChromaFn },
+        .{ "cs-resolve", &csResolveFn },
+        .{ "cs-radius", &csRadiusFn },
     };
 
     inline for (builtins) |b| {
@@ -2839,6 +2848,104 @@ fn requireFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
                     reg.refer(reg.current, ns_name) catch {};
                 }
             }
+        }
+    }
+    return Value.makeNil();
+}
+
+// ============================================================================
+// COLORSPACE BUILTINS
+// ============================================================================
+
+const colorspace_mod = @import("colorspace.zig");
+
+fn colorToVector(color: colorspace_mod.Color, gc: *GC) !Value {
+    const obj = try gc.allocObj(.vector);
+    try obj.data.vector.items.append(gc.allocator, Value.makeFloat(color.L));
+    try obj.data.vector.items.append(gc.allocator, Value.makeFloat(color.a));
+    try obj.data.vector.items.append(gc.allocator, Value.makeFloat(color.b));
+    try obj.data.vector.items.append(gc.allocator, Value.makeFloat(color.alpha));
+    return Value.makeObj(obj);
+}
+
+/// (*cs*) — return current colorspace name as symbol
+fn currentCsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (eval_mod.cs_registry) |reg| {
+        return Value.makeSymbol(try gc.internString(reg.currentName()));
+    }
+    return Value.makeSymbol(try gc.internString("user"));
+}
+
+/// (cs-color) or (cs-color name) — return [L a b alpha] of current or named colorspace
+fn csColorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const reg = eval_mod.cs_registry orelse return Value.makeNil();
+    if (args.len == 0) {
+        return colorToVector(reg.currentColor(), gc);
+    }
+    if (args[0].isSymbol() or args[0].isKeyword()) {
+        const name = if (args[0].isSymbol()) gc.getString(args[0].asSymbolId()) else gc.getString(args[0].asKeywordId());
+        if (reg.getSpace(name)) |sp| {
+            return colorToVector(sp.color, gc);
+        }
+    }
+    return Value.makeNil();
+}
+
+/// (cs-complement) — return [L a b alpha] of perceptual complement of current focus
+fn csComplementFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const reg = eval_mod.cs_registry orelse return Value.makeNil();
+    return colorToVector(reg.currentColor().complement(), gc);
+}
+
+/// (cs-distance name1 name2) — perceptual distance between two colorspaces
+fn csDistanceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    const reg = eval_mod.cs_registry orelse return Value.makeNil();
+    const n1 = if (args[0].isSymbol()) gc.getString(args[0].asSymbolId()) else if (args[0].isKeyword()) gc.getString(args[0].asKeywordId()) else return error.TypeError;
+    const n2 = if (args[1].isSymbol()) gc.getString(args[1].asSymbolId()) else if (args[1].isKeyword()) gc.getString(args[1].asKeywordId()) else return error.TypeError;
+    const s1 = reg.getSpace(n1) orelse return Value.makeNil();
+    const s2 = reg.getSpace(n2) orelse return Value.makeNil();
+    return Value.makeFloat(s1.color.distance(s2.color));
+}
+
+/// (cs-hue) or (cs-hue name) — hue angle in degrees [0, 360)
+fn csHueFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const reg = eval_mod.cs_registry orelse return Value.makeNil();
+    if (args.len == 0) return Value.makeFloat(reg.currentColor().hue());
+    if (args[0].isSymbol() or args[0].isKeyword()) {
+        const name = if (args[0].isSymbol()) gc.getString(args[0].asSymbolId()) else gc.getString(args[0].asKeywordId());
+        if (reg.getSpace(name)) |sp| return Value.makeFloat(sp.color.hue());
+    }
+    return Value.makeNil();
+}
+
+/// (cs-chroma) or (cs-chroma name) — chroma (saturation) magnitude
+fn csChromaFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const reg = eval_mod.cs_registry orelse return Value.makeNil();
+    if (args.len == 0) return Value.makeFloat(reg.currentColor().chroma());
+    if (args[0].isSymbol() or args[0].isKeyword()) {
+        const name = if (args[0].isSymbol()) gc.getString(args[0].asSymbolId()) else gc.getString(args[0].asKeywordId());
+        if (reg.getSpace(name)) |sp| return Value.makeFloat(sp.color.chroma());
+    }
+    return Value.makeNil();
+}
+
+/// (cs-resolve sym) — resolve symbol through color manifold (nearest colorspace with binding)
+fn csResolveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const reg = eval_mod.cs_registry orelse return Value.makeNil();
+    const name = if (args[0].isSymbol()) gc.getString(args[0].asSymbolId()) else if (args[0].isString()) gc.getString(args[0].asStringId()) else return error.TypeError;
+    return reg.resolve(name) orelse Value.makeNil();
+}
+
+/// (cs-radius) or (cs-radius new-radius) — get or set resolution radius
+fn csRadiusFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (eval_mod.cs_registry) |*reg| {
+        if (args.len == 0) return Value.makeFloat(reg.radius);
+        if (args.len == 1) {
+            const r = if (args[0].isFloat()) @as(f32, @floatCast(args[0].asFloat())) else if (args[0].isInt()) @as(f32, @floatFromInt(args[0].asInt())) else return error.TypeError;
+            reg.radius = r;
+            return Value.makeFloat(r);
         }
     }
     return Value.makeNil();

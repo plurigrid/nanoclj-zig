@@ -490,10 +490,49 @@ fn applyBounded(func: Value, args: []Value, env: *Env, gc: *GC, res: *Resources)
     if (!func.isObj()) return Domain.fail(.not_a_function);
     const obj = func.asObj();
 
-    // partial_fn: prepend bound args, then dispatch to underlying function
+    // partial_fn: special markers or prepend bound args
     if (obj.kind == .partial_fn) {
         const pf = &obj.data.partial_fn;
         const bound = pf.bound_args.items;
+
+        // Special dispatch: comp/juxt/complement/constantly
+        if (pf.func.isNil() and bound.len > 0 and bound[0].isKeyword()) {
+            const marker = gc.getString(bound[0].asKeywordId());
+            if (std.mem.eql(u8, marker, "__constantly__")) {
+                return Domain.pure(bound[1]);
+            }
+            if (std.mem.eql(u8, marker, "__juxt__")) {
+                const fns = bound[1..];
+                const vec = gc.allocObj(.vector) catch return Domain.fail(.type_error);
+                for (fns) |f| {
+                    const d = applyBounded(f, args, env, gc, res);
+                    if (!d.isValue()) return d;
+                    vec.data.vector.items.append(gc.allocator, d.value) catch return Domain.fail(.type_error);
+                }
+                return Domain.pure(Value.makeObj(vec));
+            }
+            if (std.mem.eql(u8, marker, "__comp__")) {
+                const fns = bound[1..];
+                var result = args;
+                var tmp: [16]Value = undefined;
+                var ri: usize = fns.len;
+                while (ri > 0) {
+                    ri -= 1;
+                    const d = applyBounded(fns[ri], result, env, gc, res);
+                    if (!d.isValue()) return d;
+                    tmp[0] = d.value;
+                    result = tmp[0..1];
+                }
+                return Domain.pure(result[0]);
+            }
+            if (std.mem.eql(u8, marker, "__complement__")) {
+                const d = applyBounded(bound[1], args, env, gc, res);
+                if (!d.isValue()) return d;
+                return Domain.pure(Value.makeBool(!d.value.isTruthy()));
+            }
+        }
+
+        // Normal partial: prepend bound args
         const total = bound.len + args.len;
         if (total > 16) return Domain.fail(.arity_error);
         var combined: [16]Value = undefined;

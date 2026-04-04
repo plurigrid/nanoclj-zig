@@ -58,6 +58,10 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "testing")) return evalTesting(items, env, gc);
         if (std.mem.eql(u8, name, "ns")) return evalNs(items, env, gc);
         if (std.mem.eql(u8, name, "in-ns")) return evalInNs(items, env, gc);
+        if (std.mem.eql(u8, name, "defmacro")) return evalDefmacro(items, env, gc);
+        if (std.mem.eql(u8, name, "macroexpand-1")) return evalMacroexpand1(items, env, gc);
+        if (std.mem.eql(u8, name, "colorspace")) return evalColorspace(items, env, gc);
+        if (std.mem.eql(u8, name, "blend")) return evalBlend(items, env, gc);
         if (std.mem.eql(u8, name, "try")) return evalTry(items, env, gc);
         if (std.mem.eql(u8, name, "throw")) {
             if (items.len != 2) return error.ArityError;
@@ -365,13 +369,16 @@ fn evalTesting(items: []Value, env: *Env, gc: *GC) EvalError!Value {
 // ============================================================================
 
 const namespace = @import("namespace.zig");
+const colorspace_mod = @import("colorspace.zig");
 pub var ns_registry: ?namespace.NamespaceRegistry = null;
+pub var cs_registry: ?colorspace_mod.ColorspaceRegistry = null;
 
 pub fn initNamespaces(allocator: std.mem.Allocator, core_env: *Env) !void {
     ns_registry = try namespace.NamespaceRegistry.init(allocator, core_env);
+    cs_registry = try colorspace_mod.ColorspaceRegistry.init(allocator, core_env);
 }
 
-/// (ns name) — switch to namespace, creating if needed
+/// (ns name) — legacy adapter: delegates to colorspace focus_on
 fn evalNs(items: []Value, _: *Env, gc: *GC) EvalError!Value {
     if (items.len < 2) return error.ArityError;
     const ns_name = if (items[1].isSymbol())
@@ -380,26 +387,84 @@ fn evalNs(items: []Value, _: *Env, gc: *GC) EvalError!Value {
         gc.getString(items[1].asStringId())
     else
         return error.TypeError;
+    if (cs_registry) |*reg| {
+        _ = reg.focus_on(ns_name) catch return error.OutOfMemory;
+    }
     if (ns_registry) |*reg| {
         _ = reg.switchTo(ns_name) catch return error.OutOfMemory;
     }
     return Value.makeSymbol(items[1].asSymbolId());
 }
 
-/// (in-ns 'name) — switch to namespace
+/// (in-ns 'name) — legacy adapter: delegates to colorspace focus_on
 fn evalInNs(items: []Value, _: *Env, gc: *GC) EvalError!Value {
     if (items.len != 2) return error.ArityError;
-    // (in-ns 'name) — the arg is quoted, so eval it first
     const ns_name = if (items[1].isSymbol())
         gc.getString(items[1].asSymbolId())
     else if (items[1].isString())
         gc.getString(items[1].asStringId())
     else
         return error.TypeError;
+    if (cs_registry) |*reg| {
+        _ = reg.focus_on(ns_name) catch return error.OutOfMemory;
+    }
     if (ns_registry) |*reg| {
         _ = reg.switchTo(ns_name) catch return error.OutOfMemory;
     }
     return Value.makeNil();
+}
+
+/// (colorspace name-or-vec) — focus on a colorspace by name or [L a b] coordinates
+fn evalColorspace(items: []Value, _: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    var reg = cs_registry orelse return Value.makeNil();
+    _ = &reg;
+    if (items[1].isSymbol()) {
+        const name = gc.getString(items[1].asSymbolId());
+        _ = cs_registry.?.focus_on(name) catch return error.OutOfMemory;
+        return Value.makeSymbol(items[1].asSymbolId());
+    }
+    if (items[1].isKeyword()) {
+        const name = gc.getString(items[1].asKeywordId());
+        _ = cs_registry.?.focus_on(name) catch return error.OutOfMemory;
+        return items[1];
+    }
+    // [L a b] or [L a b alpha] vector literal
+    if (items[1].isObj() and items[1].asObj().kind == .vector) {
+        const vec = items[1].asObj().data.vector.items.items;
+        if (vec.len >= 3) {
+            const color = colorspace_mod.Color{
+                .L = if (vec[0].isFloat()) @as(f32, @floatCast(vec[0].asFloat())) else if (vec[0].isInt()) @as(f32, @floatFromInt(vec[0].asInt())) else 0.5,
+                .a = if (vec[1].isFloat()) @as(f32, @floatCast(vec[1].asFloat())) else if (vec[1].isInt()) @as(f32, @floatFromInt(vec[1].asInt())) else 0.0,
+                .b = if (vec[2].isFloat()) @as(f32, @floatCast(vec[2].asFloat())) else if (vec[2].isInt()) @as(f32, @floatFromInt(vec[2].asInt())) else 0.0,
+                .alpha = if (vec.len > 3 and vec[3].isFloat()) @as(f32, @floatCast(vec[3].asFloat())) else 1.0,
+            };
+            const name = if (items.len > 2 and items[2].isSymbol())
+                gc.getString(items[2].asSymbolId())
+            else
+                "anon";
+            _ = cs_registry.?.focus_at(color, name) catch return error.OutOfMemory;
+            return items[1];
+        }
+    }
+    return error.TypeError;
+}
+
+/// (blend cs1 cs2 t result-name) — blend two colorspaces
+fn evalBlend(items: []Value, _: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 4) return error.ArityError;
+    var reg = cs_registry orelse return Value.makeNil();
+    _ = &reg;
+    const name1 = if (items[1].isSymbol()) gc.getString(items[1].asSymbolId()) else if (items[1].isKeyword()) gc.getString(items[1].asKeywordId()) else return error.TypeError;
+    const name2 = if (items[2].isSymbol()) gc.getString(items[2].asSymbolId()) else if (items[2].isKeyword()) gc.getString(items[2].asKeywordId()) else return error.TypeError;
+    const t_val = try eval(items[3], &struct { fn get() *Env { return cs_registry.?.currentEnv(); } }.get().*, gc);
+    const t: f32 = if (t_val.isFloat()) @as(f32, @floatCast(t_val.asFloat())) else if (t_val.isInt()) @as(f32, @floatFromInt(t_val.asInt())) else 0.5;
+    const result_name = if (items.len > 4 and items[4].isSymbol())
+        gc.getString(items[4].asSymbolId())
+    else
+        "blended";
+    _ = cs_registry.?.blend(name1, name2, t, result_name) catch return error.OutOfMemory;
+    return Value.makeSymbol(try gc.internString(result_name));
 }
 
 fn evalIf(items: []Value, env: *Env, gc: *GC) EvalError!Value {
