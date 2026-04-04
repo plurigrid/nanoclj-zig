@@ -271,9 +271,90 @@ pub const Compiler = struct {
             if (items.len >= 3) {
                 if (self.tryCompileVariadicOp(name, items[1..], dest)) |_| return;
             }
-            // Unary: (- x) → negate
-            if (items.len == 2 and std.mem.eql(u8, name, "-")) {
-                return self.compileNegate(items[1], dest);
+            // Unary operations
+            if (items.len == 2) {
+                if (std.mem.eql(u8, name, "-")) return self.compileNegate(items[1], dest);
+                if (std.mem.eql(u8, name, "not")) {
+                    try self.compile(items[1], dest);
+                    // if truthy → false, else → true. Use jump_if_not trick:
+                    const jump_idx = self.codeLen();
+                    try self.emit(0); // placeholder
+                    try self.emit(bc.encode_d(.load_false, dest));
+                    const jump_end = self.codeLen();
+                    try self.emit(0); // placeholder
+                    const else_off: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_idx)) - 1);
+                    self.emitAt(jump_idx, bc.encode_ae(.jump_if_not, dest, @bitCast(else_off)));
+                    try self.emit(bc.encode_d(.load_true, dest));
+                    const end_off: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jump_end)) - 1);
+                    self.emitAt(jump_end, bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(@as(i24, @intCast(end_off)))))));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "inc")) {
+                    try self.compile(items[1], dest);
+                    const one = try self.allocReg();
+                    try self.emit(bc.encode_ae(.load_int, one, @bitCast(@as(i16, 1))));
+                    try self.emit(bc.encode_abc(.add, dest, dest, one));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "dec")) {
+                    try self.compile(items[1], dest);
+                    const one = try self.allocReg();
+                    try self.emit(bc.encode_ae(.load_int, one, @bitCast(@as(i16, 1))));
+                    try self.emit(bc.encode_abc(.sub, dest, dest, one));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "zero?")) {
+                    try self.compile(items[1], dest);
+                    const zero = try self.allocReg();
+                    try self.emit(bc.encode_ae(.load_int, zero, 0));
+                    try self.emit(bc.encode_abc(.eq, dest, dest, zero));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "pos?")) {
+                    try self.compile(items[1], dest);
+                    const zero = try self.allocReg();
+                    try self.emit(bc.encode_ae(.load_int, zero, 0));
+                    try self.emit(bc.encode_abc(.lt, dest, zero, dest)); // 0 < x
+                    return;
+                }
+                if (std.mem.eql(u8, name, "neg?")) {
+                    try self.compile(items[1], dest);
+                    const zero = try self.allocReg();
+                    try self.emit(bc.encode_ae(.load_int, zero, 0));
+                    try self.emit(bc.encode_abc(.lt, dest, dest, zero)); // x < 0
+                    return;
+                }
+                if (std.mem.eql(u8, name, "even?")) {
+                    try self.compile(items[1], dest);
+                    const two = try self.allocReg();
+                    try self.emit(bc.encode_ae(.load_int, two, @bitCast(@as(i16, 2))));
+                    try self.emit(bc.encode_abc(.rem, dest, dest, two));
+                    const zero = try self.allocReg();
+                    try self.emit(bc.encode_ae(.load_int, zero, 0));
+                    try self.emit(bc.encode_abc(.eq, dest, dest, zero));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "odd?")) {
+                    try self.compile(items[1], dest);
+                    const two = try self.allocReg();
+                    try self.emit(bc.encode_ae(.load_int, two, @bitCast(@as(i16, 2))));
+                    try self.emit(bc.encode_abc(.rem, dest, dest, two));
+                    const zero = try self.allocReg();
+                    try self.emit(bc.encode_ae(.load_int, zero, 0));
+                    try self.emit(bc.encode_abc(.eq, dest, dest, zero));
+                    // negate: eq gave us (rem=0), we want (rem!=0)
+                    const jidx = self.codeLen();
+                    try self.emit(0);
+                    try self.emit(bc.encode_d(.load_false, dest));
+                    const jend = self.codeLen();
+                    try self.emit(0);
+                    const eo: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jidx)) - 1);
+                    self.emitAt(jidx, bc.encode_ae(.jump_if_not, dest, @bitCast(eo)));
+                    try self.emit(bc.encode_d(.load_true, dest));
+                    const eeo: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(jend)) - 1);
+                    self.emitAt(jend, bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(@as(i24, @intCast(eeo)))))));
+                    return;
+                }
             }
         }
 
@@ -711,10 +792,15 @@ pub const Compiler = struct {
         return null;
     }
 
-    fn nameToCmpOp(name: []const u8) ?Op {
-        if (std.mem.eql(u8, name, "=")) return .eq;
-        if (std.mem.eql(u8, name, "<")) return .lt;
-        if (std.mem.eql(u8, name, "<=")) return .lte;
+    const CmpOp = struct { op: Op, swap: bool };
+
+    fn nameToCmpOp(name: []const u8) ?CmpOp {
+        if (std.mem.eql(u8, name, "=")) return .{ .op = .eq, .swap = false };
+        if (std.mem.eql(u8, name, "<")) return .{ .op = .lt, .swap = false };
+        if (std.mem.eql(u8, name, "<=")) return .{ .op = .lte, .swap = false };
+        if (std.mem.eql(u8, name, ">")) return .{ .op = .lt, .swap = true };
+        if (std.mem.eql(u8, name, ">=")) return .{ .op = .lte, .swap = true };
+        if (std.mem.eql(u8, name, "!=")) return .{ .op = .eq, .swap = false }; // will negate
         return null;
     }
 
@@ -725,18 +811,21 @@ pub const Compiler = struct {
             self.compileVariadicArith(op, args, dest) catch return null;
             return {};
         }
-        if (nameToCmpOp(name)) |op| {
+        if (nameToCmpOp(name)) |cmp| {
             if (args.len == 2) {
-                // Binary comparison: simple case
                 const r_lhs = self.allocReg() catch return null;
                 self.compile(args[0], r_lhs) catch return null;
                 const r_rhs = self.allocReg() catch return null;
                 self.compile(args[1], r_rhs) catch return null;
-                self.emit(bc.encode_abc(op, dest, r_lhs, r_rhs)) catch return null;
+                if (cmp.swap) {
+                    self.emit(bc.encode_abc(cmp.op, dest, r_rhs, r_lhs)) catch return null;
+                } else {
+                    self.emit(bc.encode_abc(cmp.op, dest, r_lhs, r_rhs)) catch return null;
+                }
                 return {};
             }
             if (args.len >= 3) {
-                self.compileVariadicCmp(op, args, dest) catch return null;
+                self.compileVariadicCmp(cmp.op, args, dest) catch return null;
                 return {};
             }
         }
