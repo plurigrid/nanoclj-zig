@@ -285,14 +285,14 @@ test "persistent vector: basic conj and nth" {
     var v = PersistentVector.empty(alloc);
     // Build up 100 elements
     var i: u32 = 0;
-    var nodes_to_free = std.ArrayList(*Node).init(alloc);
-    defer nodes_to_free.deinit();
+    var nodes_to_free = std.ArrayListUnmanaged(*Node){};
+    defer nodes_to_free.deinit(alloc);
     while (i < 100) : (i += 1) {
         const old_root = v.root;
         v = try v.conj(Value.makeInt(@intCast(i)));
         // Track new root nodes for cleanup
         if (v.root != old_root) {
-            if (v.root) |r| try nodes_to_free.append(r);
+            if (v.root) |r| nodes_to_free.append(alloc, r) catch {};
         }
     }
     defer {

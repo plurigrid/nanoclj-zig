@@ -333,7 +333,7 @@ fn dissocNode(allocator: std.mem.Allocator, node: *HamtNode, key: Value, hash: u
 test "persistent map: basic assoc and get" {
     const alloc = std.testing.allocator;
     const gc_mod = @import("gc.zig");
-    var gc = try gc_mod.GC.init(alloc);
+    var gc = gc_mod.GC.init(alloc);
     defer gc.deinit();
 
     var m = PersistentMap.empty(alloc);
@@ -353,7 +353,7 @@ test "persistent map: basic assoc and get" {
 test "persistent map: structural sharing" {
     const alloc = std.testing.allocator;
     const gc_mod = @import("gc.zig");
-    var gc = try gc_mod.GC.init(alloc);
+    var gc = gc_mod.GC.init(alloc);
     defer gc.deinit();
 
     var m1 = PersistentMap.empty(alloc);
@@ -377,7 +377,7 @@ test "persistent map: structural sharing" {
 test "persistent map: dissoc" {
     const alloc = std.testing.allocator;
     const gc_mod = @import("gc.zig");
-    var gc = try gc_mod.GC.init(alloc);
+    var gc = gc_mod.GC.init(alloc);
     defer gc.deinit();
 
     var m1 = PersistentMap.empty(alloc);
