@@ -270,6 +270,19 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, name, "when")) return self.compileWhen(items, dest);
             if (std.mem.eql(u8, name, "cond")) return self.compileCond(items, dest);
 
+            // Compile-time macro expansion: check VM globals for macros
+            if (self.vm_globals) |globals| {
+                if (globals.get(name)) |head_val| {
+                    if (head_val.isObj() and head_val.asObj().kind == .macro_fn) {
+                        const eval_mod = @import("eval.zig");
+                        var dummy_env = @import("env.zig").Env.init(self.allocator, null);
+                        defer dummy_env.deinit();
+                        const expanded = eval_mod.apply(head_val, items[1..], &dummy_env, self.gc) catch return error.InvalidSyntax;
+                        return self.compile(expanded, dest);
+                    }
+                }
+            }
+
             // Variadic arithmetic: (+ a b c ...) → left-fold of binary ops
             if (items.len >= 3) {
                 if (self.tryCompileVariadicOp(name, items[1..], dest)) |_| return;
