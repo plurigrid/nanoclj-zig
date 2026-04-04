@@ -358,7 +358,6 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "cs-radius", &csRadiusFn },
         // Regex
         .{ "re-pattern", &rePatternFn },
-        .{ "re-find", &reFindFn },
         .{ "re-matches", &reMatchesFn },
     };
 
@@ -2952,6 +2951,30 @@ fn csRadiusFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
             reg.radius = r;
             return Value.makeFloat(r);
         }
+    }
+    return Value.makeNil();
+}
+
+// ============================================================================
+// REGEX BUILTINS
+// ============================================================================
+
+/// (re-pattern str) — identity: pattern is the string itself
+fn rePatternFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    return args[0];
+}
+
+/// (re-matches pattern string) — match entire string, return match or nil
+fn reMatchesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    const pat = gc.getString(args[0].asStringId());
+    const input = gc.getString(args[1].asStringId());
+    const result = pat_mod.matchWith(.thompson, pat, input);
+    if (result.matched and result.consumed == input.len) {
+        return args[1]; // full match
     }
     return Value.makeNil();
 }
