@@ -104,6 +104,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "hue-to-trit", &substrate.hueToTritFn },
         .{ "mix64", &substrate.mix64Fn },
         .{ "xor-fingerprint", &substrate.xorFingerprintFn },
+        // Universal index-addressed primitive
+        .{ "at", &atFn },
+        .{ "trit-at", &tritAtFn },
+        .{ "trit-sum", &tritSumFn },
         // Splittable RNG builtins
         .{ "split-rng", &splitRngFn },
         .{ "rng-next", &rngNextFn },
@@ -707,7 +711,35 @@ fn splitMix64(seed: u64) u64 {
     return z ^ (z >> 31);
 }
 
-// Splittable RNG stubs removed — real implementations at end of file
+// ── Universal index-addressed builtins ──
+
+/// (at seed index) → deterministic u64 value. The single primitive.
+fn atFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
+    const index: u64 = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    const v = substrate.at(seed, index);
+    return Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(v))))));
+}
+
+/// (trit-at seed index) → -1, 0, or 1. GF(3) projection of at().
+fn tritAtFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
+    const index: u64 = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    return Value.makeInt(@as(i48, substrate.tritAt(seed, index)));
+}
+
+/// (trit-sum seed n) → sum of trits [0, n). GF(3) conservation check.
+fn tritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
+    const n: u64 = @intCast(@max(@as(i48, 0), @min(args[1].asInt(), 100000)));
+    return Value.makeInt(@as(i48, substrate.tritSum(seed, n)));
+}
 
 fn incFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;

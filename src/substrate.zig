@@ -113,6 +113,45 @@ fn mixGamma(z_in: u64) u64 {
     return z;
 }
 
+// ─── Universal Index-Addressed Primitive ──────────────────────────────
+// at(seed, index) → u64: the single source of all deterministic state.
+// Everything else is a projection:
+//   color_at  = rgb_from(at(seed, index))
+//   trit_at   = at(seed, index) mod 3 - 1
+//   version_at = at(seed + hash(expr), index)
+//   rng_at    = SplitRng from at(seed, index)
+//
+// SPI (Strong Parallelism Invariance): at(s, i) is O(1), pure, parallelizable.
+// No state. No ordering dependency. Any index computable independently.
+
+pub fn at(seed: u64, index: u64) u64 {
+    return mix64(seed +% index *% GOLDEN);
+}
+
+/// Trit at position: -1, 0, or +1. GF(3) phase of the index-addressed value.
+pub fn tritAt(seed: u64, index: u64) i8 {
+    return @as(i8, @intCast(at(seed, index) % 3)) - 1;
+}
+
+/// Trit sum over [0, n): O(n) but deterministic and replayable.
+pub fn tritSum(seed: u64, n: u64) i32 {
+    var s: i32 = 0;
+    for (0..n) |i| {
+        s += @as(i32, tritAt(seed, i));
+    }
+    return s;
+}
+
+/// Color at position: projection of at() into RGB.
+pub fn colorAtIndexed(seed: u64, index: u64) Color {
+    const v = at(seed, index);
+    return .{
+        .r = @truncate(v >> 16),
+        .g = @truncate(v >> 8),
+        .b = @truncate(v),
+    };
+}
+
 pub const Color = struct {
     r: u8,
     g: u8,
