@@ -529,6 +529,16 @@ fn evalDefn(items: []Value, env: *Env, gc: *GC) EvalError!Value {
 }
 
 pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalError!Value {
+    // Handle builtin sentinel keywords (e.g. +, zero?, str resolved from env)
+    if (func.isKeyword()) {
+        const core = @import("core.zig");
+        if (core.isBuiltinSentinel(func, gc)) |bname| {
+            if (core.lookupBuiltin(bname)) |builtin| {
+                return builtin(@constCast(args), gc, caller_env) catch return error.EvalFailed;
+            }
+        }
+        return error.NotAFunction;
+    }
     if (!func.isObj()) return error.NotAFunction;
     const obj = func.asObj();
 

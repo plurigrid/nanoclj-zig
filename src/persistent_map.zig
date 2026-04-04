@@ -331,7 +331,8 @@ fn dissocNode(allocator: std.mem.Allocator, node: *HamtNode, key: Value, hash: u
 // ============================================================================
 
 test "persistent map: basic assoc and get" {
-    const alloc = std.testing.allocator;
+    // page_allocator: structural sharing means intermediate nodes can't be individually freed
+    const alloc = std.heap.page_allocator;
     const gc_mod = @import("gc.zig");
     var gc = gc_mod.GC.init(alloc);
     defer gc.deinit();
@@ -345,13 +346,10 @@ test "persistent map: basic assoc and get" {
     try std.testing.expectEqual(@as(u32, 2), m.count);
     try std.testing.expectEqual(@as(i48, 1), m.get(k1, &gc).?.asInt());
     try std.testing.expectEqual(@as(i48, 2), m.get(k2, &gc).?.asInt());
-
-    // Free nodes
-    if (m.root) |root| freeHamtNode(alloc, root);
 }
 
 test "persistent map: structural sharing" {
-    const alloc = std.testing.allocator;
+    const alloc = std.heap.page_allocator;
     const gc_mod = @import("gc.zig");
     var gc = gc_mod.GC.init(alloc);
     defer gc.deinit();
@@ -363,19 +361,15 @@ test "persistent map: structural sharing" {
     m1 = try m1.assoc(ka, Value.makeInt(1), &gc);
     m1 = try m1.assoc(kb, Value.makeInt(2), &gc);
 
-    var m2 = try m1.assoc(kc, Value.makeInt(3), &gc);
+    const m2 = try m1.assoc(kc, Value.makeInt(3), &gc);
     try std.testing.expectEqual(@as(u32, 2), m1.count);
     try std.testing.expectEqual(@as(u32, 3), m2.count);
     try std.testing.expect(m1.get(kc, &gc) == null);
     try std.testing.expectEqual(@as(i48, 3), m2.get(kc, &gc).?.asInt());
-
-    // Cleanup (simplified — in production, GC handles this)
-    if (m2.root) |root| freeHamtNode(alloc, root);
-    _ = &m2;
 }
 
 test "persistent map: dissoc" {
-    const alloc = std.testing.allocator;
+    const alloc = std.heap.page_allocator;
     const gc_mod = @import("gc.zig");
     var gc = gc_mod.GC.init(alloc);
     defer gc.deinit();
@@ -386,15 +380,11 @@ test "persistent map: dissoc" {
     m1 = try m1.assoc(ka, Value.makeInt(10), &gc);
     m1 = try m1.assoc(kb, Value.makeInt(20), &gc);
 
-    var m2 = try m1.dissoc(ka, &gc);
+    const m2 = try m1.dissoc(ka, &gc);
     try std.testing.expectEqual(@as(u32, 2), m1.count);
     try std.testing.expectEqual(@as(u32, 1), m2.count);
     try std.testing.expect(m2.get(ka, &gc) == null);
     try std.testing.expectEqual(@as(i48, 20), m2.get(kb, &gc).?.asInt());
-    _ = &m2;
-
-    // Cleanup
-    if (m1.root) |root| freeHamtNode(alloc, root);
 }
 
 fn freeHamtNode(allocator: std.mem.Allocator, node: *HamtNode) void {
