@@ -107,6 +107,11 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
             if (std.mem.eql(u8, name, "do")) return evalBoundedDo(items, env, gc, res);
             if (std.mem.eql(u8, name, "fn*") or std.mem.eql(u8, name, "fn")) return evalBoundedFnStar(items, env, gc, res);
             if (std.mem.eql(u8, name, "defn")) return evalBoundedDefn(items, env, gc, res);
+            if (std.mem.eql(u8, name, "deftest")) return evalBoundedDo(items, env, gc, res); // deftest = do + name
+            if (std.mem.eql(u8, name, "testing")) return evalBoundedDo(items, env, gc, res); // testing = do + label
+            if (std.mem.eql(u8, name, "try")) return evalBoundedTry(items, env, gc, res);
+            if (std.mem.eql(u8, name, "ns")) return Domain.pure(Value.makeNil()); // ns = noop for now
+            if (std.mem.eql(u8, name, "in-ns")) return Domain.pure(Value.makeNil());
             if (std.mem.eql(u8, name, "peval")) return evalBoundedPeval(items, env, gc, res);
         }
 
@@ -414,6 +419,46 @@ fn evalBoundedFnStar(items: []Value, env: *Env, gc: *GC, _: *Resources) Domain {
 /// (peval expr1 expr2 ...) — evaluate all exprs with forked fuel, return vector of results.
 /// Level 2 parallelism: dispatches to real OS threads via thread_peval.
 /// Zig 0.15: std.Thread + Mutex. Zig 0.16: swap to std.Io fibers.
+/// (try body... (catch e handler...)) — eval body, catch errors
+fn evalBoundedTry(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+    if (items.len < 2) return Domain.fail(.arity_error);
+    // Find catch clause
+    var body_end: usize = items.len;
+    for (items[1..], 1..) |item, i| {
+        if (item.isObj() and item.asObj().kind == .list) {
+            const sub = item.asObj().data.list.items.items;
+            if (sub.len > 0 and sub[0].isSymbol()) {
+                const sn = gc.getString(sub[0].asSymbolId());
+                if (std.mem.eql(u8, sn, "catch")) {
+                    body_end = i;
+                    break;
+                }
+            }
+        }
+    }
+    // Eval body forms
+    var result = Domain.pure(Value.makeNil());
+    for (items[1..body_end]) |form| {
+        result = evalBounded(form, env, gc, res);
+        if (!result.isValue()) {
+            // Error — look for catch clause
+            if (body_end < items.len) {
+                const catch_form = items[body_end].asObj().data.list.items.items;
+                // (catch e handler...)
+                if (catch_form.len >= 3) {
+                    var catch_result = Domain.pure(Value.makeNil());
+                    for (catch_form[2..]) |handler| {
+                        catch_result = evalBounded(handler, env, gc, res);
+                    }
+                    return catch_result;
+                }
+            }
+            return Domain.pure(Value.makeNil()); // swallow error if no catch
+        }
+    }
+    return result;
+}
+
 fn evalBoundedPeval(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     const exprs = items[1..];
     const thread_peval = @import("thread_peval.zig");

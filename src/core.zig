@@ -2782,3 +2782,69 @@ fn runTestsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
     eval_mod.resetTestCounts();
     return Value.makeObj(obj);
 }
+
+// ============================================================================
+// NAMESPACE BUILTINS
+// ============================================================================
+
+fn currentNsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (eval_mod.ns_registry) |reg| {
+        return Value.makeSymbol(try gc.internString(reg.currentName()));
+    }
+    return Value.makeSymbol(try gc.internString("user"));
+}
+
+fn nsNameFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (eval_mod.ns_registry) |reg| {
+        return Value.makeString(try gc.internString(reg.currentName()));
+    }
+    return Value.makeString(try gc.internString("user"));
+}
+
+fn allNsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const obj = try gc.allocObj(.vector);
+    if (eval_mod.ns_registry) |reg| {
+        var it = reg.namespaces.keyIterator();
+        while (it.next()) |key| {
+            try obj.data.vector.items.append(gc.allocator, Value.makeSymbol(try gc.internString(key.*)));
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+/// (require [ns :as alias]) — load namespace and alias it
+/// Simplified: just creates the alias mapping
+fn requireFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    var reg = eval_mod.ns_registry orelse return Value.makeNil();
+    for (args) |arg| {
+        if (!arg.isObj()) continue;
+        const a = arg.asObj();
+        if (a.kind != .vector) continue;
+        const items = a.data.vector.items.items;
+        if (items.len == 0) continue;
+        // [ns-name :as alias]
+        const ns_name = if (items[0].isSymbol())
+            gc.getString(items[0].asSymbolId())
+        else
+            continue;
+        // Create the namespace if it doesn't exist
+        _ = reg.switchTo(ns_name) catch continue;
+        // Switch back to current
+        _ = reg.switchTo(reg.current) catch {};
+        // Handle :as alias
+        if (items.len >= 3 and items[1].isKeyword()) {
+            const directive = gc.getString(items[1].asKeywordId());
+            if (std.mem.eql(u8, directive, "as") and items[2].isSymbol()) {
+                const alias_name = gc.getString(items[2].asSymbolId());
+                reg.addAlias(reg.current, ns_name, alias_name) catch {};
+            } else if (std.mem.eql(u8, directive, "refer") and items[2].isKeyword()) {
+                const refer_type = gc.getString(items[2].asKeywordId());
+                if (std.mem.eql(u8, refer_type, "all")) {
+                    reg.refer(reg.current, ns_name) catch {};
+                }
+            }
+        }
+    }
+    return Value.makeNil();
+}

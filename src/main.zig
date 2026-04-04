@@ -88,7 +88,7 @@ fn bcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) [
     var reader = Reader.init(input, gc);
     const form = reader.readForm() catch return "Error: read failed";
 
-    var comp = Compiler.init(allocator, gc, null);
+    var comp = Compiler.init(allocator, gc, null, &vm.globals);
     defer comp.deinit();
 
     const dest = comp.allocReg() catch return "Error: too many registers";
@@ -124,7 +124,7 @@ fn timeBcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.V
     var reader = Reader.init(input, gc);
     const form = reader.readForm() catch return "Error: read failed";
 
-    var comp = Compiler.init(allocator, gc, null);
+    var comp = Compiler.init(allocator, gc, null, &vm.globals);
     defer comp.deinit();
     const dest = comp.allocReg() catch return "Error: compile failed";
     comp.compile(form, dest) catch return "Error: compile failed";
@@ -175,7 +175,7 @@ fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator,
     var reader2 = Reader.init(input, gc);
     const form2 = reader2.readForm() catch return "Error: read failed";
 
-    var comp = Compiler.init(allocator, gc, null);
+    var comp = Compiler.init(allocator, gc, null, &vm.globals);
     defer comp.deinit();
     const dest_reg = comp.allocReg() catch return "Error: compile failed";
     comp.compile(form2, dest_reg) catch return "Error: compile failed";
@@ -455,7 +455,7 @@ pub fn main() !void {
                 compat.fileWriteAll(stdout, "Error: read failed\n");
                 continue;
             };
-            var comp = Compiler.init(allocator, &gc, null);
+            var comp = Compiler.init(allocator, &gc, null, &vm.globals);
             defer comp.deinit();
             const dest = comp.allocReg() catch {
                 compat.fileWriteAll(stdout, "Error: compile failed\n");
@@ -516,4 +516,5 @@ test {
     _ = @import("gorj_mcp.zig");
     _ = @import("disasm.zig");
     _ = @import("simd_str.zig");
+    _ = @import("namespace.zig");
 }

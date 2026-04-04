@@ -67,7 +67,7 @@ pub const NamespaceRegistry = struct {
     }
 
     /// Get current namespace name.
-    pub fn currentName(self: *NamespaceRegistry) []const u8 {
+    pub fn currentName(self: *const NamespaceRegistry) []const u8 {
         return self.current;
     }
 
