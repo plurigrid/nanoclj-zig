@@ -220,6 +220,9 @@ pub const Compiler = struct {
                 }
             } else if (try self.resolveUpvalue(name)) |uv_idx| {
                 try self.emit(bc.encode_ae(.get_upvalue, dest, uv_idx));
+            } else if (try self.tryResolveBuiltin(expr)) |bi_const| {
+                // Symbol is a known builtin — load as builtin_ref
+                try self.emit(bc.encode_ae(.load_const, dest, bi_const));
             } else {
                 const sym_const = try self.addConst(Value.makeSymbol(expr.asSymbolId()));
                 try self.emit(bc.encode_ae(.get_global, dest, sym_const));
