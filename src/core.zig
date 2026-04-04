@@ -481,6 +481,21 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "pr", &prFn },
         .{ "prn", &prnFn },
         .{ "newline", &newlineFn },
+        // Mutable refs
+        .{ "volatile!", &volatileBangFn },
+        .{ "vswap!", &vswapBangFn },
+        .{ "vreset!", &vresetBangFn },
+        // Reduce
+        .{ "reductions", &reductionsFn },
+        .{ "reduced", &reducedFn },
+        .{ "reduced?", &isReducedP },
+        .{ "unreduced", &unreducedFn },
+        .{ "transduce", &transduceFn },
+        // Misc
+        .{ "delay", &delayFn },
+        .{ "force", &forceFn },
+        .{ "add-watch", &addWatchFn },
+        .{ "remove-watch", &removeWatchFn },
     };
 
     inline for (builtins) |b| {
@@ -4016,4 +4031,171 @@ fn newlineFn(_: []Value, _: *GC, _: *Env) anyerror!Value {
     const stdout = compat.stdoutFile();
     compat.fileWriteAll(stdout, "\n");
     return Value.makeNil();
+}
+
+// ============================================================================
+// VOLATILE (lightweight mutable box, no watches/validators)
+// ============================================================================
+
+/// (volatile! val) — create a volatile mutable ref (uses atom internally)
+fn volatileBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try gc.allocObj(.atom);
+    obj.data.atom.val = args[0];
+    return Value.makeObj(obj);
+}
+
+/// (vswap! vol f & args) — apply f to volatile's value, store result
+fn vswapBangFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .atom) return error.TypeError;
+    const vol = args[0].asObj();
+    var fn_args_buf: [16]Value = undefined;
+    fn_args_buf[0] = vol.data.atom.val;
+    const extra = @min(args.len - 2, 15);
+    for (args[2..2 + extra], 0..) |a, i| fn_args_buf[1 + i] = a;
+    const new_val = try eval_mod.apply(args[1], fn_args_buf[0 .. 1 + extra], env, gc);
+    vol.data.atom.val = new_val;
+    return new_val;
+}
+
+/// (vreset! vol val) — reset volatile to new value
+fn vresetBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .atom) return error.TypeError;
+    args[0].asObj().data.atom.val = args[1];
+    return args[1];
+}
+
+// ============================================================================
+// REDUCTIONS / TRANSDUCE
+// ============================================================================
+
+/// (reductions f init coll) — lazy list of intermediate reduce values
+fn reductionsFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    const f = args[0];
+    var acc: Value = undefined;
+    var items: []Value = undefined;
+    if (args.len == 2) {
+        // (reductions f coll) — init = (f)
+        items = getItems(args[1]) orelse return error.TypeError;
+        if (items.len == 0) {
+            var empty_args = [_]Value{};
+            acc = try eval_mod.apply(f, &empty_args, env, gc);
+            const obj = try gc.allocObj(.list);
+            try obj.data.list.items.append(gc.allocator, acc);
+            return Value.makeObj(obj);
+        }
+        acc = items[0];
+        items = items[1..];
+    } else {
+        acc = args[1];
+        items = getItems(args[2]) orelse return error.TypeError;
+    }
+    const obj = try gc.allocObj(.list);
+    try obj.data.list.items.append(gc.allocator, acc);
+    for (items) |item| {
+        var fn_args = [_]Value{ acc, item };
+        acc = try eval_mod.apply(f, &fn_args, env, gc);
+        // Check for reduced
+        if (acc.isObj() and acc.asObj().kind == .vector) {
+            if (acc.asObj().is_transient) { // reduced marker
+                acc = acc.asObj().data.vector.items.items[0];
+                try obj.data.list.items.append(gc.allocator, acc);
+                break;
+            }
+        }
+        try obj.data.list.items.append(gc.allocator, acc);
+    }
+    return Value.makeObj(obj);
+}
+
+/// (reduced x) — wrap x to signal early termination
+fn reducedFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try gc.allocObj(.vector);
+    obj.is_transient = true; // marker for "reduced"
+    try obj.data.vector.items.append(gc.allocator, args[0]);
+    return Value.makeObj(obj);
+}
+
+fn isReducedP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj()) return Value.makeBool(false);
+    const obj = args[0].asObj();
+    return Value.makeBool(obj.kind == .vector and obj.is_transient and obj.data.vector.items.items.len == 1);
+}
+
+fn unreducedFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isObj()) {
+        const obj = args[0].asObj();
+        if (obj.kind == .vector and obj.is_transient and obj.data.vector.items.items.len == 1)
+            return obj.data.vector.items.items[0];
+    }
+    return args[0];
+}
+
+/// (transduce xform f init coll) — transduce with transducer
+fn transduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 3) return error.ArityError;
+    if (args.len == 3) {
+        // (transduce xform f coll) — no init, use (f) as init
+        const f = args[1];
+        var empty_args = [_]Value{};
+        const init = try eval_mod.apply(f, &empty_args, env, gc);
+        var new_args = [_]Value{ args[0], args[1], init, args[2] };
+        return transduceFn(&new_args, gc, env);
+    }
+    // (transduce xform f init coll)
+    // xform is a transducer: (xform f) → reducing-fn
+    var xf_args = [_]Value{args[1]};
+    const rf = try eval_mod.apply(args[0], &xf_args, env, gc);
+    var acc = args[2];
+    const items = getItems(args[3]) orelse return error.TypeError;
+    for (items) |item| {
+        var fn_args = [_]Value{ acc, item };
+        acc = try eval_mod.apply(rf, &fn_args, env, gc);
+        if (acc.isObj() and acc.asObj().kind == .vector and acc.asObj().is_transient) {
+            return acc.asObj().data.vector.items.items[0];
+        }
+    }
+    return acc;
+}
+
+// ============================================================================
+// DELAY / FORCE
+// ============================================================================
+
+/// (delay expr) — wraps a value, realized on first deref
+/// Since our builtins get pre-evaluated args, delay is a special case.
+/// We use lazy_seq with the value already cached.
+fn delayFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try gc.allocObj(.lazy_seq);
+    obj.data.lazy_seq.thunk = Value.makeNil();
+    obj.data.lazy_seq.cached = args[0];
+    return Value.makeObj(obj);
+}
+
+/// (force x) — realize a delay
+fn forceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isObj() and args[0].asObj().kind == .lazy_seq) {
+        if (args[0].asObj().data.lazy_seq.cached) |c| return c;
+    }
+    return args[0];
+}
+
+/// (add-watch ref key fn) — stub, returns ref
+fn addWatchFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    return args[0];
+}
+
+/// (remove-watch ref key) — stub, returns ref
+fn removeWatchFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    return args[0];
 }

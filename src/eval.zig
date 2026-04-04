@@ -79,6 +79,11 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "if-let")) return evalIfLet(items, env, gc);
         if (std.mem.eql(u8, name, "when-not")) return evalWhenNot(items, env, gc);
         if (std.mem.eql(u8, name, "if-not")) return evalIfNot(items, env, gc);
+        if (std.mem.eql(u8, name, "cond->")) return evalCondThread(items, env, gc, true);
+        if (std.mem.eql(u8, name, "cond->>")) return evalCondThread(items, env, gc, false);
+        if (std.mem.eql(u8, name, "condp")) return evalCondp(items, env, gc);
+        if (std.mem.eql(u8, name, "case")) return evalCase(items, env, gc);
+        if (std.mem.eql(u8, name, "letfn")) return evalLetfn(items, env, gc);
         if (std.mem.eql(u8, name, "colorspace")) return evalColorspace(items, env, gc);
         if (std.mem.eql(u8, name, "blend")) return evalBlend(items, env, gc);
         if (std.mem.eql(u8, name, "try")) return evalTry(items, env, gc);
@@ -1100,6 +1105,105 @@ fn evalIfNot(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     const cond_val = try eval(items[1], env, gc);
     if (!cond_val.isTruthy()) return eval(items[2], env, gc);
     return if (items.len > 3) eval(items[3], env, gc) else Value.makeNil();
+}
+
+/// (cond-> expr test1 form1 test2 form2 ...) — conditional threading
+fn evalCondThread(items: []Value, env: *Env, gc: *GC, first: bool) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    var result = try eval(items[1], env, gc);
+    var i: usize = 2;
+    while (i + 1 < items.len) : (i += 2) {
+        const test_val = try eval(items[i], env, gc);
+        if (test_val.isTruthy()) {
+            const form = items[i + 1];
+            if (form.isObj() and form.asObj().kind == .list) {
+                const parts = form.asObj().data.list.items.items;
+                const call = gc.allocObj(.list) catch return error.OutOfMemory;
+                if (first) {
+                    call.data.list.items.append(gc.allocator, parts[0]) catch return error.OutOfMemory;
+                    call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+                    for (parts[1..]) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
+                } else {
+                    for (parts) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
+                    call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+                }
+                result = try eval(Value.makeObj(call), env, gc);
+            } else {
+                const call = gc.allocObj(.list) catch return error.OutOfMemory;
+                call.data.list.items.append(gc.allocator, form) catch return error.OutOfMemory;
+                call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
+                result = try eval(Value.makeObj(call), env, gc);
+            }
+        }
+    }
+    return result;
+}
+
+/// (condp pred expr clause...) — like cond but with a predicate
+fn evalCondp(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 4) return error.ArityError;
+    const pred = try eval(items[1], env, gc);
+    const expr = try eval(items[2], env, gc);
+    var i: usize = 3;
+    while (i + 1 < items.len) : (i += 2) {
+        const test_val = try eval(items[i], env, gc);
+        var test_args = [_]Value{ test_val, expr };
+        const result = try apply(pred, &test_args, env, gc);
+        if (result.isTruthy()) return eval(items[i + 1], env, gc);
+    }
+    // Odd trailing form = default
+    if (i < items.len) return eval(items[i], env, gc);
+    return error.EvalFailed; // no matching clause
+}
+
+/// (case expr val1 result1 val2 result2 ... default?)
+fn evalCase(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    const expr = try eval(items[1], env, gc);
+    const sem = @import("semantics.zig");
+    var i: usize = 2;
+    while (i + 1 < items.len) : (i += 2) {
+        // case values are NOT evaluated (they're compile-time constants)
+        if (sem.structuralEq(items[i], expr, gc)) return eval(items[i + 1], env, gc);
+    }
+    // Odd trailing form = default
+    if (i < items.len) return eval(items[i], env, gc);
+    return error.EvalFailed;
+}
+
+/// (letfn [(f [x] body) (g [y] body)] body...)
+fn evalLetfn(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const bindings = items[1].asObj().data.vector.items.items;
+    const child = env.createChild() catch return error.OutOfMemory;
+    gc.trackEnv(child) catch return error.OutOfMemory;
+    // First pass: bind all fn names to nil (allows mutual recursion)
+    for (bindings) |b| {
+        if (!b.isObj() or b.asObj().kind != .list) continue;
+        const parts = b.asObj().data.list.items.items;
+        if (parts.len < 3 or !parts[0].isSymbol()) continue;
+        const fname = gc.getString(parts[0].asSymbolId());
+        child.set(fname, Value.makeNil()) catch return error.OutOfMemory;
+    }
+    // Second pass: create fns with child env (sees all names)
+    for (bindings) |b| {
+        if (!b.isObj() or b.asObj().kind != .list) continue;
+        const parts = b.asObj().data.list.items.items;
+        if (parts.len < 3 or !parts[0].isSymbol()) continue;
+        const fname = gc.getString(parts[0].asSymbolId());
+        // Build (fn* [params] body...)
+        const fn_list = gc.allocObj(.list) catch return error.OutOfMemory;
+        const fn_star = gc.internString("fn*") catch return error.OutOfMemory;
+        fn_list.data.list.items.append(gc.allocator, Value.makeSymbol(fn_star)) catch return error.OutOfMemory;
+        for (parts[1..]) |p| fn_list.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
+        const fn_val = try eval(Value.makeObj(fn_list), child, gc);
+        child.set(fname, fn_val) catch return error.OutOfMemory;
+    }
+    // Eval body in child env
+    var result = Value.makeNil();
+    for (items[2..]) |body| result = try eval(body, child, gc);
+    return result;
 }
 
 fn seqItems(val: Value, gc: *GC) ![]Value {
