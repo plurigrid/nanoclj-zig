@@ -18,6 +18,7 @@ const http_fetch = @import("http_fetch.zig");
 const peval_mod = @import("peval.zig");
 const ibc_denom = @import("ibc_denom.zig");
 const church_turing = @import("church_turing.zig");
+const kanren = @import("kanren.zig");
 const gorj_bridge = @import("gorj_bridge.zig");
 const computable_sets = @import("computable_sets.zig");
 const avalon_api_example = @import("avalon_api_example.zig");
@@ -203,6 +204,16 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "halting-witness", &church_turing.haltingWitnessFn },
         .{ "epochal-witness", &church_turing.epochalWitnessFn },
         .{ "primitive-recursive", &church_turing.primitiveRecursiveFn },
+        // miniKanren — relational programming (SPJ→Fogus→Hickey)
+        .{ "lvar", &kanren.lvarFn },
+        .{ "lvar?", &kanren.lvarP },
+        .{ "unify", &kanren.unifyFn },
+        .{ "walk*", &kanren.walkStarFn },
+        .{ "==", &kanren.eqGoalFn },
+        .{ "conde", &kanren.condeFn },
+        .{ "conj-goal", &kanren.conjGoalFn },
+        .{ "fresh-goal", &kanren.freshGoalFn },
+        .{ "run-goal", &kanren.runGoalFn },
         // gorj bridge — collapsed loops (no hex roundtrip, fused eval pipeline)
         .{ "gorj-pipe", &gorj_bridge.gorjPipeFn },
         .{ "gorj-eval", &gorj_bridge.gorjEvalFn },
