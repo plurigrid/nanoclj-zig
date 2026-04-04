@@ -56,6 +56,21 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "drop", &dropFn },
         .{ "reduce", &reduceFn },
         .{ "range", &rangeFn },
+        .{ "map", &mapFn },
+        .{ "filter", &filterFn },
+        .{ "concat", &concatFn },
+        .{ "reverse", &reverseFn },
+        .{ "empty?", &isEmptyP },
+        .{ "into", &intoFn },
+        .{ "set?", &isSetP },
+        .{ "seq?", &isSeqP },
+        .{ "sequential?", &isSequentialP },
+        // Trit-tick time quantum builtins
+        .{ "trit-phase", &tritPhaseFn },
+        .{ "frames->trit-ticks", &framesToTritTicksFn },
+        .{ "samples->trit-ticks", &samplesToTritTicksFn },
+        .{ "trit-ticks-per-sec", &tritTicksPerSecFn },
+        .{ "flicks-per-sec", &flicksPerSecFn },
         // Gay Color builtins
         .{ "color-at", &substrate.colorAtFn },
         .{ "color-seed", &substrate.colorSeedFn },
@@ -127,6 +142,11 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "noble-channels", &ibc_denom.nobleChannelsFn },
         // Church-Turing ill-posedness witness
         .{ "ill-posed", &church_turing.illPosedFn },
+        // Decidability hierarchy
+        .{ "decidable?", &church_turing.decidableFn },
+        .{ "semi-decide", &church_turing.semiDecideFn },
+        .{ "halting-witness", &church_turing.haltingWitnessFn },
+        .{ "primitive-recursive", &church_turing.primitiveRecursiveFn },
     };
 
     inline for (builtins) |b| {
@@ -216,6 +236,13 @@ fn mul(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 fn div_fn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 2) return error.ArityError;
+    // Integer division when both args are ints and evenly divisible
+    if (args[0].isInt() and args[1].isInt()) {
+        const b = args[1].asInt();
+        if (b == 0) return error.DivisionByZero;
+        const a = args[0].asInt();
+        if (@rem(a, b) == 0) return Value.makeInt(@divTrunc(a, b));
+    }
     const a_f: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
     const b_f: f64 = if (args[1].isInt()) @floatFromInt(args[1].asInt()) else args[1].asFloat();
     return Value.makeFloat(a_f / b_f);
@@ -226,7 +253,10 @@ fn modFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args[0].isInt() and args[1].isInt()) {
         return Value.makeInt(@rem(args[0].asInt(), args[1].asInt()));
     }
-    return error.TypeError;
+    // Support float mod
+    const a_f: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else if (args[0].isFloat()) args[0].asFloat() else return error.TypeError;
+    const b_f: f64 = if (args[1].isInt()) @floatFromInt(args[1].asInt()) else if (args[1].isFloat()) args[1].asFloat() else return error.TypeError;
+    return Value.makeFloat(@rem(a_f, b_f));
 }
 
 // Comparison
@@ -688,4 +718,131 @@ fn rangeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         }
     }
     return Value.makeObj(new);
+}
+
+fn getItems(val: Value) ?[]Value {
+    if (val.isNil()) return &.{};
+    if (!val.isObj()) return null;
+    const obj = val.asObj();
+    return switch (obj.kind) {
+        .list => obj.data.list.items.items,
+        .vector => obj.data.vector.items.items,
+        .set => obj.data.set.items.items,
+        else => null,
+    };
+}
+
+fn mapFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const func = args[0];
+    const items = getItems(args[1]) orelse return error.TypeError;
+    const new = try gc.allocObj(.list);
+    const core = @import("core.zig");
+    for (items) |item| {
+        var a = [1]Value{item};
+        const v = if (core.isBuiltinSentinel(func, gc)) |name|
+            (if (core.lookupBuiltin(name)) |builtin| try builtin(&a, gc, env) else try eval_mod.apply(func, &a, env, gc))
+        else
+            try eval_mod.apply(func, &a, env, gc);
+        try new.data.list.items.append(gc.allocator, v);
+    }
+    return Value.makeObj(new);
+}
+
+fn filterFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const func = args[0];
+    const items = getItems(args[1]) orelse return error.TypeError;
+    const new = try gc.allocObj(.list);
+    const core = @import("core.zig");
+    for (items) |item| {
+        var a = [1]Value{item};
+        const v = if (core.isBuiltinSentinel(func, gc)) |name|
+            (if (core.lookupBuiltin(name)) |builtin| try builtin(&a, gc, env) else try eval_mod.apply(func, &a, env, gc))
+        else
+            try eval_mod.apply(func, &a, env, gc);
+        if (v.isTruthy()) {
+            try new.data.list.items.append(gc.allocator, item);
+        }
+    }
+    return Value.makeObj(new);
+}
+
+fn concatFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const new = try gc.allocObj(.list);
+    for (args) |arg| {
+        const items = getItems(arg) orelse continue;
+        for (items) |item| try new.data.list.items.append(gc.allocator, item);
+    }
+    return Value.makeObj(new);
+}
+
+fn reverseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const items = getItems(args[0]) orelse return error.TypeError;
+    const new = try gc.allocObj(.list);
+    var i = items.len;
+    while (i > 0) {
+        i -= 1;
+        try new.data.list.items.append(gc.allocator, items[i]);
+    }
+    return Value.makeObj(new);
+}
+
+fn isEmptyP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isNil()) return Value.makeBool(true);
+    const items = getItems(args[0]) orelse return error.TypeError;
+    return Value.makeBool(items.len == 0);
+}
+
+fn intoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const target = args[0].asObj();
+    const src_items = getItems(args[1]) orelse return error.TypeError;
+    switch (target.kind) {
+        .vector => {
+            const new = try gc.allocObj(.vector);
+            for (target.data.vector.items.items) |item| try new.data.vector.items.append(gc.allocator, item);
+            for (src_items) |item| try new.data.vector.items.append(gc.allocator, item);
+            return Value.makeObj(new);
+        },
+        .list => {
+            const new = try gc.allocObj(.list);
+            for (target.data.list.items.items) |item| try new.data.list.items.append(gc.allocator, item);
+            for (src_items) |item| try new.data.list.items.append(gc.allocator, item);
+            return Value.makeObj(new);
+        },
+        .set => {
+            const new = try gc.allocObj(.set);
+            for (target.data.set.items.items) |item| try new.data.set.items.append(gc.allocator, item);
+            for (src_items) |item| {
+                var found = false;
+                for (new.data.set.items.items) |existing| {
+                    if (existing.eql(item)) { found = true; break; }
+                }
+                if (!found) try new.data.set.items.append(gc.allocator, item);
+            }
+            return Value.makeObj(new);
+        },
+        else => return error.TypeError,
+    }
+}
+
+fn isSetP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .set);
+}
+
+fn isSeqP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .list);
+}
+
+fn isSequentialP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj()) return Value.makeBool(false);
+    const k = args[0].asObj().kind;
+    return Value.makeBool(k == .list or k == .vector);
 }

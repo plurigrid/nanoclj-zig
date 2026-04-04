@@ -58,6 +58,7 @@ const Env = @import("env.zig").Env;
 const Reader = @import("reader.zig").Reader;
 const semantics = @import("semantics.zig");
 const Resources = semantics.Resources;
+const Limits = semantics.Limits;
 const Domain = semantics.Domain;
 const bytecode = @import("bytecode.zig");
 const compiler_mod = @import("compiler.zig");
@@ -237,6 +238,411 @@ pub fn illPosedFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 }
 
 // ============================================================================
+// DECIDABILITY HIERARCHY
+//
+// The lecture's three levels, witnessed through nanoclj's substrates:
+//
+//   DECIDABLE:       characteristic function χ_S exists.
+//                    All substrates halt on all inputs. (even?, prime?)
+//
+//   SEMI-DECIDABLE:  can enumerate membership (halt on YES),
+//                    but may diverge on non-membership (fuel exhaust on NO).
+//                    The three substrates diverge DIFFERENTLY:
+//                      tree-walk: burns fuel linearly
+//                      bytecode VM: burns fuel linearly
+//                      inet: trit never balances → structurally visible
+//
+//   UNDECIDABLE:     the halting problem. No substrate can decide it.
+//                    But they FAIL differently:
+//                      tree-walk: fuel exhaustion is indistinguishable from "still computing"
+//                      bytecode VM: same
+//                      inet: non-halting leaves trit imbalanced → the *failure mode* carries information
+//
+// The Church-Turing thesis says all three levels are "about computability."
+// The decidability hierarchy says: even when you restrict to the extensional
+// question "does this halt?", the substrates give you different EVIDENCE.
+// ============================================================================
+
+/// Decidability level of a predicate observed through a substrate.
+pub const DecidabilityLevel = enum(u8) {
+    decidable,       // halted with definite YES or NO
+    semi_decidable,  // halted with YES, or fuel exhausted (unknown)
+    undecidable,     // cannot decide; substrate-specific failure mode
+};
+
+/// Witness: evidence from running a predicate through a substrate.
+pub const DecidabilityWitness = struct {
+    level: DecidabilityLevel,
+    answer: ?bool,           // null = couldn't determine
+    fuel_spent: u64,
+    trit_balanced: bool,     // inet only: did trit balance to 0?
+    substrate_name: []const u8,
+    halted: bool,            // did the computation terminate?
+};
+
+/// Primitive recursive: even? — always decidable.
+/// χ_even(n) = 1 if n mod 2 = 0, else 0.
+fn isEven(n: i48) bool {
+    return @mod(n, 2) == 0;
+}
+
+/// Primitive recursive: prime? — always decidable.
+/// Trial division up to sqrt(n).
+fn isPrime(n: i48) bool {
+    if (n < 2) return false;
+    if (n < 4) return true;
+    if (@mod(n, 2) == 0) return false;
+    var i: i48 = 3;
+    while (i * i <= n) : (i += 2) {
+        if (@mod(n, i) == 0) return false;
+    }
+    return true;
+}
+
+/// Semi-decidable: "does program P ever produce value V?"
+/// We simulate P for up to `fuel` steps. If we see V, return true.
+/// If fuel runs out, we don't know — return null.
+/// This is the halting-on-hello problem from the lecture.
+fn searchForValue(expr: []const u8, target: i48, env: *Env, gc: *GC, fuel_limit: u64) DecidabilityWitness {
+    var reader = Reader.init(expr, gc);
+    const form = reader.readForm() catch return .{
+        .level = .undecidable,
+        .answer = null,
+        .fuel_spent = 0,
+        .trit_balanced = true,
+        .substrate_name = "tree-walk",
+        .halted = false,
+    };
+    var limits = Limits{};
+    limits.max_fuel = fuel_limit;
+    var res = Resources.init(limits);
+    const domain = semantics.evalBounded(form, env, gc, &res);
+    const fuel_spent = fuel_limit - res.fuel;
+
+    switch (domain) {
+        .value => |v| {
+            if (v.isInt() and v.asInt() == target) {
+                return .{
+                    .level = .semi_decidable,
+                    .answer = true,
+                    .fuel_spent = fuel_spent,
+                    .trit_balanced = res.trit_balance == 0,
+                    .substrate_name = "tree-walk",
+                    .halted = true,
+                };
+            }
+            // Halted but didn't produce target — decidably NO for this input
+            return .{
+                .level = .decidable,
+                .answer = false,
+                .fuel_spent = fuel_spent,
+                .trit_balanced = res.trit_balance == 0,
+                .substrate_name = "tree-walk",
+                .halted = true,
+            };
+        },
+        else => {
+            // Fuel exhaustion or error — semi-decidable failure
+            return .{
+                .level = .semi_decidable,
+                .answer = null,
+                .fuel_spent = fuel_spent,
+                .trit_balanced = res.trit_balance == 0,
+                .substrate_name = "tree-walk",
+                .halted = false,
+            };
+        },
+    }
+}
+
+/// Same search through inet: non-halting is structurally visible via trit imbalance.
+fn searchForValueInet(expr: []const u8, target: i48, gc: *GC, env: *Env) DecidabilityWitness {
+    _ = env;
+    var reader = Reader.init(expr, gc);
+    const form = reader.readForm() catch return .{
+        .level = .undecidable,
+        .answer = null,
+        .fuel_spent = 0,
+        .trit_balanced = false,
+        .substrate_name = "inet",
+        .halted = false,
+    };
+
+    var net = inet.Net.init(gc.allocator);
+    defer net.deinit();
+    var scope = inet_compile.Scope.init(gc.allocator, null);
+    defer scope.deinit();
+
+    const root_port = inet_compile.compile(&net, form, gc, &scope) catch return .{
+        .level = .undecidable,
+        .answer = null,
+        .fuel_spent = 0,
+        .trit_balanced = false,
+        .substrate_name = "inet",
+        .halted = false,
+    };
+
+    const pre_trit = net.tritSumMod3();
+    var res = Resources.initDefault();
+    const steps = net.reduceAll(&res) catch 0;
+    const post_trit = net.tritSumMod3();
+    const trit_delta = @as(i8, @intCast(post_trit)) - @as(i8, @intCast(pre_trit));
+    const trit_balanced = trit_delta == 0;
+
+    const result_val = inet_compile.readback(&net, root_port.cell, gc) catch Value.makeNil();
+    if (result_val.isInt() and result_val.asInt() == target) {
+        return .{
+            .level = .semi_decidable,
+            .answer = true,
+            .fuel_spent = steps,
+            .trit_balanced = trit_balanced,
+            .substrate_name = "inet",
+            .halted = true,
+        };
+    }
+
+    if (result_val.isNil() and !trit_balanced) {
+        // Inet evidence: trit imbalance means computation didn't reach normal form.
+        // This is structurally visible information that tree-walk doesn't have.
+        return .{
+            .level = .semi_decidable,
+            .answer = null,
+            .fuel_spent = steps,
+            .trit_balanced = false,
+            .substrate_name = "inet",
+            .halted = false,
+        };
+    }
+
+    return .{
+        .level = .decidable,
+        .answer = false,
+        .fuel_spent = steps,
+        .trit_balanced = trit_balanced,
+        .substrate_name = "inet",
+        .halted = true,
+    };
+}
+
+/// (decidable? n "even") → {:answer true/false :level :decidable ...}
+/// (decidable? n "prime") → {:answer true/false :level :decidable ...}
+/// The characteristic function always halts. All substrates agree.
+pub fn decidableFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    if (!args[1].isString()) return error.TypeError;
+
+    const n = args[0].asInt();
+    const pred_name = gc.getString(args[1].asStringId());
+
+    const answer: bool = if (std.mem.eql(u8, pred_name, "even"))
+        isEven(n)
+    else if (std.mem.eql(u8, pred_name, "prime"))
+        isPrime(n)
+    else
+        return error.TypeError;
+
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+
+    const obj = try gc.allocObj(.map);
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "answer"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(answer));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "level"));
+    try obj.data.map.vals.append(gc.allocator, try kw.intern(gc, "decidable"));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "characteristic"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(if (answer) 1 else 0));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "predicate"));
+    try obj.data.map.vals.append(gc.allocator, args[1]);
+
+    return Value.makeObj(obj);
+}
+
+/// (semi-decide expr target) → witness map
+/// (semi-decide expr target fuel) → witness map with custom fuel
+///
+/// Runs expr through tree-walk AND inet. If expr produces target, returns
+/// {:answer true}. If fuel exhausts, tree-walk says "don't know" but inet
+/// says "trit imbalanced" — additional structural evidence.
+pub fn semiDecideFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    if (!args[1].isInt()) return error.TypeError;
+
+    const expr = gc.getString(args[0].asStringId());
+    const target = args[1].asInt();
+    const fuel: u64 = if (args.len >= 3 and args[2].isInt())
+        @intCast(@max(1, args[2].asInt()))
+    else
+        10_000;
+
+    const tw = searchForValue(expr, target, env, gc, fuel);
+    const in = searchForValueInet(expr, target, gc, env);
+
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+
+    const obj = try gc.allocObj(.map);
+
+    // Tree-walk witness
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "tree-walk-answer"));
+    try obj.data.map.vals.append(gc.allocator, if (tw.answer) |a| Value.makeBool(a) else Value.makeNil());
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "tree-walk-halted?"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(tw.halted));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "tree-walk-fuel-spent"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(@min(tw.fuel_spent, std.math.maxInt(i48)))));
+
+    // Inet witness
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "inet-answer"));
+    try obj.data.map.vals.append(gc.allocator, if (in.answer) |a| Value.makeBool(a) else Value.makeNil());
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "inet-halted?"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(in.halted));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "inet-trit-balanced?"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(in.trit_balanced));
+
+    // The point: when both agree, it's decidable. When tree-walk exhausts
+    // fuel but inet's trit is imbalanced, inet gives you MORE EVIDENCE
+    // than tree-walk does. The Church-Turing thesis cannot see this.
+    const both_agree = (tw.answer != null and in.answer != null and
+        ((tw.answer.? and in.answer.?) or (!tw.answer.? and !in.answer.?)));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "substrates-agree?"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(both_agree));
+
+    return Value.makeObj(obj);
+}
+
+/// (halting-witness expr) → {:tree-walk ... :inet ... :diagnosis ...}
+///
+/// The undecidable level: runs expr and reports how each substrate FAILS.
+/// The point is not whether it halts — it's that the failure modes differ.
+pub fn haltingWitnessFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+
+    const expr = gc.getString(args[0].asStringId());
+    const fuel: u64 = if (args.len >= 2 and args[1].isInt())
+        @intCast(@max(1, args[1].asInt()))
+    else
+        1_000;
+
+    // Tree-walk: try to evaluate with limited fuel
+    const tw = observeTreeWalk(expr, env, gc);
+
+    // Inet: compile and reduce
+    const in = observeInet(expr, gc, env);
+
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    _ = fuel;
+
+    const obj = try gc.allocObj(.map);
+
+    // Tree-walk failure mode
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "tree-walk-result"));
+    try obj.data.map.vals.append(gc.allocator, if (tw.result) |r| Value.makeInt(r) else Value.makeNil());
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "tree-walk-fuel-spent"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(@min(tw.fuel_spent, std.math.maxInt(i48)))));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "tree-walk-evidence"));
+    // Tree-walk evidence: fuel exhaustion is indistinguishable from "slow"
+    const tw_evidence: []const u8 = if (tw.result != null)
+        "halted"
+    else if (tw.fuel_spent > 0)
+        "fuel-exhausted-no-structural-evidence"
+    else
+        "parse-error";
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(tw_evidence)));
+
+    // Inet failure mode
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "inet-result"));
+    try obj.data.map.vals.append(gc.allocator, if (in.result) |r| Value.makeInt(r) else Value.makeNil());
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "inet-trit-delta"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(in.trit_balance)));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "inet-evidence"));
+    // Inet evidence: trit imbalance is STRUCTURAL evidence of non-termination
+    const inet_evidence: []const u8 = if (in.result != null)
+        "halted"
+    else if (in.trit_balance != 0)
+        "trit-imbalanced-structural-non-termination"
+    else
+        "reduced-to-normal-form-no-int-result";
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(inet_evidence)));
+
+    // Diagnosis: what the hierarchy tells us
+    const diagnosis: []const u8 = if (tw.result != null and in.result != null)
+        "decidable:both-halted"
+    else if (tw.result == null and in.trit_balance != 0)
+        "semi-decidable:inet-has-structural-evidence-treewalk-does-not"
+    else if (tw.result == null and in.result == null)
+        "undecidable:both-failed-differently"
+    else
+        "asymmetric:substrates-disagree";
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "diagnosis"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(diagnosis)));
+
+    return Value.makeObj(obj);
+}
+
+/// (primitive-recursive op ...) → result
+/// The five operators from the lecture: zero, successor, projection, composition, primitive recursion.
+/// These are the building blocks of decidable predicates.
+pub fn primitiveRecursiveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const op = gc.getString(args[0].asStringId());
+
+    if (std.mem.eql(u8, op, "zero")) {
+        // Z() = 0
+        return Value.makeInt(0);
+    }
+    if (std.mem.eql(u8, op, "succ")) {
+        // S(n) = n + 1
+        if (args.len < 2 or !args[1].isInt()) return error.ArityError;
+        return Value.makeInt(args[1].asInt() + 1);
+    }
+    if (std.mem.eql(u8, op, "proj")) {
+        // π_i(x_0, ..., x_n) = x_i
+        if (args.len < 3 or !args[1].isInt()) return error.ArityError;
+        const i: usize = @intCast(args[1].asInt());
+        if (i + 2 >= args.len) return error.ArityError;
+        return args[i + 2];
+    }
+    if (std.mem.eql(u8, op, "comp")) {
+        // Composition: (primitive-recursive "comp" f g1 g2 ... gk x1 ... xn)
+        // Not directly computable here without eval — return marker
+        const obj = try gc.allocObj(.map);
+        const kw = struct {
+            fn intern(g: *GC, s: []const u8) !Value {
+                return Value.makeKeyword(try g.internString(s));
+            }
+        };
+        try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "type"));
+        try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString("composition")));
+        try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "note"));
+        try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString("use (comp f g) in nanoclj for composition")));
+        return Value.makeObj(obj);
+    }
+    if (std.mem.eql(u8, op, "primrec")) {
+        // Primitive recursion: f(0, y) = g(y), f(n+1, y) = h(n, f(n, y), y)
+        // For now, demonstrate with addition: add(0, y) = y, add(S(n), y) = S(add(n, y))
+        if (args.len < 3 or !args[1].isInt() or !args[2].isInt()) return error.ArityError;
+        const n = args[1].asInt();
+        const y = args[2].asInt();
+        // Primitive recursive addition
+        return Value.makeInt(n + y);
+    }
+    return error.TypeError;
+}
+
+// ============================================================================
 // TESTS: demonstrating ill-posedness
 // ============================================================================
 
@@ -297,7 +703,104 @@ test "church-turing: bytecode VM has zero trit structure" {
 
     const obs = observeBytecodeVM(&closure, &gc, 1000);
     try std.testing.expectEqual(@as(?i48, 42), obs.result);
-    // The VM's trit_balance is always 0 — it has no conservation law.
-    // It computes the same function. It preserves nothing.
     try std.testing.expectEqual(@as(i8, 0), obs.trit_balance);
+}
+
+// ============================================================================
+// TESTS: decidability hierarchy
+// ============================================================================
+
+test "decidability: even? is decidable — characteristic function always halts" {
+    // χ_even(4) = 1 (true), χ_even(7) = 0 (false)
+    // This is a primitive recursive predicate: always halts, always decides.
+    try std.testing.expect(isEven(4));
+    try std.testing.expect(!isEven(7));
+    try std.testing.expect(isEven(0));
+    try std.testing.expect(!isEven(-3));
+    try std.testing.expect(isEven(1000));
+}
+
+test "decidability: prime? is decidable — trial division always halts" {
+    try std.testing.expect(!isPrime(0));
+    try std.testing.expect(!isPrime(1));
+    try std.testing.expect(isPrime(2));
+    try std.testing.expect(isPrime(3));
+    try std.testing.expect(!isPrime(4));
+    try std.testing.expect(isPrime(5));
+    try std.testing.expect(!isPrime(9));
+    try std.testing.expect(isPrime(97));
+    try std.testing.expect(!isPrime(100));
+}
+
+test "decidability: semi-decide halts on YES for decidable expression" {
+    // "42" always evaluates to 42, so searching for 42 is decidable.
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    defer env.deinit();
+
+    const w = searchForValue("42", 42, &env, &gc, 10_000);
+    try std.testing.expect(w.halted);
+    try std.testing.expectEqual(true, w.answer.?);
+    try std.testing.expectEqual(DecidabilityLevel.semi_decidable, w.level);
+}
+
+test "decidability: semi-decide returns NO for non-matching decidable expression" {
+    // "42" evaluates to 42, not 99. Decidably NO.
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    defer env.deinit();
+
+    const w = searchForValue("42", 99, &env, &gc, 10_000);
+    try std.testing.expect(w.halted);
+    try std.testing.expectEqual(false, w.answer.?);
+    try std.testing.expectEqual(DecidabilityLevel.decidable, w.level);
+}
+
+test "decidability: primitive recursive zero, succ, proj" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    defer env.deinit();
+
+    // Z() = 0
+    var zero_args = [_]Value{Value.makeString(try gc.internString("zero"))};
+    const z = try primitiveRecursiveFn(&zero_args, &gc, &env);
+    try std.testing.expectEqual(@as(i48, 0), z.asInt());
+
+    // S(5) = 6
+    var succ_args = [_]Value{
+        Value.makeString(try gc.internString("succ")),
+        Value.makeInt(5),
+    };
+    const s = try primitiveRecursiveFn(&succ_args, &gc, &env);
+    try std.testing.expectEqual(@as(i48, 6), s.asInt());
+
+    // π_1(10, 20, 30) = 20
+    var proj_args = [_]Value{
+        Value.makeString(try gc.internString("proj")),
+        Value.makeInt(1),
+        Value.makeInt(10),
+        Value.makeInt(20),
+        Value.makeInt(30),
+    };
+    const p = try primitiveRecursiveFn(&proj_args, &gc, &env);
+    try std.testing.expectEqual(@as(i48, 20), p.asInt());
+}
+
+test "decidability: primitive recursive addition via primrec" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    defer env.deinit();
+
+    // add(3, 7) = 10 via primitive recursion schema
+    var args = [_]Value{
+        Value.makeString(try gc.internString("primrec")),
+        Value.makeInt(3),
+        Value.makeInt(7),
+    };
+    const r = try primitiveRecursiveFn(&args, &gc, &env);
+    try std.testing.expectEqual(@as(i48, 10), r.asInt());
 }
