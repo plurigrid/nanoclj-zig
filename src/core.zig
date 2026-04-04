@@ -115,6 +115,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Put a keyword as sentinel value for the builtin name
         const id = try gc.internString(b[0]);
         try env.set(b[0], Value.makeKeyword(id));
+        try env.setById(id, Value.makeKeyword(id));
     }
 }
 

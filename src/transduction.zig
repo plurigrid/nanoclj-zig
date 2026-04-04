@@ -59,7 +59,11 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
     }
 
     if (val.isSymbol()) {
-        const name = gc.getString(val.asSymbolId());
+        const sym_id = val.asSymbolId();
+        // Fast path: integer-keyed lookup (no string hashing)
+        if (env.getById(sym_id)) |v| return Domain.pure(v);
+        // Fallback: string-keyed lookup (for bindings set via string API)
+        const name = gc.getString(sym_id);
         return if (env.get(name)) |v|
             Domain.pure(v)
         else
@@ -180,10 +184,12 @@ fn evalBoundedMap(obj: *Obj, env: *Env, gc: *GC, res: *Resources) Domain {
 fn evalBoundedDef(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     if (items.len != 3) return Domain.fail(.arity_error);
     if (!items[1].isSymbol()) return Domain.fail(.type_error);
-    const name = gc.getString(items[1].asSymbolId());
+    const sym_id = items[1].asSymbolId();
+    const name = gc.getString(sym_id);
     const d = evalBounded(items[2], env, gc, res);
     if (!d.isValue()) return d;
     env.set(name, d.value) catch return Domain.fail(.type_error);
+    env.setById(sym_id, d.value) catch {};
     return d;
 }
 
@@ -204,10 +210,12 @@ fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     var i: usize = 0;
     while (i < bindings.len) : (i += 2) {
         if (!bindings[i].isSymbol()) return Domain.fail(.type_error);
-        const name = gc.getString(bindings[i].asSymbolId());
+        const sym_id = bindings[i].asSymbolId();
+        const name = gc.getString(sym_id);
         const d = evalBounded(bindings[i + 1], child, gc, res);
         if (!d.isValue()) return d;
         child.set(name, d.value) catch return Domain.fail(.type_error);
+        child.setById(sym_id, d.value) catch {};
     }
 
     var result = Domain.pure(Value.makeNil());
@@ -294,21 +302,27 @@ fn applyBounded(func: Value, args: []Value, _: *Env, gc: *GC, res: *Resources) D
         const required = fn_params.len - 1;
         if (args.len < required) return Domain.fail(.arity_error);
         for (fn_params[0..required], 0..) |p, i| {
-            const name = gc.getString(p.asSymbolId());
+            const pid = p.asSymbolId();
+            const name = gc.getString(pid);
             child.set(name, args[i]) catch return Domain.fail(.type_error);
+            child.setById(pid, args[i]) catch {};
         }
         const rest_obj = gc.allocObj(.list) catch return Domain.fail(.type_error);
         for (args[required..]) |a| {
             rest_obj.data.list.items.append(gc.allocator, a) catch
                 return Domain.fail(.type_error);
         }
-        const rest_name = gc.getString(fn_params[required].asSymbolId());
+        const rest_id = fn_params[required].asSymbolId();
+        const rest_name = gc.getString(rest_id);
         child.set(rest_name, Value.makeObj(rest_obj)) catch return Domain.fail(.type_error);
+        child.setById(rest_id, Value.makeObj(rest_obj)) catch {};
     } else {
         if (args.len != fn_params.len) return Domain.fail(.arity_error);
         for (fn_params, 0..) |p, i| {
-            const name = gc.getString(p.asSymbolId());
+            const pid = p.asSymbolId();
+            const name = gc.getString(pid);
             child.set(name, args[i]) catch return Domain.fail(.type_error);
+            child.setById(pid, args[i]) catch {};
         }
     }
 
