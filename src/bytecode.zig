@@ -240,14 +240,6 @@ pub const VM = struct {
             const inst = self.readInst();
             const op = decode_op(inst);
 
-            // Debug trace (temporary)
-            if (self.frame_count >= 2) {
-                const compat_dbg = @import("compat.zig");
-                var trc: [128]u8 = undefined;
-                const tmsg = std.fmt.bufPrint(&trc, "TRC frame={d} ip={d} op={s}\n", .{ self.frame_count, self.currentFrame().ip - 1, @tagName(op) }) catch "?";
-                compat_dbg.fileWriteAll(compat_dbg.stderrFile(), tmsg);
-            }
-
             switch (op) {
                 // ── Control flow ──
                 .ret => {
@@ -299,15 +291,7 @@ pub const VM = struct {
                 .load_const => {
                     const a = decode_a(inst);
                     const e = decode_e(inst);
-                    const consts = self.currentFrame().closure.def.constants;
-                    if (e >= consts.len) {
-                        const compat3 = @import("compat.zig");
-                        var dbg3: [256]u8 = undefined;
-                        const msg3 = std.fmt.bufPrint(&dbg3, "DBG load_const OOB! e={d} len={d} frame={d}\n", .{ e, consts.len, self.frame_count }) catch "?";
-                        compat3.fileWriteAll(compat3.stderrFile(), msg3);
-                        return error.TypeError;
-                    }
-                    self.reg(a).* = consts[e];
+                    self.reg(a).* = self.currentFrame().closure.def.constants[e];
                 },
 
                 // ── Arithmetic ──
@@ -428,13 +412,7 @@ pub const VM = struct {
                     const base = self.currentFrame().base;
                     const func_val = self.stack[base + c];
 
-                    if (!func_val.isObj()) {
-                        const compat2 = @import("compat.zig");
-                        var dbg2: [256]u8 = undefined;
-                        const msg2 = std.fmt.bufPrint(&dbg2, "DBG CALL not obj! a={d} b={d} c={d} base={d} isInt={} isNil={} bits=0x{x}\n", .{ a, b, c, base, func_val.isInt(), func_val.isNil(), func_val.bits }) catch "?";
-                        compat2.fileWriteAll(compat2.stderrFile(), msg2);
-                        return error.TypeError;
-                    }
+                    if (!func_val.isObj()) return error.TypeError;
                     const func_obj = func_val.asObj();
 
                     // Dispatch: bc_closure (bytecode) or builtin_ref (native)
@@ -445,17 +423,6 @@ pub const VM = struct {
                             args_buf[i] = self.stack[base + c + 1 + i];
                         }
                         // Debug: print builtin name and arg types
-                        {
-                            const compat = @import("compat.zig");
-                            var dbg: [256]u8 = undefined;
-                            const msg = std.fmt.bufPrint(&dbg, "DBG builtin '{s}' argc={d} base={d} c={d} frame={d}\n", .{ builtin.name, b, base, c, self.frame_count }) catch "?";
-                            compat.fileWriteAll(compat.stderrFile(), msg);
-                            for (0..b) |i| {
-                                const av = args_buf[i];
-                                const amsg = std.fmt.bufPrint(&dbg, "  arg[{d}]: isObj={} isInt={} isNil={} bits=0x{x}\n", .{ i, av.isObj(), av.isInt(), av.isNil(), av.bits }) catch "?";
-                                compat.fileWriteAll(compat.stderrFile(), amsg);
-                            }
-                        }
                         // builtins need GC and Env — use a dummy env for now
                         var dummy_env = @import("env.zig").Env.init(self.gc.allocator, null);
                         defer dummy_env.deinit();
@@ -488,21 +455,36 @@ pub const VM = struct {
 
                     if (!func_val.isObj()) return error.TypeError;
                     const func_obj = func_val.asObj();
-                    if (func_obj.kind != .bc_closure) return error.TypeError;
-                    const callee = &func_obj.data.bc_closure;
 
-                    if (b != callee.def.arity) return error.ArityError;
+                    if (func_obj.kind == .builtin_ref) {
+                        // Builtin in tail position: call normally, then return
+                        const builtin = func_obj.data.builtin_ref;
+                        var args_buf2: [64]Value = undefined;
+                        for (0..b) |i| {
+                            args_buf2[i] = self.stack[base + a + 1 + i];
+                        }
+                        var dummy_env2 = @import("env.zig").Env.init(self.gc.allocator, null);
+                        defer dummy_env2.deinit();
+                        const result = builtin.func(args_buf2[0..b], self.gc, &dummy_env2) catch return error.TypeError;
+                        const ret_dest = self.currentFrame().ret_dest;
+                        self.frame_count -= 1;
+                        if (self.frame_count == 0) return result;
+                        self.reg(ret_dest).* = result;
+                    } else if (func_obj.kind == .bc_closure) {
+                        const callee = &func_obj.data.bc_closure;
+                        if (b != callee.def.arity) return error.ArityError;
 
-                    // Copy args to base (overwrite current frame's registers)
-                    for (0..b) |i| {
-                        self.stack[base + i] = self.stack[base + a + 1 + i];
-                    }
+                        // Copy args to base (overwrite current frame's registers)
+                        for (0..b) |i| {
+                            self.stack[base + i] = self.stack[base + a + 1 + i];
+                        }
 
-                    // Reuse current frame slot
-                    const frame = self.currentFrame();
-                    frame.closure = callee;
-                    frame.ip = 0;
-                    // base stays the same — that's the TCO magic
+                        // Reuse current frame slot
+                        const frame = self.currentFrame();
+                        frame.closure = callee;
+                        frame.ip = 0;
+                        // base stays the same — that's the TCO magic
+                    } else return error.TypeError;
                 },
                 // CLOSURE A, E: $A = make_closure(defs[E])
                 .closure => {
