@@ -118,33 +118,20 @@ pub const Value = packed struct {
         return @truncate(self.bits & PAYLOAD_MASK);
     }
 
-    pub fn isNil(self: Value) bool {
-        return self.isTagged() and self.getTag() == .nil;
+    /// Branchless tag check: compare upper 16 bits against expected pattern.
+    /// QNAN | (tag << 48) occupies bits 63..48. Masking and comparing in one op.
+    inline fn isTag(self: Value, comptime tag: Tag) bool {
+        const expected: u64 = QNAN | (@as(u64, @intFromEnum(tag)) << TAG_SHIFT);
+        return (self.bits & (QNAN | (@as(u64, 0x7) << TAG_SHIFT))) == expected;
     }
 
-    pub fn isBool(self: Value) bool {
-        return self.isTagged() and self.getTag() == .boolean;
-    }
-
-    pub fn isInt(self: Value) bool {
-        return self.isTagged() and self.getTag() == .integer;
-    }
-
-    pub fn isSymbol(self: Value) bool {
-        return self.isTagged() and self.getTag() == .symbol;
-    }
-
-    pub fn isKeyword(self: Value) bool {
-        return self.isTagged() and self.getTag() == .keyword;
-    }
-
-    pub fn isString(self: Value) bool {
-        return self.isTagged() and self.getTag() == .string;
-    }
-
-    pub fn isObj(self: Value) bool {
-        return self.isTagged() and self.getTag() == .object;
-    }
+    pub fn isNil(self: Value) bool { return self.isTag(.nil); }
+    pub fn isBool(self: Value) bool { return self.isTag(.boolean); }
+    pub fn isInt(self: Value) bool { return self.isTag(.integer); }
+    pub fn isSymbol(self: Value) bool { return self.isTag(.symbol); }
+    pub fn isKeyword(self: Value) bool { return self.isTag(.keyword); }
+    pub fn isString(self: Value) bool { return self.isTag(.string); }
+    pub fn isObj(self: Value) bool { return self.isTag(.object); }
 
     pub fn asBool(self: Value) bool {
         return self.getPayload() != 0;
@@ -175,9 +162,10 @@ pub const Value = packed struct {
     }
 
     /// Truthiness: nil and false are falsy, everything else truthy
-    pub fn isTruthy(self: Value) bool {
+    pub inline fn isTruthy(self: Value) bool {
+        // Fast: nil is false, (bool, payload=0) is false, everything else is true
         if (self.isNil()) return false;
-        if (self.isBool()) return self.asBool();
+        if (self.isBool()) return self.getPayload() != 0;
         return true;
     }
 

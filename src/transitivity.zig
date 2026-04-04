@@ -63,10 +63,15 @@ pub const Resources = struct {
     }
 
     /// Consume fuel based on color-game depth cost.
-    pub fn tick(self: *Resources) !void {
+    /// Inlined LUT path for depths < 512 (hot path avoids function call).
+    pub inline fn tick(self: *Resources) !void {
         if (self.fuel == 0) return error.FuelExhausted;
         const gay_skills = @import("gay_skills.zig");
-        const cost = gay_skills.depthFuelCost(self.depth);
+        // Inline LUT access — avoids function call overhead for common depths
+        const cost = if (self.depth < gay_skills.DEPTH_FUEL_LUT_SIZE)
+            gay_skills.depth_fuel_lut[self.depth]
+        else
+            gay_skills.depthFuelCost(self.depth);
         if (self.fuel < cost) {
             self.fuel = 0;
             return error.FuelExhausted;

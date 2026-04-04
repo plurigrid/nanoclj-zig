@@ -76,8 +76,8 @@ fn computeDepthFuelCost(depth: u32) u64 {
 }
 
 /// Comptime lookup table: eliminates ~10M float computations per fib(28).
-const DEPTH_FUEL_LUT_SIZE = 512;
-const depth_fuel_lut: [DEPTH_FUEL_LUT_SIZE]u64 = blk: {
+pub const DEPTH_FUEL_LUT_SIZE = 512;
+pub const depth_fuel_lut: [DEPTH_FUEL_LUT_SIZE]u64 = blk: {
     @setEvalBranchQuota(100_000);
     var table: [DEPTH_FUEL_LUT_SIZE]u64 = undefined;
     for (0..DEPTH_FUEL_LUT_SIZE) |d| {

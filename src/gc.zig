@@ -127,43 +127,68 @@ pub const GC = struct {
         }
     }
 
+    /// Worklist-based mark: no recursion, bounded stack usage.
+    /// Avoids stack overflow on deep object graphs and improves cache locality.
     fn mark(self: *GC, val: Value) void {
         if (!val.isObj()) return;
         const obj = val.asObj();
         if (obj.marked) return;
+
+        // Use a worklist instead of recursion
+        var worklist = compat.emptyList(*Obj);
+        defer worklist.deinit(self.allocator);
+
         obj.marked = true;
-        switch (obj.kind) {
-            .list => for (obj.data.list.items.items) |v| self.mark(v),
-            .vector => for (obj.data.vector.items.items) |v| self.mark(v),
-            .map => {
-                for (obj.data.map.keys.items) |v| self.mark(v);
-                for (obj.data.map.vals.items) |v| self.mark(v);
-            },
-            .set => for (obj.data.set.items.items) |v| self.mark(v),
-            .function => {
-                for (obj.data.function.params.items) |v| self.mark(v);
-                for (obj.data.function.body.items) |v| self.mark(v);
-                if (obj.data.function.env) |e| self.markEnv(e);
-            },
-            .macro_fn => {
-                for (obj.data.macro_fn.params.items) |v| self.mark(v);
-                for (obj.data.macro_fn.body.items) |v| self.mark(v);
-                if (obj.data.macro_fn.env) |e| self.markEnv(e);
-            },
-            .atom => self.mark(obj.data.atom.val),
+        worklist.append(self.allocator, obj) catch return;
+
+        while (worklist.items.len > 0) {
+            const cur = worklist.items[worklist.items.len - 1];
+            worklist.items.len -= 1; // pop
+
+            switch (cur.kind) {
+                .list => for (cur.data.list.items.items) |v| self.enqueueVal(v, &worklist),
+                .vector => for (cur.data.vector.items.items) |v| self.enqueueVal(v, &worklist),
+                .map => {
+                    for (cur.data.map.keys.items) |v| self.enqueueVal(v, &worklist);
+                    for (cur.data.map.vals.items) |v| self.enqueueVal(v, &worklist);
+                },
+                .set => for (cur.data.set.items.items) |v| self.enqueueVal(v, &worklist),
+                .function => {
+                    for (cur.data.function.params.items) |v| self.enqueueVal(v, &worklist);
+                    for (cur.data.function.body.items) |v| self.enqueueVal(v, &worklist);
+                    if (cur.data.function.env) |e| self.markEnv(e);
+                },
+                .macro_fn => {
+                    for (cur.data.macro_fn.params.items) |v| self.enqueueVal(v, &worklist);
+                    for (cur.data.macro_fn.body.items) |v| self.enqueueVal(v, &worklist);
+                    if (cur.data.macro_fn.env) |e| self.markEnv(e);
+                },
+                .atom => self.enqueueVal(cur.data.atom.val, &worklist),
+            }
         }
     }
 
+    fn enqueueVal(self: *const GC, val: Value, worklist: *std.ArrayListUnmanaged(*Obj)) void {
+        if (!val.isObj()) return;
+        const obj = val.asObj();
+        if (obj.marked) return;
+        obj.marked = true;
+        worklist.append(self.allocator, obj) catch {};
+    }
+
     fn markEnv(self: *GC, e: *Env) void {
-        if (e.marked or e.is_root) return;
-        e.marked = true;
-        // Mark all values bound in this env
-        var it = e.bindings.valueIterator();
-        while (it.next()) |v| {
-            self.mark(v.*);
+        var cur = e;
+        while (true) {
+            if (cur.marked or cur.is_root) return;
+            cur.marked = true;
+            // Mark all values bound in this env
+            var it = cur.bindings.valueIterator();
+            while (it.next()) |v| {
+                self.mark(v.*);
+            }
+            // Iterate parent chain (no recursion)
+            cur = cur.parent orelse return;
         }
-        // Trace parent chain
-        if (e.parent) |p| self.markEnv(p);
     }
 
     fn freeObj(self: *GC, obj: *Obj) void {
