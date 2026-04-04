@@ -178,6 +178,35 @@ pub fn tritSum(seed: u64, n: u64) i32 {
     return s;
 }
 
+/// FindBalancer (boxxy pattern): given a, b, compute c such that a+b+c ≡ 0 mod 3.
+/// Proven correct in boxxy/verified/GF3.dfy (FindBalancerCorrect lemma).
+/// Content-based: the compensating trit is derived from values, not position.
+pub fn findBalancer(a: i8, b: i8) i8 {
+    // In {-1,0,1} representation: find c such that a+b+c ≡ 0 mod 3
+    // a+b+c ≡ 0 mod 3  ⟹  c ≡ -(a+b) mod 3
+    const sum = @as(i16, a) + @as(i16, b);
+    // Map to {-1, 0, 1}: -(a+b) mod 3 with proper sign handling
+    const r = @mod(-sum + 300, 3); // always positive mod
+    // r ∈ {0, 1, 2} → map to {0, 1, -1} (since 2 ≡ -1 mod 3)
+    return if (r == 0) @as(i8, 0) else if (r == 1) @as(i8, 1) else @as(i8, -1);
+}
+
+/// Content-based trit: hash the value, take mod 3. Independent of position.
+/// This is boxxy's approach (SHA-256 mod 3, we use SplitMix64 mod 3).
+pub fn tritOfContent(content_hash: u64) i8 {
+    return @as(i8, @intCast(mix64(content_hash) % 3)) - 1;
+}
+
+/// Balanced quad from 3 content trits: compute the 4th via FindBalancer.
+/// Returns [4]i8 where sum ≡ 0 mod 3. Exact, content-based, not position-based.
+pub fn balancedQuad(a: i8, b: i8, c: i8) [4]i8 {
+    // d such that a+b+c+d ≡ 0 mod 3
+    const partial_sum = @as(i16, a) + @as(i16, b) + @as(i16, c);
+    const r = @mod(-partial_sum + 300, 3);
+    const d: i8 = if (r == 0) 0 else if (r == 1) 1 else -1;
+    return .{ a, b, c, d };
+}
+
 /// Color at position: projection of at() into RGB.
 pub fn colorAtIndexed(seed: u64, index: u64) Color {
     const v = at(seed, index);

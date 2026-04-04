@@ -114,6 +114,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "at", &atFn },
         .{ "trit-at", &tritAtFn },
         .{ "trit-sum", &tritSumFn },
+        .{ "find-balancer", &findBalancerFn },
+        .{ "trit-of", &tritOfContentFn },
         // Splittable RNG builtins
         .{ "split-rng", &splitRngFn },
         .{ "rng-next", &rngNextFn },
@@ -889,6 +891,23 @@ fn tritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const n: u64 = @intCast(@max(@as(i48, 0), @min(args[1].asInt(), 100000)));
     return Value.makeInt(@as(i48, substrate.tritSum(seed, n)));
+}
+
+/// (find-balancer a b) → c such that a+b+c ≡ 0 mod 3. boxxy/GF3.dfy proven.
+fn findBalancerFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const a: i8 = @intCast(@max(@as(i48, -1), @min(args[0].asInt(), 1)));
+    const b: i8 = @intCast(@max(@as(i48, -1), @min(args[1].asInt(), 1)));
+    return Value.makeInt(@as(i48, substrate.findBalancer(a, b)));
+}
+
+/// (trit-of hash-value) → content-based trit. Independent of position.
+fn tritOfContentFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const h: u64 = @bitCast(@as(i64, args[0].asInt()));
+    return Value.makeInt(@as(i48, substrate.tritOfContent(h)));
 }
 
 fn incFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
