@@ -51,6 +51,7 @@ pub const Reader = struct {
                 self.pos -= 1;
                 break :blk self.readWrapped("unquote");
             },
+            '#' => self.readDispatch(),
             '"' => self.readString(),
             ':' => self.readKeyword(),
             ';' => {
@@ -129,6 +130,102 @@ pub const Reader = struct {
         obj.data.list.items.append(self.gc.allocator, Value.makeSymbol(sym_id)) catch return error.OutOfMemory;
         obj.data.list.items.append(self.gc.allocator, inner) catch return error.OutOfMemory;
         return Value.makeObj(obj);
+    }
+
+    /// Handle # dispatch: #() anonymous fn, #{} set literal, #_ discard
+    fn readDispatch(self: *Reader) ReadError!Value {
+        self.pos += 1; // skip #
+        if (self.pos >= self.src.len) return error.UnexpectedEOF;
+        const c = self.src[self.pos];
+        return switch (c) {
+            '(' => self.readAnonFn(),
+            '{' => self.readSet(),
+            '_' => {
+                self.pos += 1;
+                _ = try self.readForm(); // discard next form
+                return self.readForm();
+            },
+            else => error.UnexpectedChar,
+        };
+    }
+
+    /// #(...) => (fn* [%1 %2 ...] (...))
+    /// Scans body for %, %1-%9, %&; builds param vector automatically.
+    fn readAnonFn(self: *Reader) ReadError!Value {
+        // Read the body list (reusing readList which consumes '(' .. ')')
+        const body = try self.readList();
+        // Scan body for % references to determine arity
+        var max_arg: u8 = 0;
+        var has_rest = false;
+        self.scanPercents(body, &max_arg, &has_rest);
+        // Build params vector: [%1 %2 ... %N] or [%1 ... %N & %&]
+        const params_obj = self.gc.allocObj(.vector) catch return error.OutOfMemory;
+        var i: u8 = 1;
+        while (i <= max_arg) : (i += 1) {
+            var name_buf: [3]u8 = undefined;
+            name_buf[0] = '%';
+            name_buf[1] = '0' + i;
+            const id = self.gc.internString(name_buf[0..2]) catch return error.OutOfMemory;
+            params_obj.data.vector.items.append(self.gc.allocator, Value.makeSymbol(id)) catch return error.OutOfMemory;
+        }
+        if (has_rest) {
+            const amp_id = self.gc.internString("&") catch return error.OutOfMemory;
+            params_obj.data.vector.items.append(self.gc.allocator, Value.makeSymbol(amp_id)) catch return error.OutOfMemory;
+            const rest_id = self.gc.internString("%&") catch return error.OutOfMemory;
+            params_obj.data.vector.items.append(self.gc.allocator, Value.makeSymbol(rest_id)) catch return error.OutOfMemory;
+        }
+        // Build (fn* [params] body)
+        const fn_list = self.gc.allocObj(.list) catch return error.OutOfMemory;
+        const fn_sym = self.gc.internString("fn*") catch return error.OutOfMemory;
+        fn_list.data.list.items.append(self.gc.allocator, Value.makeSymbol(fn_sym)) catch return error.OutOfMemory;
+        fn_list.data.list.items.append(self.gc.allocator, Value.makeObj(params_obj)) catch return error.OutOfMemory;
+        fn_list.data.list.items.append(self.gc.allocator, body) catch return error.OutOfMemory;
+        return Value.makeObj(fn_list);
+    }
+
+    fn scanPercents(self: *Reader, val: Value, max_arg: *u8, has_rest: *bool) void {
+        if (val.isSymbol()) {
+            const gc = self.gc;
+            const name = gc.getString(val.asSymbolId());
+            if (name.len == 1 and name[0] == '%') {
+                if (max_arg.* < 1) max_arg.* = 1;
+            } else if (name.len == 2 and name[0] == '%') {
+                if (name[1] == '&') {
+                    has_rest.* = true;
+                } else if (name[1] >= '1' and name[1] <= '9') {
+                    const n = name[1] - '0';
+                    if (n > max_arg.*) max_arg.* = n;
+                }
+            }
+            return;
+        }
+        if (!val.isObj()) return;
+        const obj = val.asObj();
+        const items = switch (obj.kind) {
+            .list => obj.data.list.items.items,
+            .vector => obj.data.vector.items.items,
+            else => return,
+        };
+        for (items) |item| self.scanPercents(item, max_arg, has_rest);
+    }
+
+    /// #{...} => set literal
+    fn readSet(self: *Reader) ReadError!Value {
+        self.depth += 1;
+        if (self.depth > MAX_READ_DEPTH) return error.UnexpectedChar;
+        defer self.depth -= 1;
+        self.pos += 1; // skip {
+        const obj = self.gc.allocObj(.set) catch return error.OutOfMemory;
+        while (true) {
+            self.skipWhitespace();
+            if (self.pos >= self.src.len) return error.UnexpectedEOF;
+            if (self.src[self.pos] == '}') {
+                self.pos += 1;
+                return Value.makeObj(obj);
+            }
+            const v = try self.readForm();
+            obj.data.set.items.append(self.gc.allocator, v) catch return error.OutOfMemory;
+        }
     }
 
     fn readString(self: *Reader) ReadError!Value {

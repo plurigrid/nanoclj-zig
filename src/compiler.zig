@@ -464,6 +464,31 @@ pub const Compiler = struct {
         try self.emit(bc.encode_ae(.set_global, dest, sym_const));
     }
 
+    /// (defn name [params] body...) => (def name (fn* name [params] body...))
+    fn compileDefn(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        // (defn name [params] body1 body2 ...)
+        if (items.len < 4) return error.InvalidSyntax;
+        if (!items[1].isSymbol()) return error.InvalidSyntax;
+        // Rewrite as (fn* name [params] body...) and compile it
+        const fn_name = self.gc.getString(items[1].asSymbolId());
+        const saved_self_name = self.self_name;
+        self.self_name = fn_name;
+        defer self.self_name = saved_self_name;
+        // Build synthetic fn* items: [fn*, params, body1, body2, ...]
+        // items[2] = params vector, items[3..] = body
+        var fn_items_buf: [64]Value = undefined;
+        fn_items_buf[0] = items[0]; // placeholder (fn* symbol not needed, compileFnStar uses items[1..])
+        fn_items_buf[1] = items[2]; // params
+        const body = items[3..];
+        if (body.len + 2 > fn_items_buf.len) return error.InvalidSyntax;
+        for (body, 0..) |b, i| fn_items_buf[2 + i] = b;
+        // compileFnStar expects items[1] = params, items[2..] = body
+        try self.compileFnStar(fn_items_buf[0 .. 2 + body.len], dest);
+        // Now set_global
+        const sym_const = try self.addConst(Value.makeSymbol(items[1].asSymbolId()));
+        try self.emit(bc.encode_ae(.set_global, dest, sym_const));
+    }
+
     fn compileLet(self: *Compiler, items: []Value, dest: u8) CompileError!void {
         if (items.len < 3) return error.InvalidSyntax;
         if (!items[1].isObj()) return error.InvalidSyntax;
