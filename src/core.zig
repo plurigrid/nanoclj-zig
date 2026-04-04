@@ -2200,6 +2200,7 @@ fn typeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         .builtin_ref => "function",
         .lazy_seq => "lazy-seq",
         .partial_fn => "function",
+        .multimethod => "multimethod",
     }
     else "unknown";
     return Value.makeString(try gc.internString(t));

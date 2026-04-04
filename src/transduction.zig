@@ -31,9 +31,10 @@ var sf_fn_bare: u48 = 0;
 var sf_peval: u48 = 0;
 var sf_defn: u48 = 0;
 var sf_initialized: bool = false;
+var sf_gc_ptr: ?*GC = null;
 
 fn ensureSpecialFormIds(gc: *GC) void {
-    if (sf_initialized) return;
+    if (sf_initialized and sf_gc_ptr == gc) return;
     sf_quote = gc.internString("quote") catch return;
     sf_def = gc.internString("def") catch return;
     sf_let = gc.internString("let*") catch return;
@@ -45,6 +46,7 @@ fn ensureSpecialFormIds(gc: *GC) void {
     sf_peval = gc.internString("peval") catch return;
     sf_defn = gc.internString("defn") catch return;
     sf_initialized = true;
+    sf_gc_ptr = gc;
 }
 
 // ============================================================================
@@ -122,6 +124,8 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
                 return result;
             }
             if (std.mem.eql(u8, sname, "defmacro")) return evalBoundedDefmacro(items, env, gc, res);
+            if (std.mem.eql(u8, sname, "defmulti")) return evalBoundedDo(items, env, gc, res); // stub
+            if (std.mem.eql(u8, sname, "defmethod")) return evalBoundedDo(items, env, gc, res); // stub
             if (std.mem.eql(u8, sname, "macroexpand-1")) {
                 if (items.len < 2) return Domain.fail(.arity_error);
                 const form_d = evalBounded(items[1], env, gc, res);

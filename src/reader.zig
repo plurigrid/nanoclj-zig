@@ -140,10 +140,21 @@ pub const Reader = struct {
         return switch (c) {
             '(' => self.readAnonFn(),
             '{' => self.readSet(),
+            '"' => self.readRegex(),
             '_' => {
                 self.pos += 1;
                 _ = try self.readForm(); // discard next form
                 return self.readForm();
+            },
+            '\'' => {
+                // #'var — resolve var reference, expand to (var name)
+                self.pos += 1;
+                const sym = try self.readForm();
+                const var_sym = self.gc.internString("var") catch return error.OutOfMemory;
+                const obj = self.gc.allocObj(.list) catch return error.OutOfMemory;
+                obj.data.list.items.append(self.gc.allocator, Value.makeSymbol(var_sym)) catch return error.OutOfMemory;
+                obj.data.list.items.append(self.gc.allocator, sym) catch return error.OutOfMemory;
+                return Value.makeObj(obj);
             },
             else => error.UnexpectedChar,
         };

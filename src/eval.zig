@@ -60,6 +60,8 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "in-ns")) return evalInNs(items, env, gc);
         if (std.mem.eql(u8, name, "defmacro")) return evalDefmacro(items, env, gc);
         if (std.mem.eql(u8, name, "macroexpand-1")) return evalMacroexpand1(items, env, gc);
+        if (std.mem.eql(u8, name, "defmulti")) return Value.makeNil(); // stub
+        if (std.mem.eql(u8, name, "defmethod")) return Value.makeNil(); // stub
         if (std.mem.eql(u8, name, "colorspace")) return evalColorspace(items, env, gc);
         if (std.mem.eql(u8, name, "blend")) return evalBlend(items, env, gc);
         if (std.mem.eql(u8, name, "try")) return evalTry(items, env, gc);
@@ -638,6 +640,63 @@ fn evalDefmacro(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     return val;
 }
 
+/// (defmulti name dispatch-fn)
+fn evalDefmulti(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isSymbol()) return error.TypeError;
+    const name = gc.getString(items[1].asSymbolId());
+    const dispatch_fn = try eval(items[2], env, gc);
+    const obj = gc.allocObj(.multimethod) catch return error.OutOfMemory;
+    const compat = @import("compat.zig");
+    obj.data.multimethod = .{
+        .name = name,
+        .dispatch_fn = dispatch_fn,
+        .methods = compat.emptyList(@import("value.zig").MethodEntry),
+        .default_method = null,
+    };
+    const val = Value.makeObj(obj);
+    env.set(name, val) catch return error.OutOfMemory;
+    const id = gc.internString(name) catch return error.OutOfMemory;
+    env.setById(id, val) catch return error.OutOfMemory;
+    return val;
+}
+
+/// (defmethod multi-name dispatch-val fn-impl)
+/// e.g. (defmethod greet :english (fn [name] (str "Hello, " name)))
+/// or   (defmethod greet :default (fn [name] (str "Hi, " name)))
+fn evalDefmethod(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 4) return error.ArityError;
+    // Resolve the multimethod
+    const mm_val = try eval(items[1], env, gc);
+    if (!mm_val.isObj() or mm_val.asObj().kind != .multimethod) return error.TypeError;
+    const mm = &mm_val.asObj().data.multimethod;
+    // Evaluate the dispatch value and the implementation fn
+    const dispatch_val = try eval(items[2], env, gc);
+    const impl_fn = try eval(items[3], env, gc);
+    // Check for :default
+    if (dispatch_val.isKeyword()) {
+        const kw_name = gc.getString(dispatch_val.asKeywordId());
+        if (std.mem.eql(u8, kw_name, "default")) {
+            mm.default_method = impl_fn;
+            return mm_val;
+        }
+    }
+    // Check if method already exists for this dispatch value, replace if so
+    const semantics = @import("semantics.zig");
+    for (mm.methods.items, 0..) |m, i| {
+        if (semantics.structuralEq(m.dispatch_val, dispatch_val, gc)) {
+            mm.methods.items[i].impl_fn = impl_fn;
+            return mm_val;
+        }
+    }
+    // Add new method
+    mm.methods.append(gc.allocator, .{
+        .dispatch_val = dispatch_val,
+        .impl_fn = impl_fn,
+    }) catch return error.OutOfMemory;
+    return mm_val;
+}
+
 /// (macroexpand-1 form) — expand one level of macro without evaluating
 fn evalMacroexpand1(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     if (items.len != 2) return error.ArityError;
@@ -785,6 +844,25 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
             }
         }
         return error.NotAFunction;
+    }
+
+    // Multimethod dispatch
+    if (obj.kind == .multimethod) {
+        const mm = &obj.data.multimethod;
+        // Call dispatch function on the args to get the dispatch value
+        const dispatch_result = try apply(mm.dispatch_fn, args, caller_env, gc);
+        // Look up matching method
+        const semantics = @import("semantics.zig");
+        for (mm.methods.items) |m| {
+            if (semantics.structuralEq(m.dispatch_val, dispatch_result, gc)) {
+                return apply(m.impl_fn, args, caller_env, gc);
+            }
+        }
+        // Fall back to :default
+        if (mm.default_method) |default| {
+            return apply(default, args, caller_env, gc);
+        }
+        return error.EvalFailed; // no matching method
     }
 
     return error.NotAFunction;

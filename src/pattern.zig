@@ -94,8 +94,6 @@ pub const ThompsonNfa = struct {
     pub fn match(self: *const ThompsonNfa, input: []const u8) MatchResult {
         var current: [MAX_STATES]bool = .{false} ** MAX_STATES;
         var next_set: [MAX_STATES]bool = .{false} ** MAX_STATES;
-        current[0] = true;
-        // Add epsilon transitions from start
         self.addEpsilon(&current, 0);
 
         var consumed: usize = 0;
@@ -108,18 +106,16 @@ pub const ThompsonNfa = struct {
                 switch (inst.op) {
                     .literal => {
                         if (ch == inst.ch) {
-                            next_set[inst.out1] = true;
                             self.addEpsilon(&next_set, inst.out1);
                             any_active = true;
                         }
                     },
                     .dot => {
-                        next_set[inst.out1] = true;
                         self.addEpsilon(&next_set, inst.out1);
                         any_active = true;
                     },
-                    .accept => {}, // already matched
-                    .split, .jump => {}, // handled by epsilon
+                    .accept => {},
+                    .split, .jump => {},
                 }
             }
             consumed += 1;

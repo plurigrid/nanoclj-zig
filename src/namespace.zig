@@ -14,37 +14,41 @@ pub const NamespaceRegistry = struct {
     pub fn init(allocator: std.mem.Allocator, core_env: *Env) !NamespaceRegistry {
         var reg = NamespaceRegistry{
             .namespaces = std.StringHashMap(*Env).init(allocator),
-            .current = "user",
+            .current = undefined,
             .allocator = allocator,
             .core_env = core_env,
         };
-        // Register clojure.core as the root
-        try reg.namespaces.put("clojure.core", core_env);
+        // Register clojure.core as the root (dupe key so deinit can free all)
+        const core_key = try allocator.dupe(u8, "clojure.core");
+        try reg.namespaces.put(core_key, core_env);
         // Create default "user" namespace
+        const user_key = try allocator.dupe(u8, "user");
         const user_env = try allocator.create(Env);
         user_env.* = Env.init(allocator, core_env);
         user_env.is_root = true;
-        try reg.namespaces.put("user", user_env);
+        try reg.namespaces.put(user_key, user_env);
+        reg.current = user_key;
         return reg;
     }
 
     pub fn deinit(self: *NamespaceRegistry) void {
-        var it = self.namespaces.valueIterator();
-        while (it.next()) |env_ptr| {
-            const e = env_ptr.*;
+        var it = self.namespaces.iterator();
+        while (it.next()) |entry| {
+            const e = entry.value_ptr.*;
             if (e != self.core_env) {
                 e.deinit();
                 self.allocator.destroy(e);
             }
+            self.allocator.free(entry.key_ptr.*);
         }
         self.namespaces.deinit();
     }
 
     /// Switch to namespace, creating it if needed.
     pub fn switchTo(self: *NamespaceRegistry, name: []const u8) !*Env {
-        if (self.namespaces.get(name)) |env| {
-            self.current = name;
-            return env;
+        if (self.namespaces.getKeyPtr(name)) |key_ptr| {
+            self.current = key_ptr.*;
+            return self.namespaces.get(name).?;
         }
         // Create new namespace with clojure.core as parent
         const duped_name = try self.allocator.dupe(u8, name);
