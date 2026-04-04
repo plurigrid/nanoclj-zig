@@ -54,6 +54,12 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "fn?", &isFnP },    .{ "println", &printlnFn },
         .{ "pr-str", &prStrFn }, .{ "read-string", &readStringFn }, .{ "load-file", &loadFileFn },
         .{ "str", &strFn },    .{ "subs", &subsFn },
+        .{ "split", &splitFn }, .{ "join", &joinFn },
+        .{ "replace", &replaceFn }, .{ "index-of", &indexOfFn },
+        .{ "starts-with?", &startsWithFn }, .{ "ends-with?", &endsWithFn },
+        .{ "trim", &trimFn },
+        .{ "upper-case", &upperCaseFn }, .{ "lower-case", &lowerCaseFn },
+        .{ "char-at", &charAtFn }, .{ "string-length", &stringLengthFn },
         .{ "not", &notFn },    .{ "mod", &modFn },
         .{ "inc", &incFn },    .{ "dec", &decFn },
         .{ "zero?", &isZeroP },
@@ -695,6 +701,150 @@ fn subsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (start > s.len or end > s.len or start > end) return error.InvalidArgs;
     const id = try gc.internString(s[start..end]);
     return Value.makeString(id);
+}
+
+// ── String operations ──
+
+fn splitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    const s = gc.getString(args[0].asStringId());
+    const sep = gc.getString(args[1].asStringId());
+    const obj = try gc.allocObj(.vector);
+    if (sep.len == 0) {
+        for (s) |byte| {
+            try obj.data.vector.items.append(gc.allocator, Value.makeString(try gc.internString(&[_]u8{byte})));
+        }
+    } else {
+        var start: usize = 0;
+        while (start <= s.len) {
+            if (std.mem.indexOfPos(u8, s, start, sep)) |idx| {
+                try obj.data.vector.items.append(gc.allocator, Value.makeString(try gc.internString(s[start..idx])));
+                start = idx + sep.len;
+            } else {
+                try obj.data.vector.items.append(gc.allocator, Value.makeString(try gc.internString(s[start..])));
+                break;
+            }
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+fn joinFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1 or args.len > 2) return error.ArityError;
+    const sep = if (args.len == 2 and args[0].isString()) gc.getString(args[0].asStringId()) else "";
+    const coll_arg = if (args.len == 2) args[1] else args[0];
+    if (!coll_arg.isObj()) return error.TypeError;
+    const obj = coll_arg.asObj();
+    const items = switch (obj.kind) {
+        .vector => obj.data.vector.items.items,
+        .list => obj.data.list.items.items,
+        else => return error.TypeError,
+    };
+    var buf = compat.emptyList(u8);
+    defer buf.deinit(gc.allocator);
+    for (items, 0..) |item, i| {
+        if (i > 0) try buf.appendSlice(gc.allocator, sep);
+        if (item.isString()) {
+            try buf.appendSlice(gc.allocator, gc.getString(item.asStringId()));
+        } else {
+            const s = try printer.prStr(item, gc, false);
+            try buf.appendSlice(gc.allocator, s);
+        }
+    }
+    return Value.makeString(try gc.internString(buf.items));
+}
+
+fn replaceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString() or !args[2].isString()) return error.TypeError;
+    const s = gc.getString(args[0].asStringId());
+    const from = gc.getString(args[1].asStringId());
+    const to = gc.getString(args[2].asStringId());
+    if (from.len == 0) return args[0];
+    var buf = compat.emptyList(u8);
+    defer buf.deinit(gc.allocator);
+    var pos: usize = 0;
+    while (pos < s.len) {
+        if (pos + from.len <= s.len and std.mem.eql(u8, s[pos..][0..from.len], from)) {
+            try buf.appendSlice(gc.allocator, to);
+            pos += from.len;
+        } else {
+            try buf.append(gc.allocator, s[pos]);
+            pos += 1;
+        }
+    }
+    return Value.makeString(try gc.internString(buf.items));
+}
+
+fn indexOfFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2 or args.len > 3) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    const s = gc.getString(args[0].asStringId());
+    const needle = gc.getString(args[1].asStringId());
+    const from: usize = if (args.len == 3 and args[2].isInt())
+        std.math.cast(usize, @max(@as(i48, 0), args[2].asInt())) orelse 0
+    else
+        0;
+    if (std.mem.indexOfPos(u8, s, from, needle)) |idx| {
+        return Value.makeInt(@intCast(idx));
+    }
+    return Value.makeInt(-1);
+}
+
+fn startsWithFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    return Value.makeBool(std.mem.startsWith(u8, gc.getString(args[0].asStringId()), gc.getString(args[1].asStringId())));
+}
+
+fn endsWithFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    return Value.makeBool(std.mem.endsWith(u8, gc.getString(args[0].asStringId()), gc.getString(args[1].asStringId())));
+}
+
+fn trimFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const s = gc.getString(args[0].asStringId());
+    const trimmed = std.mem.trim(u8, s, " \t\n\r");
+    return Value.makeString(try gc.internString(trimmed));
+}
+
+fn upperCaseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const s = gc.getString(args[0].asStringId());
+    var buf = try gc.allocator.alloc(u8, s.len);
+    defer gc.allocator.free(buf);
+    for (s, 0..) |c, i| buf[i] = std.ascii.toUpper(c);
+    return Value.makeString(try gc.internString(buf));
+}
+
+fn lowerCaseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const s = gc.getString(args[0].asStringId());
+    var buf = try gc.allocator.alloc(u8, s.len);
+    defer gc.allocator.free(buf);
+    for (s, 0..) |c, i| buf[i] = std.ascii.toLower(c);
+    return Value.makeString(try gc.internString(buf));
+}
+
+fn charAtFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isInt()) return error.TypeError;
+    const s = gc.getString(args[0].asStringId());
+    const idx = args[1].asInt();
+    if (idx < 0 or idx >= @as(i48, @intCast(s.len))) return Value.makeNil();
+    return Value.makeString(try gc.internString(&[_]u8{s[@intCast(idx)]}));
+}
+
+fn stringLengthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    return Value.makeInt(@intCast(gc.getString(args[0].asStringId()).len));
 }
 
 fn notFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
