@@ -2378,12 +2378,19 @@ fn atomFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
+/// Polymorphic perception: deref any IDeref-able reference type.
+/// atom → current value, lazy_seq/delay → cached or force, volatile → value
 fn derefFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
-    if (obj.kind != .atom) return error.TypeError;
-    return obj.data.atom.val;
+    return switch (obj.kind) {
+        .atom => obj.data.atom.val,
+        .lazy_seq => if (obj.data.lazy_seq.cached) |c| c else Value.makeNil(),
+        .dense_f64 => args[0], // dense vectors are their own percept
+        .trace => args[0], // traces are their own percept
+        else => error.TypeError,
+    };
 }
 
 fn swapFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {

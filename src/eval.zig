@@ -881,8 +881,10 @@ fn evalThreadFirst(items: []Value, env: *Env, gc: *GC) EvalError!Value {
 
 /// (->> x (f a) (g b)) => (g a (f a x))
 fn evalThreadLast(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    std.debug.print("->> THREAD_LAST items={d} forms={d}\n", .{ items.len, if (items.len >= 2) items.len - 2 else 0 });
     if (items.len < 2) return error.ArityError;
     var result = try eval(items[1], env, gc);
+    std.debug.print("->> initial result tag\n", .{});
     for (items[2..]) |form| {
         if (form.isObj() and form.asObj().kind == .list) {
             const parts = form.asObj().data.list.items.items;
