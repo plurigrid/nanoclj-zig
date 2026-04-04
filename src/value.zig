@@ -41,6 +41,7 @@ pub const ObjKind = enum(u8) {
 pub const Obj = struct {
     kind: ObjKind,
     marked: bool = false,
+    is_transient: bool = false, // true = mutable (conj!/assoc!/dissoc! allowed)
     data: ObjData,
 };
 

@@ -593,6 +593,55 @@ pub fn haltingWitnessFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 
 /// (primitive-recursive op ...) → result
 /// The five operators from the lecture: zero, successor, projection, composition, primitive recursion.
+/// (epochal-witness epoch-idx trit-sum substrate-agrees? classifier-agrees?)
+/// → {:epoch N :well-posed? bool :ill-posed-count N :diagnosis "..."}
+///
+/// Hickey/Fogus epochal time: each epoch is an immutable value,
+/// the recording session is the identity, perception is the readback.
+pub fn epochalWitnessFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 4) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+
+    const epoch = args[0].asInt();
+    const trit_sum = if (args[1].isInt()) args[1].asInt() else 0;
+    const substrate_ok = if (args[2].isBool()) args[2].asBool() else false;
+    const classifier_ok = if (args[3].isBool()) args[3].asBool() else false;
+
+    var ill_count: i48 = 0;
+    if (!substrate_ok) ill_count += 1;
+    if (!classifier_ok) ill_count += 1;
+    const well_posed = ill_count == 0;
+
+    const diagnosis: []const u8 = if (well_posed)
+        "well-posed"
+    else if (ill_count == 1 and !substrate_ok)
+        "Church-Turing divergence"
+    else if (ill_count == 1 and !classifier_ok)
+        "classifier divergence"
+    else
+        "double ill-posed: CT + classifier";
+
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+
+    const obj = try gc.allocObj(.map);
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "epoch"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(epoch));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit-sum"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(trit_sum));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "well-posed?"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(well_posed));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "ill-posed-count"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(ill_count));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "diagnosis"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(diagnosis)));
+
+    return Value.makeObj(obj);
+}
+
 /// These are the building blocks of decidable predicates.
 pub fn primitiveRecursiveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len < 1) return error.ArityError;

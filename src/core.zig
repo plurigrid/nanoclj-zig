@@ -201,6 +201,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "decidable?", &church_turing.decidableFn },
         .{ "semi-decide", &church_turing.semiDecideFn },
         .{ "halting-witness", &church_turing.haltingWitnessFn },
+        .{ "epochal-witness", &church_turing.epochalWitnessFn },
         .{ "primitive-recursive", &church_turing.primitiveRecursiveFn },
         // gorj bridge — collapsed loops (no hex roundtrip, fused eval pipeline)
         .{ "gorj-pipe", &gorj_bridge.gorjPipeFn },
@@ -359,6 +360,18 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Regex
         .{ "re-pattern", &rePatternFn },
         .{ "re-matches", &reMatchesFn },
+        // Nested map ops
+        .{ "get-in", &getInFn },
+        .{ "assoc-in", &assocInFn },
+        .{ "update-in", &updateInFn },
+        .{ "reduce-kv", &reduceKvFn },
+        // Transients
+        .{ "transient", &transientFn },
+        .{ "persistent!", &persistentBangFn },
+        .{ "conj!", &conjBangFn },
+        .{ "assoc!", &assocBangFn },
+        .{ "dissoc!", &dissocBangFn },
+        .{ "transient?", &isTransientFn },
     };
 
     inline for (builtins) |b| {
@@ -2978,4 +2991,103 @@ fn reMatchesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         return args[1]; // full match
     }
     return Value.makeNil();
+}
+
+// ============================================================================
+// TRANSIENTS
+// ============================================================================
+
+/// (transient coll) — return a mutable version of the collection
+fn transientFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const src = args[0].asObj();
+    return switch (src.kind) {
+        .vector => blk: {
+            const obj = try gc.allocObj(.vector);
+            obj.is_transient = true;
+            try obj.data.vector.items.appendSlice(gc.allocator, src.data.vector.items.items);
+            break :blk Value.makeObj(obj);
+        },
+        .map => blk: {
+            const obj = try gc.allocObj(.map);
+            obj.is_transient = true;
+            try obj.data.map.keys.appendSlice(gc.allocator, src.data.map.keys.items);
+            try obj.data.map.vals.appendSlice(gc.allocator, src.data.map.vals.items);
+            break :blk Value.makeObj(obj);
+        },
+        .set => blk: {
+            const obj = try gc.allocObj(.set);
+            obj.is_transient = true;
+            try obj.data.set.items.appendSlice(gc.allocator, src.data.set.items.items);
+            break :blk Value.makeObj(obj);
+        },
+        else => error.TypeError,
+    };
+}
+
+/// (persistent! tcoll) — return an immutable version
+fn persistentBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    if (!obj.is_transient) return error.TypeError;
+    obj.is_transient = false;
+    return args[0];
+}
+
+/// (conj! tcoll val) — mutate: add val to transient collection
+fn conjBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    if (!obj.is_transient) return error.TypeError;
+    switch (obj.kind) {
+        .vector => try obj.data.vector.items.append(gc.allocator, args[1]),
+        .set => try obj.data.set.items.append(gc.allocator, args[1]),
+        .list => try obj.data.list.items.append(gc.allocator, args[1]),
+        else => return error.TypeError,
+    }
+    return args[0];
+}
+
+/// (assoc! tmap key val) — mutate: set key→val in transient map
+fn assocBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    if (!obj.is_transient or obj.kind != .map) return error.TypeError;
+    // Check for existing key
+    for (obj.data.map.keys.items, 0..) |k, i| {
+        if (semantics.structuralEq(k, args[1], gc)) {
+            obj.data.map.vals.items[i] = args[2];
+            return args[0];
+        }
+    }
+    try obj.data.map.keys.append(gc.allocator, args[1]);
+    try obj.data.map.vals.append(gc.allocator, args[2]);
+    return args[0];
+}
+
+/// (dissoc! tmap key) — mutate: remove key from transient map
+fn dissocBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    if (!obj.is_transient or obj.kind != .map) return error.TypeError;
+    for (obj.data.map.keys.items, 0..) |k, i| {
+        if (semantics.structuralEq(k, args[1], gc)) {
+            _ = obj.data.map.keys.orderedRemove(i);
+            _ = obj.data.map.vals.orderedRemove(i);
+            return args[0];
+        }
+    }
+    return args[0]; // key not found, no-op
+}
+
+/// (transient? x) — true if x is a transient collection
+fn isTransientFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj()) return Value.makeBool(false);
+    return Value.makeBool(args[0].asObj().is_transient);
 }

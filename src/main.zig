@@ -316,34 +316,32 @@ fn loadMacroPrelude(env: *Env, gc: *GC) void {
         \\      (list form acc)))
         \\    x forms))
         ,
-        // ->>: thread-last
+        // ->>: thread-last (append acc to end of form)
         \\(defmacro ->> [x & forms]
         \\  (reduce (fn* [acc form]
         \\    (if (list? form)
-        \\      (conj form acc)
+        \\      (concat form (list acc))
         \\      (list form acc)))
         \\    x forms))
         ,
         // and: short-circuit and
         \\(defmacro and [& xs]
-        \\  (cond
-        \\    (zero? (count xs)) true
-        \\    (= 1 (count xs)) (first xs)
-        \\    (list 'if (first xs) (cons 'and (rest xs)) false)))
+        \\  (if (zero? (count xs)) true
+        \\    (if (= 1 (count xs)) (first xs)
+        \\      (list 'if (first xs) (cons 'and (rest xs)) false))))
         ,
-        // or: short-circuit or (simplified — no let binding)
+        // or: short-circuit or
         \\(defmacro or [& xs]
-        \\  (cond
-        \\    (zero? (count xs)) nil
-        \\    (= 1 (count xs)) (first xs)
-        \\    (list 'let* ['__or__ (first xs)]
-        \\      (list 'if '__or__ '__or__ (cons 'or (rest xs))))))
+        \\  (if (zero? (count xs)) nil
+        \\    (if (= 1 (count xs)) (first xs)
+        \\      (list 'let* ['__or__ (first xs)]
+        \\        (list 'if '__or__ '__or__ (cons 'or (rest xs)))))))
         ,
         // doto: (doto x (f args...) (g args...))
         \\(defmacro doto [x & forms]
         \\  (let* [gx '__doto__]
         \\    (cons 'let* (cons [gx x]
-        \\      (conj (map (fn* [f] (cons (first f) (cons gx (rest f)))) forms) gx)))))
+        \\      (concat (map (fn* [f] (cons (first f) (cons gx (rest f)))) forms) (list gx))))))
         ,
         // if-let: (if-let [x expr] then else)
         \\(defmacro if-let [bindings then & else-forms]
