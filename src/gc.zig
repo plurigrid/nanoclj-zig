@@ -83,6 +83,7 @@ pub const GC = struct {
                     .env = null,
                 } },
                 .atom => .{ .atom = .{ .val = Value.makeNil() } },
+                .bc_closure => .{ .bc_closure = .{ .def = undefined, .upvalues = &.{} } },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -164,6 +165,7 @@ pub const GC = struct {
                     if (cur.data.macro_fn.env) |e| self.markEnv(e);
                 },
                 .atom => self.enqueueVal(cur.data.atom.val, &worklist),
+                .bc_closure => {}, // FuncDef + upvalues managed by allocator, not GC
             }
         }
     }
@@ -209,6 +211,7 @@ pub const GC = struct {
                 obj.data.macro_fn.body.deinit(self.allocator);
             },
             .atom => {},
+            .bc_closure => {},
         }
         self.allocator.destroy(obj);
         self.bytes_allocated -|= @sizeOf(Obj);

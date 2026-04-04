@@ -44,9 +44,9 @@ pub const Compiler = struct {
 
     pub fn init(allocator: std.mem.Allocator, gc: *GC, parent: ?*Compiler) Compiler {
         return .{
-            .code = .{},
-            .constants = .{},
-            .defs = .{},
+            .code = .{ .items = &.{}, .capacity = 0 },
+            .constants = .{ .items = &.{}, .capacity = 0 },
+            .defs = .{ .items = &.{}, .capacity = 0 },
             .locals = undefined,
             .local_count = 0,
             .next_reg = 0,

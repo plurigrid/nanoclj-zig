@@ -50,6 +50,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "str", &strFn },    .{ "subs", &subsFn },
         .{ "not", &notFn },    .{ "mod", &modFn },
         .{ "apply", &applyFn },
+        .{ "take", &takeFn },
+        .{ "drop", &dropFn },
+        .{ "reduce", &reduceFn },
+        .{ "range", &rangeFn },
         // Gay Color builtins
         .{ "color-at", &substrate.colorAtFn },
         .{ "color-seed", &substrate.colorSeedFn },
@@ -542,4 +546,136 @@ fn applyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
         }
     }
     return eval_mod.apply(func, real_args.items, env, gc);
+}
+
+fn takeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const n: usize = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    if (args[1].isNil()) return Value.makeObj(try gc.allocObj(.list));
+    if (!args[1].isObj()) return error.TypeError;
+    const obj = args[1].asObj();
+    const items = switch (obj.kind) {
+        .list => obj.data.list.items.items,
+        .vector => obj.data.vector.items.items,
+        else => return error.TypeError,
+    };
+    const new = try gc.allocObj(.list);
+    const limit = @min(n, items.len);
+    for (items[0..limit]) |item| try new.data.list.items.append(gc.allocator, item);
+    return Value.makeObj(new);
+}
+
+fn dropFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const n: usize = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    if (args[1].isNil()) return Value.makeObj(try gc.allocObj(.list));
+    if (!args[1].isObj()) return error.TypeError;
+    const obj = args[1].asObj();
+    const items = switch (obj.kind) {
+        .list => obj.data.list.items.items,
+        .vector => obj.data.vector.items.items,
+        else => return error.TypeError,
+    };
+    const new = try gc.allocObj(.list);
+    const start = @min(n, items.len);
+    for (items[start..]) |item| try new.data.list.items.append(gc.allocator, item);
+    return Value.makeObj(new);
+}
+
+fn reduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    // (reduce f init coll) or (reduce f coll)
+    if (args.len < 2 or args.len > 3) return error.ArityError;
+    const func = args[0];
+    var acc: Value = undefined;
+    var items: []Value = undefined;
+
+    if (args.len == 3) {
+        acc = args[1];
+        if (args[2].isNil()) return acc;
+        if (!args[2].isObj()) return error.TypeError;
+        const obj = args[2].asObj();
+        items = switch (obj.kind) {
+            .list => obj.data.list.items.items,
+            .vector => obj.data.vector.items.items,
+            else => return error.TypeError,
+        };
+    } else {
+        if (args[1].isNil()) {
+            // (reduce f '()) — call f with no args
+            if (isBuiltinSentinel(func, gc)) |name| {
+                if (lookupBuiltin(name)) |builtin| {
+                    const empty: []Value = &.{};
+                    return builtin(empty, gc, env);
+                }
+            }
+            return eval_mod.apply(func, &.{}, env, gc);
+        }
+        if (!args[1].isObj()) return error.TypeError;
+        const obj = args[1].asObj();
+        items = switch (obj.kind) {
+            .list => obj.data.list.items.items,
+            .vector => obj.data.vector.items.items,
+            else => return error.TypeError,
+        };
+        if (items.len == 0) {
+            if (isBuiltinSentinel(func, gc)) |name| {
+                if (lookupBuiltin(name)) |builtin| {
+                    const empty: []Value = &.{};
+                    return builtin(empty, gc, env);
+                }
+            }
+            return eval_mod.apply(func, &.{}, env, gc);
+        }
+        acc = items[0];
+        items = items[1..];
+    }
+
+    for (items) |item| {
+        var pair = [2]Value{ acc, item };
+        if (isBuiltinSentinel(func, gc)) |name| {
+            if (lookupBuiltin(name)) |builtin| {
+                acc = try builtin(&pair, gc, env);
+                continue;
+            }
+        }
+        acc = try eval_mod.apply(func, &pair, env, gc);
+    }
+    return acc;
+}
+
+fn rangeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    // (range end), (range start end), (range start end step)
+    if (args.len == 0 or args.len > 3) return error.ArityError;
+    var start: i48 = 0;
+    var end: i48 = undefined;
+    var step: i48 = 1;
+
+    if (args.len == 1) {
+        if (!args[0].isInt()) return error.TypeError;
+        end = args[0].asInt();
+    } else {
+        if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+        start = args[0].asInt();
+        end = args[1].asInt();
+        if (args.len == 3) {
+            if (!args[2].isInt()) return error.TypeError;
+            step = args[2].asInt();
+        }
+    }
+    if (step == 0) return error.InvalidArgs;
+
+    const new = try gc.allocObj(.list);
+    var i = start;
+    if (step > 0) {
+        while (i < end) : (i += step) {
+            try new.data.list.items.append(gc.allocator, Value.makeInt(i));
+        }
+    } else {
+        while (i > end) : (i += step) {
+            try new.data.list.items.append(gc.allocator, Value.makeInt(i));
+        }
+    }
+    return Value.makeObj(new);
 }

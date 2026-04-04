@@ -30,6 +30,7 @@ pub const ObjKind = enum(u8) {
     function,
     macro_fn,
     atom,
+    bc_closure, // bytecode VM closure
 };
 
 pub const Obj = struct {
@@ -46,6 +47,7 @@ pub const ObjData = union {
     function: FnData,
     macro_fn: FnData,
     atom: struct { val: Value },
+    bc_closure: @import("bytecode.zig").Closure,
 };
 
 pub const FnData = struct {
