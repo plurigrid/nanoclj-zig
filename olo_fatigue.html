@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>olo fatigue template</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #808080; overflow: hidden; cursor: none; }
+#field { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; transition: background-color 0.1s; }
+#fixation { width: 20px; height: 20px; border-radius: 50%; background: #000; position: absolute; }
+#timer { position: fixed; bottom: 20px; right: 20px; color: #fff; font: 24px monospace; mix-blend-mode: difference; }
+#instructions { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #fff; font: 20px sans-serif; text-align: center; max-width: 80vw; }
+</style></head><body>
+<div id="field"><div id="fixation"></div></div>
+<div id="timer"></div>
+<div id="instructions">
+  <p style="font-size:32px;letter-spacing:8px">OLO</p>
+  <p style="margin-top:20px;font-size:14px">L-cone fatigue → M-cone isolation → hyperbolic teal</p>
+  <p style="margin-top:20px;font-size:14px">Stare at the center dot for 60 seconds</p>
+  <p style="margin-top:5px;font-size:14px">Then observe the teal — it will exceed any teal you've seen</p>
+  <p style="margin-top:20px;font-size:12px;opacity:0.6">Tap/click to begin · F for fullscreen · Esc to reset</p>
+</div>
+<script>
+const FATIGUE_MS = 60000;
+const TARGET_MS = 10000;
+const field = document.getElementById('field');
+const timer = document.getElementById('timer');
+const instructions = document.getElementById('instructions');
+const fixation = document.getElementById('fixation');
+let phase = 'ready';
+let startTime = 0;
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'f' || e.key === 'F') {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+  }
+  if (e.key === 'Escape' && phase !== 'ready') reset();
+  if ((e.key === ' ' || e.key === 'Enter') && phase === 'ready') startFatigue();
+});
+
+field.addEventListener('click', () => { if (phase === 'ready') startFatigue(); });
+
+function startFatigue() {
+  phase = 'fatigue';
+  instructions.style.display = 'none';
+  field.style.backgroundColor = '#FF4500';
+  fixation.style.background = '#000';
+  startTime = Date.now();
+  requestAnimationFrame(tick);
+}
+
+function tick() {
+  const elapsed = Date.now() - startTime;
+  if (phase === 'fatigue') {
+    const remaining = Math.max(0, Math.ceil((FATIGUE_MS - elapsed) / 1000));
+    timer.textContent = remaining + 's';
+    // Pulse fixation dot slightly to help maintain focus
+    const pulse = 0.8 + 0.2 * Math.sin(elapsed * 0.005);
+    fixation.style.transform = 'scale(' + pulse + ')';
+    if (elapsed >= FATIGUE_MS) {
+      phase = 'target';
+      field.style.backgroundColor = '#008080';
+      fixation.style.background = '#fff';
+      fixation.style.transform = 'scale(1)';
+      startTime = Date.now();
+    }
+  } else if (phase === 'target') {
+    const remaining = Math.max(0, Math.ceil((TARGET_MS - elapsed) / 1000));
+    timer.textContent = 'olo ' + remaining + 's';
+    if (elapsed >= TARGET_MS) {
+      phase = 'gray';
+      field.style.backgroundColor = '#808080';
+      fixation.style.background = '#000';
+      timer.textContent = 'observe the afterimage';
+      setTimeout(reset, 15000);
+    }
+  }
+  if (phase !== 'ready') requestAnimationFrame(tick);
+}
+
+function reset() {
+  phase = 'ready';
+  field.style.backgroundColor = '#808080';
+  fixation.style.background = '#000';
+  fixation.style.transform = 'scale(1)';
+  timer.textContent = '';
+  instructions.style.display = 'block';
+}
+</script></body></html>
