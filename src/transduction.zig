@@ -100,11 +100,11 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
             // Fall through to string compare for deftest/testing/try/ns
         }
         {
-            const name = gc.getString(sym_id);
-            if (std.mem.eql(u8, name, "deftest")) return evalBoundedDo(items, env, gc, res);
-            if (std.mem.eql(u8, name, "testing")) return evalBoundedDo(items, env, gc, res);
-            if (std.mem.eql(u8, name, "try")) return evalBoundedTry(items, env, gc, res);
-            if (std.mem.eql(u8, name, "ns") or std.mem.eql(u8, name, "in-ns")) return Domain.pure(Value.makeNil());
+            const sname = gc.getString(sym_id);
+            if (std.mem.eql(u8, sname, "deftest")) return evalBoundedDo(items, env, gc, res);
+            if (std.mem.eql(u8, sname, "testing")) return evalBoundedDo(items, env, gc, res);
+            if (std.mem.eql(u8, sname, "try")) return evalBoundedTry(items, env, gc, res);
+            if (std.mem.eql(u8, sname, "ns") or std.mem.eql(u8, sname, "in-ns")) return Domain.pure(Value.makeNil());
         }
         if (!sf_initialized) {
             const fname = gc.getString(sym_id);
