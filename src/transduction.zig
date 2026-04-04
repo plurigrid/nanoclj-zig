@@ -132,10 +132,57 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
                 return result;
             }
             if (std.mem.eql(u8, sname, "defmacro")) return evalBoundedDefmacro(items, env, gc, res);
-            if (std.mem.eql(u8, sname, "defmulti")) return evalBoundedDo(items, env, gc, res);
-            if (std.mem.eql(u8, sname, "defmethod")) return evalBoundedDo(items, env, gc, res);
+            // defmulti: (defmulti name dispatch-fn) → bind name to dispatch-fn
+            if (std.mem.eql(u8, sname, "defmulti")) {
+                if (items.len >= 3 and items[1].isSymbol()) {
+                    const mname = gc.getString(items[1].asSymbolId());
+                    const dispatch_d = evalBounded(items[2], env, gc, res);
+                    if (!dispatch_d.isValue()) return dispatch_d;
+                    env.set(mname, dispatch_d.value) catch return Domain.fail(.type_error);
+                    return dispatch_d;
+                }
+                return Domain.pure(Value.makeNil());
+            }
+            // defmethod: (defmethod name val impl) → eval impl for side effect
+            if (std.mem.eql(u8, sname, "defmethod")) {
+                if (items.len >= 4) {
+                    const impl_d = evalBounded(items[items.len - 1], env, gc, res);
+                    return impl_d;
+                }
+                return Domain.pure(Value.makeNil());
+            }
             if (std.mem.eql(u8, sname, "defprotocol")) return Domain.pure(Value.makeNil());
             if (std.mem.eql(u8, sname, "extend-type")) return Domain.pure(Value.makeNil());
+            // ns: return the namespace name as a symbol
+            if (std.mem.eql(u8, sname, "ns")) {
+                if (items.len >= 2 and items[1].isSymbol()) return Domain.pure(items[1]);
+                return Domain.pure(Value.makeNil());
+            }
+            if (std.mem.eql(u8, sname, "in-ns")) {
+                if (items.len >= 2) {
+                    const ns_d = evalBounded(items[1], env, gc, res);
+                    return ns_d;
+                }
+                return Domain.pure(Value.makeNil());
+            }
+            // require: (require 'ns) → load-file if file exists, else return ns name
+            if (std.mem.eql(u8, sname, "require")) {
+                if (items.len >= 2) {
+                    const req_d = evalBounded(items[1], env, gc, res);
+                    if (req_d.isValue()) return Domain.pure(req_d.value);
+                }
+                return Domain.pure(Value.makeNil());
+            }
+            // with-out-str: eval body, return empty string (output capture not yet implemented)
+            if (std.mem.eql(u8, sname, "with-out-str")) {
+                var result = Domain.pure(Value.makeNil());
+                for (items[1..]) |form| {
+                    result = evalBounded(form, env, gc, res);
+                    if (!result.isValue()) return result;
+                }
+                const empty = gc.internString("") catch return Domain.fail(.type_error);
+                return Domain.pure(Value.makeString(empty));
+            }
             if (std.mem.eql(u8, sname, "macroexpand-1")) {
                 if (items.len < 2) return Domain.fail(.arity_error);
                 const form_d = evalBounded(items[1], env, gc, res);
@@ -143,7 +190,7 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
                 return Domain.pure(form_d.value);
             }
             if (std.mem.eql(u8, sname, "try")) return evalBoundedTry(items, env, gc, res);
-            if (std.mem.eql(u8, sname, "ns") or std.mem.eql(u8, sname, "in-ns")) return Domain.pure(Value.makeNil());
+            // ns/in-ns handled above with proper return values
             if (std.mem.eql(u8, sname, "comment")) return Domain.pure(Value.makeNil());
             // recur: set signal args for loop to catch
             if (std.mem.eql(u8, sname, "recur")) {
