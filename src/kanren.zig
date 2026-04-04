@@ -313,6 +313,188 @@ fn executeGoal(goal: Value, subst: Value, gc: *GC) !Value {
         return Value.makeObj(current_stream);
     }
 
+    if (std.mem.eql(u8, tag, "conso") and items.len == 4) {
+        // conso h t l: unify l with a list whose head=h, tail=t
+        // We represent lists as vectors for unification: [h, t_elem1, t_elem2, ...]
+        // But actually we need to handle this structurally.
+        // Strategy: walk l,h,t then try to unify.
+        if (!subst.isObj() or subst.asObj().kind != .vector) return Value.makeNil();
+        const h = items[1];
+        const t = items[2];
+        const l = items[3];
+
+        const l_walked = walk(l, subst.asObj(), gc);
+        const t_walked = walk(t, subst.asObj(), gc);
+
+        // If l is a ground list, decompose: head=first, tail=rest
+        if (l_walked.isObj() and l_walked.asObj().kind == .list) {
+            const l_items = l_walked.asObj().data.list.items.items;
+            if (l_items.len == 0) return Value.makeNil(); // empty list can't conso
+            // unify h with head
+            const s1 = try unify(h, l_items[0], subst.asObj(), gc);
+            if (s1 == null) return Value.makeNil();
+            // build tail list
+            const tail = try gc.allocObj(.list);
+            for (l_items[1..]) |item| try tail.data.list.items.append(gc.allocator, item);
+            const s2 = try unify(t, Value.makeObj(tail), s1.?.asObj(), gc);
+            if (s2 == null) return Value.makeNil();
+            const stream = try gc.allocObj(.list);
+            try stream.data.list.items.append(gc.allocator, s2.?);
+            return Value.makeObj(stream);
+        }
+
+        // If t is ground, build l = (cons h t)
+        if (t_walked.isObj() and t_walked.asObj().kind == .list) {
+            const new_list = try gc.allocObj(.list);
+            try new_list.data.list.items.append(gc.allocator, h);
+            for (t_walked.asObj().data.list.items.items) |item|
+                try new_list.data.list.items.append(gc.allocator, item);
+            const s1 = try unify(l, Value.makeObj(new_list), subst.asObj(), gc);
+            if (s1 == null) return Value.makeNil();
+            // Also unify h with walked h (in case h is lvar)
+            const s2 = try unify(h, walk(h, s1.?.asObj(), gc), s1.?.asObj(), gc);
+            if (s2 == null) return Value.makeNil();
+            const stream = try gc.allocObj(.list);
+            try stream.data.list.items.append(gc.allocator, s2.?);
+            return Value.makeObj(stream);
+        }
+
+        // If l is an lvar and we know h and t, build and bind
+        if (isLvar(l_walked, gc)) {
+            // Need t to be ground to construct
+            if (t_walked.isNil()) {
+                // t = nil/empty → l = (h)
+                const new_list = try gc.allocObj(.list);
+                try new_list.data.list.items.append(gc.allocator, h);
+                const s1 = try unify(l, Value.makeObj(new_list), subst.asObj(), gc);
+                if (s1 == null) return Value.makeNil();
+                const stream = try gc.allocObj(.list);
+                try stream.data.list.items.append(gc.allocator, s1.?);
+                return Value.makeObj(stream);
+            }
+        }
+
+        return Value.makeNil();
+    }
+
+    if (std.mem.eql(u8, tag, "appendo") and items.len == 4) {
+        // appendo l s out: (concat l s) = out
+        // Base case: l=() → s=out
+        // Recursive: l=(h . t) → out=(h . res), appendo(t, s, res)
+        if (!subst.isObj() or subst.asObj().kind != .vector) return Value.makeNil();
+        const l = items[1];
+        const s = items[2];
+        const out = items[3];
+        const l_walked = walk(l, subst.asObj(), gc);
+
+        const all_results = try gc.allocObj(.list);
+
+        // Base case: l = () → unify s out
+        {
+            const empty_list = try gc.allocObj(.list);
+            const s1 = try unify(l, Value.makeObj(empty_list), subst.asObj(), gc);
+            if (s1) |base_subst| {
+                const s2 = try unify(s, out, base_subst.asObj(), gc);
+                if (s2) |final| {
+                    try all_results.data.list.items.append(gc.allocator, final);
+                }
+            }
+        }
+
+        // Recursive case: l = (h . t)
+        // Only recurse if l is a ground list (prevents infinite search)
+        if (l_walked.isObj() and l_walked.asObj().kind == .list) {
+            const l_items = l_walked.asObj().data.list.items.items;
+            if (l_items.len > 0) {
+                const head = l_items[0];
+                // Build tail
+                const tail = try gc.allocObj(.list);
+                for (l_items[1..]) |item| try tail.data.list.items.append(gc.allocator, item);
+
+                // Fresh var for recursive result
+                const res = try makeLogicVar(gc);
+
+                // Build recursive appendo goal
+                const rec_goal = try gc.allocObj(.vector);
+                const appendo_tag = Value.makeKeyword(try gc.internString("appendo"));
+                try rec_goal.data.vector.items.append(gc.allocator, appendo_tag);
+                try rec_goal.data.vector.items.append(gc.allocator, Value.makeObj(tail));
+                try rec_goal.data.vector.items.append(gc.allocator, s);
+                try rec_goal.data.vector.items.append(gc.allocator, res);
+
+                // Execute recursive goal
+                const rec_stream = try executeGoal(Value.makeObj(rec_goal), subst, gc);
+                if (rec_stream.isObj() and rec_stream.asObj().kind == .list) {
+                    for (rec_stream.asObj().data.list.items.items) |rec_subst| {
+                        if (!rec_subst.isObj()) continue;
+                        // Now build out = (head . res) via conso
+                        const conso_goal = try gc.allocObj(.vector);
+                        const conso_tag = Value.makeKeyword(try gc.internString("conso"));
+                        try conso_goal.data.vector.items.append(gc.allocator, conso_tag);
+                        try conso_goal.data.vector.items.append(gc.allocator, head);
+                        try conso_goal.data.vector.items.append(gc.allocator, res);
+                        try conso_goal.data.vector.items.append(gc.allocator, out);
+
+                        const conso_stream = try executeGoal(Value.makeObj(conso_goal), rec_subst, gc);
+                        if (conso_stream.isObj() and conso_stream.asObj().kind == .list) {
+                            try all_results.data.list.items.appendSlice(
+                                gc.allocator,
+                                conso_stream.asObj().data.list.items.items,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        return Value.makeObj(all_results);
+    }
+
+    if (std.mem.eql(u8, tag, "membero") and items.len == 3) {
+        // membero x l: x is in l
+        // (== x head) OR (membero x tail)
+        if (!subst.isObj() or subst.asObj().kind != .vector) return Value.makeNil();
+        const x = items[1];
+        const l = items[2];
+        const l_walked = walk(l, subst.asObj(), gc);
+
+        if (!l_walked.isObj() or l_walked.asObj().kind != .list) return Value.makeNil();
+        const l_items = l_walked.asObj().data.list.items.items;
+        if (l_items.len == 0) return Value.makeNil();
+
+        const all_results = try gc.allocObj(.list);
+
+        // Try head: unify x with first element
+        {
+            const s1 = try unify(x, l_items[0], subst.asObj(), gc);
+            if (s1) |found| {
+                try all_results.data.list.items.append(gc.allocator, found);
+            }
+        }
+
+        // Recurse on tail
+        if (l_items.len > 1) {
+            const tail = try gc.allocObj(.list);
+            for (l_items[1..]) |item| try tail.data.list.items.append(gc.allocator, item);
+
+            const rec_goal = try gc.allocObj(.vector);
+            const membero_tag = Value.makeKeyword(try gc.internString("membero"));
+            try rec_goal.data.vector.items.append(gc.allocator, membero_tag);
+            try rec_goal.data.vector.items.append(gc.allocator, x);
+            try rec_goal.data.vector.items.append(gc.allocator, Value.makeObj(tail));
+
+            const rec_stream = try executeGoal(Value.makeObj(rec_goal), subst, gc);
+            if (rec_stream.isObj() and rec_stream.asObj().kind == .list) {
+                try all_results.data.list.items.appendSlice(
+                    gc.allocator,
+                    rec_stream.asObj().data.list.items.items,
+                );
+            }
+        }
+
+        return Value.makeObj(all_results);
+    }
+
     return Value.makeNil();
 }
 
@@ -350,6 +532,57 @@ pub fn runGoalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         }
     }
     return Value.makeObj(results);
+}
+
+/// (conso h t l) → goal: l = (cons h t)
+/// The fundamental list relation. appendo and membero reduce to this.
+/// Street fighting: instead of "cons builds a list", we say
+/// "h, t, and l are related such that l = h:t". Run it any direction.
+pub fn consoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    const h = args[0];
+    const t = args[1];
+    const l = args[2];
+    // Goal: unify l with [h | t] — represented as a list (h . t)
+    // We build: (conj (== l constructed-pair))
+    // But we need the pair as a value. Use a vector [h, t-items...] flattened.
+    // Actually: represent as [:conso h t l] and handle in executeGoal.
+    const goal = try gc.allocObj(.vector);
+    const tag = Value.makeKeyword(try gc.internString("conso"));
+    try goal.data.vector.items.append(gc.allocator, tag);
+    try goal.data.vector.items.append(gc.allocator, h);
+    try goal.data.vector.items.append(gc.allocator, t);
+    try goal.data.vector.items.append(gc.allocator, l);
+    return Value.makeObj(goal);
+}
+
+/// (appendo l s out) → goal: (concat l s) = out
+/// The classic miniKanren relation. Bidirectional: given any two, find the third.
+/// Recursive definition:
+///   (appendo () s out) :- (== s out)
+///   (appendo (h . t) s out) :- (fresh [res] (== out (h . res)) (appendo t s res))
+/// Represented as [:appendo l s out] and expanded lazily in executeGoal.
+pub fn appendoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    const goal = try gc.allocObj(.vector);
+    const tag = Value.makeKeyword(try gc.internString("appendo"));
+    try goal.data.vector.items.append(gc.allocator, tag);
+    try goal.data.vector.items.append(gc.allocator, args[0]);
+    try goal.data.vector.items.append(gc.allocator, args[1]);
+    try goal.data.vector.items.append(gc.allocator, args[2]);
+    return Value.makeObj(goal);
+}
+
+/// (membero x l) → goal: x is a member of l
+/// (membero x (h . t)) :- (== x h) OR (membero x t)
+pub fn memberoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const goal = try gc.allocObj(.vector);
+    const tag = Value.makeKeyword(try gc.internString("membero"));
+    try goal.data.vector.items.append(gc.allocator, tag);
+    try goal.data.vector.items.append(gc.allocator, args[0]);
+    try goal.data.vector.items.append(gc.allocator, args[1]);
+    return Value.makeObj(goal);
 }
 
 // ============================================================================

@@ -214,6 +214,9 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "conj-goal", &kanren.conjGoalFn },
         .{ "fresh-goal", &kanren.freshGoalFn },
         .{ "run-goal", &kanren.runGoalFn },
+        .{ "conso", &kanren.consoFn },
+        .{ "appendo", &kanren.appendoFn },
+        .{ "membero", &kanren.memberoFn },
         // gorj bridge — collapsed loops (no hex roundtrip, fused eval pipeline)
         .{ "gorj-pipe", &gorj_bridge.gorjPipeFn },
         .{ "gorj-eval", &gorj_bridge.gorjEvalFn },
