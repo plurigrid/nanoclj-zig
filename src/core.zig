@@ -219,6 +219,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "conso", &kanren.consoFn },
         .{ "appendo", &kanren.appendoFn },
         .{ "membero", &kanren.memberoFn },
+        .{ "evalo", &kanren.evaloFn },
+        .{ "lookupo", &kanren.lookupoFn },
         // gorj bridge — collapsed loops (no hex roundtrip, fused eval pipeline)
         .{ "gorj-pipe", &gorj_bridge.gorjPipeFn },
         .{ "gorj-eval", &gorj_bridge.gorjEvalFn },

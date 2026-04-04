@@ -450,6 +450,290 @@ fn executeGoal(goal: Value, subst: Value, gc: *GC) !Value {
         return Value.makeObj(all_results);
     }
 
+    if (std.mem.eql(u8, tag, "lookupo") and items.len == 4) {
+        // lookupo name env val: lookup name in assoc list env, result is val
+        // env = ((name1 val1) (name2 val2) ...)
+        // Base: empty env → fail
+        // Head: first pair matches → unify val
+        // Tail: recurse on rest
+        if (!subst.isObj() or subst.asObj().kind != .vector) return Value.makeNil();
+        const name = items[1];
+        const env_val = items[2];
+        const val = items[3];
+        const env_walked = walk(env_val, subst.asObj(), gc);
+
+        if (!env_walked.isObj() or env_walked.asObj().kind != .list) return Value.makeNil();
+        const env_items = env_walked.asObj().data.list.items.items;
+        if (env_items.len == 0) return Value.makeNil();
+
+        const all_results = try gc.allocObj(.list);
+
+        // Try head pair
+        if (env_items[0].isObj() and env_items[0].asObj().kind == .list) {
+            const pair = env_items[0].asObj().data.list.items.items;
+            if (pair.len == 2) {
+                const s1 = try unify(name, pair[0], subst.asObj(), gc);
+                if (s1) |matched| {
+                    const s2 = try unify(val, pair[1], matched.asObj(), gc);
+                    if (s2) |final| {
+                        try all_results.data.list.items.append(gc.allocator, final);
+                    }
+                }
+            }
+        }
+
+        // Recurse on tail
+        if (env_items.len > 1) {
+            const tail_env = try gc.allocObj(.list);
+            for (env_items[1..]) |item| try tail_env.data.list.items.append(gc.allocator, item);
+
+            const rec_goal = try gc.allocObj(.vector);
+            const lookupo_tag = Value.makeKeyword(try gc.internString("lookupo"));
+            try rec_goal.data.vector.items.append(gc.allocator, lookupo_tag);
+            try rec_goal.data.vector.items.append(gc.allocator, name);
+            try rec_goal.data.vector.items.append(gc.allocator, Value.makeObj(tail_env));
+            try rec_goal.data.vector.items.append(gc.allocator, val);
+
+            const rec_stream = try executeGoal(Value.makeObj(rec_goal), subst, gc);
+            if (rec_stream.isObj() and rec_stream.asObj().kind == .list) {
+                try all_results.data.list.items.appendSlice(
+                    gc.allocator,
+                    rec_stream.asObj().data.list.items.items,
+                );
+            }
+        }
+
+        return Value.makeObj(all_results);
+    }
+
+    if (std.mem.eql(u8, tag, "evalo") and items.len == 4) {
+        // evalo expr val env: expr evaluates to val under env
+        if (!subst.isObj() or subst.asObj().kind != .vector) return Value.makeNil();
+        const expr = items[1];
+        const val = items[2];
+        const env_val = items[3];
+
+        const expr_walked = walk(expr, subst.asObj(), gc);
+        const all_results = try gc.allocObj(.list);
+
+        // Rule 1: Integer/keyword self-evaluation
+        // If expr is an int or keyword, val = expr
+        {
+            if (expr_walked.isInt() or expr_walked.isKeyword()) {
+                const s1 = try unify(val, expr_walked, subst.asObj(), gc);
+                if (s1) |final| {
+                    try all_results.data.list.items.append(gc.allocator, final);
+                }
+                return Value.makeObj(all_results);
+            }
+        }
+
+        // For vector expressions, dispatch on the first element (tag)
+        if (expr_walked.isObj() and expr_walked.asObj().kind == .vector) {
+            const parts = expr_walked.asObj().data.vector.items.items;
+
+            if (parts.len >= 1) {
+                const form_tag = walk(parts[0], subst.asObj(), gc);
+
+                // Rule 2: [:quote x] → x
+                if (form_tag.isKeyword() and std.mem.eql(u8, gc.getString(form_tag.asKeywordId()), "quote") and parts.len == 2) {
+                    const s1 = try unify(val, parts[1], subst.asObj(), gc);
+                    if (s1) |final| {
+                        try all_results.data.list.items.append(gc.allocator, final);
+                    }
+                    return Value.makeObj(all_results);
+                }
+
+                // Rule 3: [:var name] → lookup in env
+                if (form_tag.isKeyword() and std.mem.eql(u8, gc.getString(form_tag.asKeywordId()), "var") and parts.len == 2) {
+                    const lookup_goal = try gc.allocObj(.vector);
+                    const lookupo_tag = Value.makeKeyword(try gc.internString("lookupo"));
+                    try lookup_goal.data.vector.items.append(gc.allocator, lookupo_tag);
+                    try lookup_goal.data.vector.items.append(gc.allocator, parts[1]);
+                    try lookup_goal.data.vector.items.append(gc.allocator, env_val);
+                    try lookup_goal.data.vector.items.append(gc.allocator, val);
+
+                    return executeGoal(Value.makeObj(lookup_goal), subst, gc);
+                }
+
+                // Rule 4: [:if test then else] → conditional
+                if (form_tag.isKeyword() and std.mem.eql(u8, gc.getString(form_tag.asKeywordId()), "if") and parts.len == 4) {
+                    const test_expr = parts[1];
+                    const then_expr = parts[2];
+                    const else_expr = parts[3];
+
+                    // Branch true: test evaluates to true, result = eval(then)
+                    {
+                        const test_v = try makeLogicVar(gc);
+                        const evalo_tag = Value.makeKeyword(try gc.internString("evalo"));
+
+                        // eval test
+                        const test_goal = try gc.allocObj(.vector);
+                        try test_goal.data.vector.items.append(gc.allocator, evalo_tag);
+                        try test_goal.data.vector.items.append(gc.allocator, test_expr);
+                        try test_goal.data.vector.items.append(gc.allocator, test_v);
+                        try test_goal.data.vector.items.append(gc.allocator, env_val);
+
+                        const test_stream = try executeGoal(Value.makeObj(test_goal), subst, gc);
+                        if (test_stream.isObj() and test_stream.asObj().kind == .list) {
+                            for (test_stream.asObj().data.list.items.items) |test_subst| {
+                                if (!test_subst.isObj()) continue;
+                                const tv = walk(test_v, test_subst.asObj(), gc);
+                                // true branch: test is truthy (not false, not nil)
+                                if (!tv.isNil() and !(tv.isBool() and !tv.asBool())) {
+                                    const then_goal = try gc.allocObj(.vector);
+                                    try then_goal.data.vector.items.append(gc.allocator, evalo_tag);
+                                    try then_goal.data.vector.items.append(gc.allocator, then_expr);
+                                    try then_goal.data.vector.items.append(gc.allocator, val);
+                                    try then_goal.data.vector.items.append(gc.allocator, env_val);
+
+                                    const then_stream = try executeGoal(Value.makeObj(then_goal), test_subst, gc);
+                                    if (then_stream.isObj() and then_stream.asObj().kind == .list) {
+                                        try all_results.data.list.items.appendSlice(gc.allocator, then_stream.asObj().data.list.items.items);
+                                    }
+                                } else {
+                                    // false branch
+                                    const else_goal = try gc.allocObj(.vector);
+                                    try else_goal.data.vector.items.append(gc.allocator, evalo_tag);
+                                    try else_goal.data.vector.items.append(gc.allocator, else_expr);
+                                    try else_goal.data.vector.items.append(gc.allocator, val);
+                                    try else_goal.data.vector.items.append(gc.allocator, env_val);
+
+                                    const else_stream = try executeGoal(Value.makeObj(else_goal), test_subst, gc);
+                                    if (else_stream.isObj() and else_stream.asObj().kind == .list) {
+                                        try all_results.data.list.items.appendSlice(gc.allocator, else_stream.asObj().data.list.items.items);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return Value.makeObj(all_results);
+                }
+
+                // Rule 5: [:lambda param body] → closure value [:closure param body env]
+                if (form_tag.isKeyword() and std.mem.eql(u8, gc.getString(form_tag.asKeywordId()), "lambda") and parts.len == 3) {
+                    const closure = try gc.allocObj(.vector);
+                    const closure_tag = Value.makeKeyword(try gc.internString("closure"));
+                    try closure.data.vector.items.append(gc.allocator, closure_tag);
+                    try closure.data.vector.items.append(gc.allocator, parts[1]); // param
+                    try closure.data.vector.items.append(gc.allocator, parts[2]); // body
+                    try closure.data.vector.items.append(gc.allocator, env_val);  // captured env
+
+                    const s1 = try unify(val, Value.makeObj(closure), subst.asObj(), gc);
+                    if (s1) |final| {
+                        try all_results.data.list.items.append(gc.allocator, final);
+                    }
+                    return Value.makeObj(all_results);
+                }
+
+                // Rule 6: [:app f arg] → apply f to arg
+                if (form_tag.isKeyword() and std.mem.eql(u8, gc.getString(form_tag.asKeywordId()), "app") and parts.len == 3) {
+                    const f_expr = parts[1];
+                    const arg_expr = parts[2];
+
+                    const f_val = try makeLogicVar(gc);
+                    const arg_val = try makeLogicVar(gc);
+                    const evalo_tag = Value.makeKeyword(try gc.internString("evalo"));
+
+                    // eval f
+                    const f_goal = try gc.allocObj(.vector);
+                    try f_goal.data.vector.items.append(gc.allocator, evalo_tag);
+                    try f_goal.data.vector.items.append(gc.allocator, f_expr);
+                    try f_goal.data.vector.items.append(gc.allocator, f_val);
+                    try f_goal.data.vector.items.append(gc.allocator, env_val);
+
+                    const f_stream = try executeGoal(Value.makeObj(f_goal), subst, gc);
+                    if (f_stream.isObj() and f_stream.asObj().kind == .list) {
+                        for (f_stream.asObj().data.list.items.items) |f_subst| {
+                            if (!f_subst.isObj()) continue;
+
+                            // eval arg
+                            const arg_goal = try gc.allocObj(.vector);
+                            try arg_goal.data.vector.items.append(gc.allocator, evalo_tag);
+                            try arg_goal.data.vector.items.append(gc.allocator, arg_expr);
+                            try arg_goal.data.vector.items.append(gc.allocator, arg_val);
+                            try arg_goal.data.vector.items.append(gc.allocator, env_val);
+
+                            const arg_stream = try executeGoal(Value.makeObj(arg_goal), f_subst, gc);
+                            if (arg_stream.isObj() and arg_stream.asObj().kind == .list) {
+                                for (arg_stream.asObj().data.list.items.items) |arg_subst| {
+                                    if (!arg_subst.isObj()) continue;
+
+                                    // f must be a closure: [:closure param body closure-env]
+                                    const f_walked = walk(f_val, arg_subst.asObj(), gc);
+                                    if (f_walked.isObj() and f_walked.asObj().kind == .vector) {
+                                        const closure_parts = f_walked.asObj().data.vector.items.items;
+                                        if (closure_parts.len == 4) {
+                                            const ct = walk(closure_parts[0], arg_subst.asObj(), gc);
+                                            if (ct.isKeyword() and std.mem.eql(u8, gc.getString(ct.asKeywordId()), "closure")) {
+                                                const param = closure_parts[1];
+                                                const body = closure_parts[2];
+                                                const closure_env = closure_parts[3];
+
+                                                // Extend closure env with (param arg_val)
+                                                const binding = try gc.allocObj(.list);
+                                                try binding.data.list.items.append(gc.allocator, param);
+                                                const arg_resolved = walk(arg_val, arg_subst.asObj(), gc);
+                                                try binding.data.list.items.append(gc.allocator, arg_resolved);
+
+                                                const new_env = try gc.allocObj(.list);
+                                                try new_env.data.list.items.append(gc.allocator, Value.makeObj(binding));
+                                                // Append closure env entries
+                                                const ce_walked = walk(closure_env, arg_subst.asObj(), gc);
+                                                if (ce_walked.isObj() and ce_walked.asObj().kind == .list) {
+                                                    try new_env.data.list.items.appendSlice(gc.allocator, ce_walked.asObj().data.list.items.items);
+                                                }
+
+                                                // eval body in extended env
+                                                const body_goal = try gc.allocObj(.vector);
+                                                try body_goal.data.vector.items.append(gc.allocator, evalo_tag);
+                                                try body_goal.data.vector.items.append(gc.allocator, body);
+                                                try body_goal.data.vector.items.append(gc.allocator, val);
+                                                try body_goal.data.vector.items.append(gc.allocator, Value.makeObj(new_env));
+
+                                                const body_stream = try executeGoal(Value.makeObj(body_goal), arg_subst, gc);
+                                                if (body_stream.isObj() and body_stream.asObj().kind == .list) {
+                                                    try all_results.data.list.items.appendSlice(gc.allocator, body_stream.asObj().data.list.items.items);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return Value.makeObj(all_results);
+                }
+            }
+        }
+
+        // For lvar expressions (unknown expr), generate all possible forms
+        // This enables backward search (program synthesis)
+        if (isLvar(expr_walked, gc)) {
+            // Self-eval: expr could be an integer that equals val
+            if (val.isInt() or val.isKeyword()) {
+                const s1 = try unify(expr, val, subst.asObj(), gc);
+                if (s1) |final| {
+                    try all_results.data.list.items.append(gc.allocator, final);
+                }
+            }
+
+            // Quote: expr = [:quote val]
+            {
+                const quote_expr = try gc.allocObj(.vector);
+                const quote_tag = Value.makeKeyword(try gc.internString("quote"));
+                try quote_expr.data.vector.items.append(gc.allocator, quote_tag);
+                try quote_expr.data.vector.items.append(gc.allocator, val);
+                const s1 = try unify(expr, Value.makeObj(quote_expr), subst.asObj(), gc);
+                if (s1) |final| {
+                    try all_results.data.list.items.append(gc.allocator, final);
+                }
+            }
+        }
+
+        return Value.makeObj(all_results);
+    }
+
     if (std.mem.eql(u8, tag, "membero") and items.len == 3) {
         // membero x l: x is in l
         // (== x head) OR (membero x tail)
@@ -582,6 +866,41 @@ pub fn memberoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     try goal.data.vector.items.append(gc.allocator, tag);
     try goal.data.vector.items.append(gc.allocator, args[0]);
     try goal.data.vector.items.append(gc.allocator, args[1]);
+    return Value.makeObj(goal);
+}
+
+/// (evalo expr val env-assoc) → goal: expr evaluates to val under env
+/// The Byrd crown jewel. A relational interpreter for a small Lisp:
+///   - Integers and keywords self-evaluate
+///   - [:quote x] → x
+///   - [:if test then else] → conditional
+///   - [:lambda param body] → closure (as a value)
+///   - [:app f arg] → function application
+///   - [:var name] → environment lookup
+/// Represented as [:evalo expr val env] and expanded in executeGoal.
+///
+/// Forward: (evalo '[:app [:lambda :x [:var :x]] [:quote 42]] q '()) → q=42
+/// Backward: (evalo q 42 '()) → synthesize programs producing 42
+pub fn evaloFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    const goal = try gc.allocObj(.vector);
+    const tag = Value.makeKeyword(try gc.internString("evalo"));
+    try goal.data.vector.items.append(gc.allocator, tag);
+    try goal.data.vector.items.append(gc.allocator, args[0]); // expr
+    try goal.data.vector.items.append(gc.allocator, args[1]); // val
+    try goal.data.vector.items.append(gc.allocator, args[2]); // env (assoc list)
+    return Value.makeObj(goal);
+}
+
+/// (lookupo name env val) → goal: name maps to val in env (assoc list)
+pub fn lookupoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    const goal = try gc.allocObj(.vector);
+    const tag = Value.makeKeyword(try gc.internString("lookupo"));
+    try goal.data.vector.items.append(gc.allocator, tag);
+    try goal.data.vector.items.append(gc.allocator, args[0]);
+    try goal.data.vector.items.append(gc.allocator, args[1]);
+    try goal.data.vector.items.append(gc.allocator, args[2]);
     return Value.makeObj(goal);
 }
 
