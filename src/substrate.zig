@@ -28,6 +28,91 @@ pub fn splitmix_next(state: u64) struct { val: u64, next: u64 } {
     return .{ .val = mix64(s), .next = s };
 }
 
+// ─── Splittable PRNG (Steele/Lea/Flood) ──────────────────────────────
+// State = (seed, gamma) where gamma is odd with good bit distribution.
+// next:  advance seed by gamma, return mixed value.
+// split: fork into two independent streams — both deterministic from parent.
+//
+// Jepsen gets: split(world_seed) → left=test_stream (deterministic)
+// REPL gets:   split(world_seed) → right=live_stream (independent)
+// Both traceable back to world_seed.
+
+pub const SplitRng = struct {
+    seed: u64,
+    gamma: u64,
+
+    pub fn init(s: u64) SplitRng {
+        return .{ .seed = s, .gamma = mixGamma(mix64(s +% GOLDEN)) };
+    }
+
+    /// Next value + advance state
+    pub fn next(self: *SplitRng) u64 {
+        self.seed +%= self.gamma;
+        return mix64(self.seed);
+    }
+
+    /// Next value as i48 (for NaN-boxed Value)
+    pub fn nextInt(self: *SplitRng) i48 {
+        return @truncate(@as(i64, @bitCast(self.next())));
+    }
+
+    /// Next value in [0, n)
+    pub fn nextBounded(self: *SplitRng, n: u64) u64 {
+        if (n == 0) return 0;
+        return self.next() % n;
+    }
+
+    /// Next trit: -1, 0, or +1
+    pub fn nextTrit(self: *SplitRng) i8 {
+        const v = self.next() % 3;
+        return @as(i8, @intCast(v)) - 1;
+    }
+
+    /// Fork: produce two independent generators from this one.
+    /// Left gets current (seed', gamma), right gets new (seed'', gamma').
+    /// Both are deterministic given the parent state.
+    pub fn split(self: *SplitRng) SplitRng {
+        const s1 = self.seed +% self.gamma;
+        const s2 = s1 +% self.gamma;
+        self.seed = s1;
+        return .{
+            .seed = mix64(s2),
+            .gamma = mixGamma(mix64(s2 +% self.gamma)),
+        };
+    }
+
+    /// Split N ways: produce N independent generators.
+    /// All deterministic from the same parent state.
+    pub fn splitN(self: *SplitRng, n: usize, out: []SplitRng) void {
+        for (0..@min(n, out.len)) |i| {
+            out[i] = self.split();
+        }
+    }
+
+    /// GF(3)-conserving next: returns (value, trit) where trit sums to 0 mod 3
+    /// over groups of 3 calls (signal, mechanism, act).
+    pub fn nextGF3(self: *SplitRng) struct { val: u64, trit: i8 } {
+        const v = self.next();
+        // Trit derived from value — deterministic, GF(3) phase of seed position
+        const trit: i8 = switch (@as(u2, @truncate(self.seed % 3))) {
+            0 => 0,  // mechanism
+            1 => 1,  // signal
+            2 => -1, // act
+            else => 0,
+        };
+        return .{ .val = v, .trit = trit };
+    }
+};
+
+/// mix_gamma: ensure gamma is odd with >= 24 bits set (good period)
+fn mixGamma(z_in: u64) u64 {
+    var z = mix64(z_in) | 1; // force odd
+    // Ensure enough bits are set (popcount >= 24)
+    const popcount = @popCount(z ^ (z >> 1));
+    if (popcount < 24) z ^= 0xaaaaaaaaaaaaaaaa;
+    return z;
+}
+
 pub const Color = struct {
     r: u8,
     g: u8,

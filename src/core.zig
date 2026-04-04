@@ -707,38 +707,7 @@ fn splitMix64(seed: u64) u64 {
     return z ^ (z >> 31);
 }
 
-fn splitRngFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
-    if (args.len != 1) return error.ArityError;
-    if (!args[0].isInt()) return error.TypeError;
-    const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
-    const left = splitMix64(seed);
-    const right = splitMix64(left);
-    const obj = try gc.allocObj(.vector);
-    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@bitCast(@as(i48, @truncate(@as(i64, @bitCast(left)))))));
-    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@bitCast(@as(i48, @truncate(@as(i64, @bitCast(right)))))));
-    return Value.makeObj(obj);
-}
-
-fn rngNextFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
-    if (args.len != 1) return error.ArityError;
-    if (!args[0].isInt()) return error.TypeError;
-    const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
-    const next = splitMix64(seed);
-    return Value.makeInt(@bitCast(@as(i48, @truncate(@as(i64, @bitCast(next))))));
-}
-
-fn rngSplitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
-    return splitRngFn(args, gc, undefined);
-}
-
-fn rngTritFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
-    if (args.len != 1) return error.ArityError;
-    if (!args[0].isInt()) return error.TypeError;
-    const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
-    const h = splitMix64(seed);
-    const trit: i48 = @as(i48, @intCast(h % 3)) - 1; // -1, 0, or 1
-    return Value.makeInt(trit);
-}
+// Splittable RNG stubs removed — real implementations at end of file
 
 fn incFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
@@ -1370,5 +1339,70 @@ fn jepsenCheckCasRegisterFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.lost_writes)));
     try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("value")));
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.register_value)));
+    return Value.makeObj(obj);
+}
+
+// ============================================================================
+// SPLITTABLE RNG BUILTINS
+// ============================================================================
+// RNG state is a 2-element vector [seed gamma].
+// Purely functional: each operation returns a new state + value.
+
+fn rngFromVec(args: []Value, gc: *GC) ?substrate.SplitRng {
+    if (args.len < 1) return null;
+    if (args[0].isInt()) return substrate.SplitRng.init(@intCast(@max(@as(i48, 0), args[0].asInt())));
+    if (!args[0].isObj()) return null;
+    const obj = args[0].asObj();
+    if (obj.kind != .vector) return null;
+    const items = obj.data.vector.items.items;
+    if (items.len < 2 or !items[0].isInt() or !items[1].isInt()) return null;
+    _ = gc;
+    return .{
+        .seed = @intCast(@max(@as(i48, 0), items[0].asInt())),
+        .gamma = @intCast(@max(@as(i48, 1), items[1].asInt())),
+    };
+}
+
+fn rngToVec(rng: substrate.SplitRng, gc: *GC) !Value {
+    const obj = try gc.allocObj(.vector);
+    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(rng.seed)))))));
+    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(rng.gamma)))))));
+    return Value.makeObj(obj);
+}
+
+/// (split-rng seed) → [seed gamma] — create a splittable RNG from seed
+fn splitRngFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isInt()) return error.TypeError;
+    const seed: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    return rngToVec(substrate.SplitRng.init(seed), gc);
+}
+
+/// (rng-next rng) → [value new-rng] — next value + advanced state
+fn rngNextFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    var rng = rngFromVec(args, gc) orelse return error.TypeError;
+    const val = rng.next();
+    const obj = try gc.allocObj(.vector);
+    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(val)))))));
+    try obj.data.vector.items.append(gc.allocator, try rngToVec(rng, gc));
+    return Value.makeObj(obj);
+}
+
+/// (rng-split rng) → [left-rng right-rng] — fork into two independent streams
+fn rngSplitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    var rng = rngFromVec(args, gc) orelse return error.TypeError;
+    const right = rng.split();
+    const obj = try gc.allocObj(.vector);
+    try obj.data.vector.items.append(gc.allocator, try rngToVec(rng, gc));
+    try obj.data.vector.items.append(gc.allocator, try rngToVec(right, gc));
+    return Value.makeObj(obj);
+}
+
+/// (rng-trit rng) → [trit new-rng] — next GF(3) trit + advanced state
+fn rngTritFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    var rng = rngFromVec(args, gc) orelse return error.TypeError;
+    const gf3 = rng.nextGF3();
+    const obj = try gc.allocObj(.vector);
+    try obj.data.vector.items.append(gc.allocator, Value.makeInt(@as(i48, gf3.trit)));
+    try obj.data.vector.items.append(gc.allocator, try rngToVec(rng, gc));
     return Value.makeObj(obj);
 }
