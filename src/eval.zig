@@ -881,17 +881,23 @@ fn evalThreadFirst(items: []Value, env: *Env, gc: *GC) EvalError!Value {
 
 /// (->> x (f a) (g b)) => (g a (f a x))
 fn evalThreadLast(items: []Value, env: *Env, gc: *GC) EvalError!Value {
-    std.debug.print("->> THREAD_LAST items={d} forms={d}\n", .{ items.len, if (items.len >= 2) items.len - 2 else 0 });
+    std.debug.print("->> THREAD_LAST items={d}\n", .{items.len});
     if (items.len < 2) return error.ArityError;
     var result = try eval(items[1], env, gc);
-    std.debug.print("->> initial result tag\n", .{});
+    std.debug.print("->> initial: nil={} int={} obj={}\n", .{ result.isNil(), result.isInt(), result.isObj() });
+    if (result.isObj()) std.debug.print("->> initial obj kind={s}\n", .{@tagName(result.asObj().kind)});
     for (items[2..]) |form| {
         if (form.isObj() and form.asObj().kind == .list) {
             const parts = form.asObj().data.list.items.items;
             const call = gc.allocObj(.list) catch return error.OutOfMemory;
             for (parts) |p| call.data.list.items.append(gc.allocator, p) catch return error.OutOfMemory;
             call.data.list.items.append(gc.allocator, result) catch return error.OutOfMemory;
-            result = try eval(Value.makeObj(call), env, gc);
+            std.debug.print("->> step call len={d}\n", .{call.data.list.items.items.len});
+            result = eval(Value.makeObj(call), env, gc) catch |err| {
+                std.debug.print("->> step EVAL ERROR: {s}\n", .{@errorName(err)});
+                return err;
+            };
+            std.debug.print("->> step result: nil={} obj={}\n", .{ result.isNil(), result.isObj() });
         } else {
             const call = gc.allocObj(.list) catch return error.OutOfMemory;
             call.data.list.items.append(gc.allocator, form) catch return error.OutOfMemory;

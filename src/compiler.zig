@@ -275,8 +275,7 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, name, "when")) return self.compileWhen(items, dest);
             if (std.mem.eql(u8, name, "cond")) return self.compileCond(items, dest);
             // -> and ->> handled by macro expansion below
-            if (std.mem.eql(u8, name, "case")) return self.compileCase(items, dest);
-            if (std.mem.eql(u8, name, "try")) return self.compileTry(items, dest);
+            // case/try: fall through to macro expansion or eval path
 
             // Compile-time macro expansion: check VM globals and tree-walk env for macros
             {
@@ -1671,5 +1670,41 @@ test "compiler: defn with multiple body forms" {
     const result = try compileAndRun(
         \\(do (defn add-and-double [a b] (let* [s (+ a b)] (* s 2))) (add-and-double 10 11))
     , std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+// ── threading macros ──
+
+test "compiler: thread-first ->" {
+    const result = try compileAndRunWithBuiltins("(-> 1 (+ 2) (* 3))", std.testing.allocator, true);
+    try std.testing.expectEqual(@as(i48, 9), result.asInt());
+}
+
+test "compiler: thread-last ->>" {
+    const result = try compileAndRunWithBuiltins("(->> 1 (+ 2) (* 3))", std.testing.allocator, true);
+    try std.testing.expectEqual(@as(i48, 9), result.asInt());
+}
+
+// ── case ──
+
+test "compiler: case — match first" {
+    const result = try compileAndRun("(case 1 1 42 2 99)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: case — match second" {
+    const result = try compileAndRun("(case 2 1 42 2 99)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 99), result.asInt());
+}
+
+test "compiler: case — default" {
+    const result = try compileAndRun("(case 3 1 42 2 99 0)", std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 0), result.asInt());
+}
+
+// ── try ──
+
+test "compiler: try — pass-through" {
+    const result = try compileAndRun("(try 42)", std.testing.allocator);
     try std.testing.expectEqual(@as(i48, 42), result.asInt());
 }
