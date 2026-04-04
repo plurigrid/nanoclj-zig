@@ -77,6 +77,16 @@ pub fn walkDeep(val: Value, subst: *const value.Obj, gc: *GC) !Value {
             }
             return Value.makeObj(new);
         }
+        if (obj.kind == .map) {
+            const new = try gc.allocObj(.map);
+            for (obj.data.map.keys.items, obj.data.map.vals.items) |k, mv| {
+                const wk = try walkDeep(k, subst, gc);
+                const wv = try walkDeep(mv, subst, gc);
+                try new.data.map.keys.append(gc.allocator, wk);
+                try new.data.map.vals.append(gc.allocator, wv);
+            }
+            return Value.makeObj(new);
+        }
     }
     return v;
 }
