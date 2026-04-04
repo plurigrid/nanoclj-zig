@@ -338,6 +338,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "neg?", &isNegP },
         .{ "even?", &isEvenP },
         .{ "odd?", &isOddP },
+        // Test framework
+        .{ "is", &isFn },
+        .{ "is=", &isEqualFn },
+        .{ "run-tests", &runTestsFn },
     };
 
     inline for (builtins) |b| {
@@ -2694,4 +2698,82 @@ fn isEvenP(args: []Value, _: *GC, _: *Env) anyerror!Value {
 fn isOddP(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.TypeError;
     return Value.makeBool(@rem(args[0].asInt(), 2) != 0);
+}
+
+// ============================================================================
+// TEST FRAMEWORK BUILTINS
+// ============================================================================
+
+/// (is expr) — assert expr is truthy; reports pass/fail
+fn isFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const val = args[0];
+    const stderr = compat.stderrFile();
+    if (val.isTruthy()) {
+        eval_mod.test_pass_count += 1;
+        return Value.makeBool(true);
+    } else {
+        eval_mod.test_fail_count += 1;
+        compat.fileWriteAll(stderr, "FAIL");
+        if (eval_mod.current_test_name.len > 0) {
+            compat.fileWriteAll(stderr, " in ");
+            compat.fileWriteAll(stderr, eval_mod.current_test_name);
+        }
+        if (eval_mod.current_testing_label.len > 0) {
+            compat.fileWriteAll(stderr, " \"");
+            compat.fileWriteAll(stderr, eval_mod.current_testing_label);
+            compat.fileWriteAll(stderr, "\"");
+        }
+        compat.fileWriteAll(stderr, ": expected truthy, got ");
+        var buf = compat.emptyList(u8);
+        defer buf.deinit(gc.allocator);
+        try printer.prStrInto(&buf, val, gc, true);
+        compat.fileWriteAll(stderr, buf.items);
+        compat.fileWriteAll(stderr, "\n");
+        return Value.makeBool(false);
+    }
+}
+
+/// (is= expected actual) — assert structural equality
+fn isEqualFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const stderr = compat.stderrFile();
+    if (semantics.structuralEq(args[0], args[1], gc)) {
+        eval_mod.test_pass_count += 1;
+        return Value.makeBool(true);
+    } else {
+        eval_mod.test_fail_count += 1;
+        compat.fileWriteAll(stderr, "FAIL");
+        if (eval_mod.current_test_name.len > 0) {
+            compat.fileWriteAll(stderr, " in ");
+            compat.fileWriteAll(stderr, eval_mod.current_test_name);
+        }
+        compat.fileWriteAll(stderr, ": expected ");
+        var buf = compat.emptyList(u8);
+        defer buf.deinit(gc.allocator);
+        try printer.prStrInto(&buf, args[0], gc, true);
+        compat.fileWriteAll(stderr, buf.items);
+        compat.fileWriteAll(stderr, ", got ");
+        buf.items.len = 0;
+        try printer.prStrInto(&buf, args[1], gc, true);
+        compat.fileWriteAll(stderr, buf.items);
+        compat.fileWriteAll(stderr, "\n");
+        return Value.makeBool(false);
+    }
+}
+
+/// (run-tests) — print summary and return {:pass N :fail N}
+fn runTestsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const counts = eval_mod.getTestCounts();
+    const stderr = compat.stderrFile();
+    var buf: [64]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "\nRan tests: {d} passed, {d} failed\n", .{ counts.pass, counts.fail }) catch "?";
+    compat.fileWriteAll(stderr, msg);
+    const obj = try gc.allocObj(.map);
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("pass")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(counts.pass)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("fail")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(counts.fail)));
+    eval_mod.resetTestCounts();
+    return Value.makeObj(obj);
 }

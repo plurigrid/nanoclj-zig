@@ -54,6 +54,8 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "do")) return evalDo(items, env, gc);
         if (std.mem.eql(u8, name, "fn*")) return evalFnStar(items, env, gc);
         if (std.mem.eql(u8, name, "defn")) return evalDefn(items, env, gc);
+        if (std.mem.eql(u8, name, "deftest")) return evalDeftest(items, env, gc);
+        if (std.mem.eql(u8, name, "testing")) return evalTesting(items, env, gc);
         if (std.mem.eql(u8, name, "try")) return evalTry(items, env, gc);
         if (std.mem.eql(u8, name, "throw")) {
             if (items.len != 2) return error.ArityError;
@@ -300,6 +302,59 @@ fn evalTry(items: []Value, env: *Env, gc: *GC) EvalError!Value {
         }
     }
 
+    return result;
+}
+
+// ============================================================================
+// TEST FRAMEWORK
+// ============================================================================
+
+pub var test_pass_count: usize = 0;
+pub var test_fail_count: usize = 0;
+pub var current_test_name: []const u8 = "";
+pub var current_testing_label: []const u8 = "";
+
+pub fn getTestCounts() struct { pass: usize, fail: usize } {
+    return .{ .pass = test_pass_count, .fail = test_fail_count };
+}
+
+pub fn resetTestCounts() void {
+    test_pass_count = 0;
+    test_fail_count = 0;
+}
+
+/// (deftest name body...) — define and run a test
+fn evalDeftest(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isSymbol()) return error.TypeError;
+    current_test_name = gc.getString(items[1].asSymbolId());
+    current_testing_label = "";
+    var result = Value.makeNil();
+    for (items[2..]) |form| {
+        result = eval(form, env, gc) catch |err| {
+            test_fail_count += 1;
+            const compat = @import("compat.zig");
+            const stderr = compat.stderrFile();
+            compat.fileWriteAll(stderr, "FAIL in ");
+            compat.fileWriteAll(stderr, current_test_name);
+            compat.fileWriteAll(stderr, "\n");
+            return err;
+        };
+    }
+    return result;
+}
+
+/// (testing "description" body...) — group assertions
+fn evalTesting(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    if (items[1].isString()) {
+        current_testing_label = gc.getString(items[1].asStringId());
+    }
+    var result = Value.makeNil();
+    for (items[2..]) |form| {
+        result = try eval(form, env, gc);
+    }
+    current_testing_label = "";
     return result;
 }
 
