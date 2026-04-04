@@ -54,6 +54,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "pr-str", &prStrFn }, .{ "read-string", &readStringFn },
         .{ "str", &strFn },    .{ "subs", &subsFn },
         .{ "not", &notFn },    .{ "mod", &modFn },
+        .{ "inc", &incFn },    .{ "dec", &decFn },
+        .{ "zero?", &isZeroP },
         .{ "apply", &applyFn },
         .{ "take", &takeFn },
         .{ "drop", &dropFn },
@@ -642,6 +644,24 @@ fn subsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 fn notFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(!args[0].isTruthy());
+}
+
+fn incFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    return Value.makeInt(args[0].asInt() +% 1);
+}
+
+fn decFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    return Value.makeInt(args[0].asInt() -% 1);
+}
+
+fn isZeroP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isInt()) return Value.makeBool(false);
+    return Value.makeBool(args[0].asInt() == 0);
 }
 
 fn applyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {

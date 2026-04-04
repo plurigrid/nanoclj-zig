@@ -719,7 +719,11 @@ fn compileAndRunWithBuiltins(src: []const u8, allocator: std.mem.Allocator, init
     defer gc.deinit();
     var env = Env.init(allocator, null);
     defer env.deinit();
-    if (init_builtins) try core.initCore(&env, &gc);
+    if (init_builtins) {
+        core.deinitCore(); // reset global state from any prior test
+        try core.initCore(&env, &gc);
+    }
+    defer if (init_builtins) core.deinitCore();
     const Reader = @import("reader.zig").Reader;
     var reader = Reader.init(src, &gc);
     const form = try reader.readForm();
