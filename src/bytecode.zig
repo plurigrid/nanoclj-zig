@@ -240,6 +240,14 @@ pub const VM = struct {
             const inst = self.readInst();
             const op = decode_op(inst);
 
+            // Debug trace (temporary)
+            if (self.frame_count >= 2) {
+                const compat_dbg = @import("compat.zig");
+                var trc: [128]u8 = undefined;
+                const tmsg = std.fmt.bufPrint(&trc, "TRC frame={d} ip={d} op={s}\n", .{ self.frame_count, self.currentFrame().ip - 1, @tagName(op) }) catch "?";
+                compat_dbg.fileWriteAll(compat_dbg.stderrFile(), tmsg);
+            }
+
             switch (op) {
                 // ── Control flow ──
                 .ret => {
@@ -291,7 +299,15 @@ pub const VM = struct {
                 .load_const => {
                     const a = decode_a(inst);
                     const e = decode_e(inst);
-                    self.reg(a).* = self.currentFrame().closure.def.constants[e];
+                    const consts = self.currentFrame().closure.def.constants;
+                    if (e >= consts.len) {
+                        const compat3 = @import("compat.zig");
+                        var dbg3: [256]u8 = undefined;
+                        const msg3 = std.fmt.bufPrint(&dbg3, "DBG load_const OOB! e={d} len={d} frame={d}\n", .{ e, consts.len, self.frame_count }) catch "?";
+                        compat3.fileWriteAll(compat3.stderrFile(), msg3);
+                        return error.TypeError;
+                    }
+                    self.reg(a).* = consts[e];
                 },
 
                 // ── Arithmetic ──

@@ -420,9 +420,32 @@ fn evalBoundedPeval(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain 
     return thread_peval.threadPeval(@constCast(exprs), env, gc, res);
 }
 
-fn applyBounded(func: Value, args: []Value, _: *Env, gc: *GC, res: *Resources) Domain {
+fn applyBounded(func: Value, args: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     if (!func.isObj()) return Domain.fail(.not_a_function);
     const obj = func.asObj();
+
+    // partial_fn: prepend bound args, then dispatch to underlying function
+    if (obj.kind == .partial_fn) {
+        const pf = &obj.data.partial_fn;
+        const bound = pf.bound_args.items;
+        const total = bound.len + args.len;
+        if (total > 16) return Domain.fail(.arity_error);
+        var combined: [16]Value = undefined;
+        for (bound, 0..) |b, i| combined[i] = b;
+        for (args, 0..) |a, i| combined[bound.len + i] = a;
+        if (pf.func.isObj()) {
+            return applyBounded(pf.func, combined[0..total], env, gc, res);
+        }
+        // Builtin sentinel
+        const core = @import("core.zig");
+        if (core.isBuiltinSentinel(pf.func, gc)) |bname| {
+            if (core.lookupBuiltin(bname)) |builtin| {
+                return evalBoundedBuiltin(builtin, combined[0..total], env, gc, res);
+            }
+        }
+        return Domain.fail(.not_a_function);
+    }
+
     if (obj.kind != .function and obj.kind != .macro_fn) return Domain.fail(.not_a_function);
 
     const fn_data = if (obj.kind == .function) &obj.data.function else &obj.data.macro_fn;

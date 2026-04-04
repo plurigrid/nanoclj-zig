@@ -540,19 +540,12 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
         var combined: [16]Value = undefined;
         for (bound, 0..) |b, i| combined[i] = b;
         for (args, 0..) |a, i| combined[bound.len + i] = a;
-        // Try apply first; if func is a builtin sentinel, resolve and call directly
+        // Try as function object first
         if (pf.func.isObj()) {
             return apply(pf.func, combined[0..total_len], caller_env, gc);
         }
-        // Builtin sentinel: look up and call
-        if (pf.func.isSymbol()) {
-            const core = @import("core.zig");
-            const fname = gc.getString(pf.func.asSymbolId());
-            if (core.lookupBuiltin(fname)) |builtin| {
-                return builtin(combined[0..total_len], gc, caller_env) catch return error.EvalFailed;
-            }
-        }
-        // Try as raw value (builtins stored as ints via sentinel)
+        // Builtin: resolve by name and call
+        const core = @import("core.zig");
         if (core.isBuiltinSentinel(pf.func, gc)) |bname| {
             if (core.lookupBuiltin(bname)) |builtin| {
                 return builtin(combined[0..total_len], gc, caller_env) catch return error.EvalFailed;
