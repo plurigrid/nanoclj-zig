@@ -35,6 +35,7 @@ pub const ObjKind = enum(u8) {
     lazy_seq, // thunk-based lazy sequence
     partial_fn, // partial application capture
     multimethod, // defmulti dispatch fn + method table
+    protocol, // defprotocol: method sigs + type→impl dispatch table
 };
 
 pub const Obj = struct {
@@ -65,6 +66,7 @@ pub const ObjData = union {
         bound_args: std.ArrayListUnmanaged(Value), // pre-bound arguments
     },
     multimethod: MultimethodData,
+    protocol: ProtocolData,
 };
 
 pub const MultimethodData = struct {
@@ -77,6 +79,23 @@ pub const MultimethodData = struct {
 pub const MethodEntry = struct {
     dispatch_val: Value,
     impl_fn: Value,
+};
+
+pub const ProtocolData = struct {
+    name: []const u8,
+    method_names: std.ArrayListUnmanaged([]const u8), // declared method names
+    // type_name → method_name → impl fn
+    impls: std.ArrayListUnmanaged(TypeImpl),
+};
+
+pub const TypeImpl = struct {
+    type_name: []const u8, // e.g. "vector", "map", "list", "string", "number"
+    methods: std.ArrayListUnmanaged(NamedMethod),
+};
+
+pub const NamedMethod = struct {
+    name: []const u8,
+    func: Value,
 };
 
 pub const FnData = struct {
