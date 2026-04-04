@@ -427,5 +427,335 @@
     (setq nanoclj--bci-timer nil)
     (message "BCI dashboard timer stopped.")))
 
+;; ──────────────────────────────────────────────────────────────────
+;; Inline eval overlays (CIDER-style)
+;; ──────────────────────────────────────────────────────────────────
+
+(defvar nanoclj--eval-overlays nil "Active inline eval result overlays.")
+
+(defun nanoclj--clear-eval-overlays ()
+  "Remove all inline eval overlays."
+  (mapc #'delete-overlay nanoclj--eval-overlays)
+  (setq nanoclj--eval-overlays nil))
+
+(defun nanoclj--show-eval-overlay (result pos)
+  "Show RESULT as inline overlay at POS (end of evaluated sexp)."
+  (nanoclj--clear-eval-overlays)
+  (let* ((trimmed (string-trim result))
+         ;; Strip prompt from result
+         (clean (if (string-match "^.*=> \\(.*\\)$" trimmed)
+                    (match-string 1 trimmed)
+                  trimmed))
+         (ov (make-overlay pos pos nil t t))
+         (display-str (propertize (format " => %s" clean)
+                                  'face '(:foreground "#19EBA5"
+                                          :slant italic))))
+    (overlay-put ov 'after-string display-str)
+    (overlay-put ov 'nanoclj-eval t)
+    (push ov nanoclj--eval-overlays)
+    ;; Auto-clear after 10 seconds or next command
+    (run-with-timer 10 nil #'nanoclj--clear-eval-overlays)
+    (add-hook 'pre-command-hook #'nanoclj--clear-eval-overlays nil t)))
+
+(defun nanoclj--eval-sync (code)
+  "Evaluate CODE synchronously via comint, return the result string.
+Sends code, waits for prompt, extracts last result line."
+  (let* ((proc (get-buffer-process nanoclj-repl-buffer-name))
+         (buf (and proc (process-buffer proc)))
+         marker result)
+    (unless proc (error "No nanoclj REPL running"))
+    (with-current-buffer buf
+      (setq marker (point-max)))
+    (comint-send-string proc (concat code "\n"))
+    ;; Wait for new prompt after our output (up to 3 seconds)
+    (let ((deadline (+ (float-time) 3.0))
+          found)
+      (while (and (not found) (< (float-time) deadline))
+        (accept-process-output proc 0.05)
+        (with-current-buffer buf
+          (goto-char marker)
+          ;; Look for: result\nuser=> (prompt after our result)
+          (when (re-search-forward "\\(.*\\)\n[^ \n]*=> " nil t)
+            (setq found t)
+            (setq result (match-string 1))))))
+    (or result "")))
+
+;;;###autoload
+(defun nanoclj-eval-last-sexp-overlay ()
+  "Evaluate sexp before point and show result inline."
+  (interactive)
+  (let ((end (point))
+        (code nil))
+    (save-excursion
+      (backward-sexp)
+      (setq code (buffer-substring-no-properties (point) end)))
+    (let ((result (nanoclj--eval-sync code)))
+      (nanoclj--show-eval-overlay result end))))
+
+;;;###autoload
+(defun nanoclj-eval-defun-overlay ()
+  "Evaluate top-level form and show result inline."
+  (interactive)
+  (save-excursion
+    (end-of-defun)
+    (let ((end (point))
+          (code nil))
+      (beginning-of-defun)
+      (setq code (buffer-substring-no-properties (point) end))
+      (let ((result (nanoclj--eval-sync code)))
+        (nanoclj--show-eval-overlay result end)))))
+
+;;;###autoload
+(defun nanoclj-eval-replace ()
+  "Evaluate sexp before point and replace it with the result."
+  (interactive)
+  (let ((end (point)))
+    (save-excursion
+      (backward-sexp)
+      (let* ((start (point))
+             (code (buffer-substring-no-properties start end))
+             (result (nanoclj--eval-sync code)))
+        (delete-region start end)
+        (insert result)))))
+
+;; ──────────────────────────────────────────────────────────────────
+;; Load file (CIDER C-c C-k)
+;; ──────────────────────────────────────────────────────────────────
+
+;;;###autoload
+(defun nanoclj-load-file (&optional filename)
+  "Load FILENAME (or current buffer's file) into the REPL."
+  (interactive)
+  (let ((file (or filename (buffer-file-name))))
+    (unless file (error "Buffer is not visiting a file"))
+    (when (buffer-modified-p) (save-buffer))
+    (nanoclj--repl-send (format "(load-file \"%s\")" file))
+    (message "Loaded %s" (file-name-nondirectory file))))
+
+;; ──────────────────────────────────────────────────────────────────
+;; inet-eval: partial evaluation through interaction nets
+;; ──────────────────────────────────────────────────────────────────
+
+;;;###autoload
+(defun nanoclj-inet-eval-last-sexp ()
+  "Evaluate sexp before point through inet (Levy-optimal reduction)."
+  (interactive)
+  (let ((end (point))
+        (code nil))
+    (save-excursion
+      (backward-sexp)
+      (setq code (buffer-substring-no-properties (point) end)))
+    (let ((result (nanoclj--eval-sync (format "(inet-eval '%s)" code))))
+      (nanoclj--show-eval-overlay
+       (propertize (format "[inet] %s" result)
+                   'face '(:foreground "#E698DF"))
+       end))))
+
+;;;###autoload
+(defun nanoclj-peval-last-sexp ()
+  "Partially evaluate sexp before point (first Futamura projection)."
+  (interactive)
+  (let ((end (point))
+        (code nil))
+    (save-excursion
+      (backward-sexp)
+      (setq code (buffer-substring-no-properties (point) end)))
+    (let ((result (nanoclj--eval-sync (format "(peval %s)" code))))
+      (nanoclj--show-eval-overlay result end))))
+
+;; ──────────────────────────────────────────────────────────────────
+;; Completion (TAB)
+;; ──────────────────────────────────────────────────────────────────
+
+(defvar nanoclj--completion-cache nil "Cached completion candidates.")
+(defvar nanoclj--completion-tick 0 "Tick counter for cache invalidation.")
+
+(defun nanoclj--refresh-completions ()
+  "Fetch current env symbols from REPL for completion."
+  (let ((result (ignore-errors (nanoclj--eval-sync "(env-keys)"))))
+    (when (and result (not (string-empty-p result)))
+      (setq nanoclj--completion-cache
+            (append nanoclj--builtins
+                    (split-string (replace-regexp-in-string "[\\[\\](){}\"']" "" result)
+                                  "[ ,\n]+" t))))))
+
+(defun nanoclj-completion-at-point ()
+  "Completion-at-point function for nanoclj-mode."
+  (let ((bounds (bounds-of-thing-at-point 'symbol)))
+    (when bounds
+      (list (car bounds) (cdr bounds)
+            (or nanoclj--completion-cache nanoclj--builtins)
+            :exclusive 'no))))
+
+;; ──────────────────────────────────────────────────────────────────
+;; Eldoc: show arglists in echo area
+;; ──────────────────────────────────────────────────────────────────
+
+(defvar nanoclj--eldoc-arglists
+  '(("color-at" . "(color-at seed index)")
+    ("colors" . "(colors n)")
+    ("mix64" . "(mix64 x)")
+    ("gf3-add" . "(gf3-add a b)")
+    ("gf3-mul" . "(gf3-mul a b)")
+    ("gf3-conserved?" . "(gf3-conserved? a b c)")
+    ("trit-balance" . "(trit-balance coll)")
+    ("bci-read" . "(bci-read)")
+    ("bci-channels" . "(bci-channels)")
+    ("bci-trit" . "(bci-trit channel)")
+    ("bci-entropy" . "(bci-entropy)")
+    ("substrate" . "(substrate)")
+    ("traverse" . "(traverse target)")
+    ("nrepl-start" . "(nrepl-start port)")
+    ("xor-fingerprint" . "(xor-fingerprint & vals)")
+    ("hue-to-trit" . "(hue-to-trit hue)")
+    ("color-seed" . "(color-seed hex)")
+    ("http-fetch" . "(http-fetch url [method] [body])")
+    ("map" . "(map f coll)")
+    ("filter" . "(filter pred coll)")
+    ("reduce" . "(reduce f init coll)")
+    ("def" . "(def name value)")
+    ("defn" . "(defn name [args] body)")
+    ("fn" . "(fn [args] body)")
+    ("let" . "(let [bindings] body)")
+    ("if" . "(if test then else)")
+    ("do" . "(do & exprs)")
+    ("quote" . "(quote form)")
+    ("nth" . "(nth coll index)")
+    ("count" . "(count coll)")
+    ("conj" . "(conj coll & items)")
+    ("assoc" . "(assoc map key val)")
+    ("get" . "(get map key)")
+    ("first" . "(first coll)")
+    ("rest" . "(rest coll)")
+    ("cons" . "(cons x coll)")
+    ("str" . "(str & args)")
+    ("println" . "(println & args)")
+    ("subs" . "(subs s start [end])")
+    ("peval" . "(peval expr) -- partial eval via first Futamura projection")
+    ("inet-eval" . "(inet-eval 'expr) -- Levy-optimal reduction via interaction nets")
+    ("inet-cell" . "(inet-cell net-id kind arity)")
+    ("inet-wire" . "(inet-wire net-id cell-a port-a cell-b port-b)")
+    ("inet-reduce" . "(inet-reduce net-id)")
+    ("inet-readback" . "(inet-readback net-id cell-idx)")
+    ("inet-new" . "(inet-new) -- allocate fresh interaction net")
+    ("inet-compile" . "(inet-compile net-id expr) -- compile expr to inet"))
+  "Alist mapping function names to arglist strings.")
+
+(defun nanoclj-eldoc-function ()
+  "Return eldoc string for the function at or around point."
+  (save-excursion
+    (let ((ppss (syntax-ppss)))
+      ;; If inside a list, find the function name
+      (when (> (nth 0 ppss) 0)
+        (goto-char (nth 1 ppss))
+        (forward-char 1)
+        (let ((sym (thing-at-point 'symbol t)))
+          (when sym
+            (let ((entry (assoc sym nanoclj--eldoc-arglists)))
+              (when entry
+                (propertize (cdr entry)
+                            'face 'font-lock-doc-face)))))))))
+
+;; ──────────────────────────────────────────────────────────────────
+;; GF(3) trit modeline indicator
+;; ──────────────────────────────────────────────────────────────────
+
+(defvar-local nanoclj--modeline-trit nil "Current GF(3) trit for modeline.")
+
+(defun nanoclj--trit-indicator ()
+  "Return modeline string showing GF(3) trit state."
+  (if nanoclj--modeline-trit
+      (let* ((trit nanoclj--modeline-trit)
+             (face (cond ((= trit 1)  '(:foreground "#FF0000" :weight bold))  ; +1 red
+                         ((= trit -1) '(:foreground "#0000FF" :weight bold))  ; -1 blue
+                         (t           '(:foreground "#00CC00" :weight bold)))) ; 0 green
+             (sym (cond ((= trit 1)  "+")
+                        ((= trit -1) "-")
+                        (t           "0"))))
+        (propertize (format " GF3[%s]" sym) 'face face))
+    ""))
+
+(defun nanoclj--update-trit-from-output (output)
+  "Extract trit from REPL OUTPUT and update modeline."
+  (when (string-match "trit_sum=\\([0-9-]+\\)" output)
+    (let ((sum (string-to-number (match-string 1 output))))
+      (setq nanoclj--modeline-trit (mod sum 3))
+      (when (= nanoclj--modeline-trit 2) (setq nanoclj--modeline-trit -1))
+      (force-mode-line-update t))))
+
+;; ──────────────────────────────────────────────────────────────────
+;; Macroexpand
+;; ──────────────────────────────────────────────────────────────────
+
+;;;###autoload
+(defun nanoclj-macroexpand ()
+  "Macroexpand sexp before point and show in overlay."
+  (interactive)
+  (let ((end (point))
+        (code nil))
+    (save-excursion
+      (backward-sexp)
+      (setq code (buffer-substring-no-properties (point) end)))
+    (let ((result (nanoclj--eval-sync (format "(macroexpand '%s)" code))))
+      (nanoclj--show-eval-overlay result end))))
+
+;; ──────────────────────────────────────────────────────────────────
+;; Pretty-print last result
+;; ──────────────────────────────────────────────────────────────────
+
+;;;###autoload
+(defun nanoclj-pprint-last ()
+  "Pretty-print last eval result in a separate buffer."
+  (interactive)
+  (let ((result (nanoclj--eval-sync "*1")))
+    (with-current-buffer (get-buffer-create "*nanoclj-pprint*")
+      (erase-buffer)
+      (insert result)
+      (nanoclj-mode)
+      (goto-char (point-min)))
+    (pop-to-buffer "*nanoclj-pprint*")))
+
+;; ──────────────────────────────────────────────────────────────────
+;; Enhanced keymap (add new bindings)
+;; ──────────────────────────────────────────────────────────────────
+
+(define-key nanoclj-mode-map (kbd "C-x C-e") #'nanoclj-eval-last-sexp-overlay)
+(define-key nanoclj-mode-map (kbd "C-M-x")   #'nanoclj-eval-defun-overlay)
+(define-key nanoclj-mode-map (kbd "C-c C-k") #'nanoclj-load-file)
+(define-key nanoclj-mode-map (kbd "C-c C-e") #'nanoclj-eval-replace)
+(define-key nanoclj-mode-map (kbd "C-c C-i") #'nanoclj-inet-eval-last-sexp)
+(define-key nanoclj-mode-map (kbd "C-c C-p") #'nanoclj-peval-last-sexp)
+(define-key nanoclj-mode-map (kbd "C-c C-m") #'nanoclj-macroexpand)
+(define-key nanoclj-mode-map (kbd "C-c C-f") #'nanoclj-pprint-last)
+
+;; ──────────────────────────────────────────────────────────────────
+;; Mode setup: wire eldoc, completion, trit modeline
+;; ──────────────────────────────────────────────────────────────────
+
+(defun nanoclj--mode-setup ()
+  "Additional setup run after nanoclj-mode is activated."
+  ;; Eldoc
+  (setq-local eldoc-documentation-function #'nanoclj-eldoc-function)
+  (eldoc-mode 1)
+  ;; Completion
+  (add-hook 'completion-at-point-functions #'nanoclj-completion-at-point nil t)
+  ;; GF(3) trit in modeline
+  (unless (memq 'nanoclj--trit-indicator mode-line-misc-info)
+    (push '(:eval (nanoclj--trit-indicator)) mode-line-misc-info)))
+
+(add-hook 'nanoclj-mode-hook #'nanoclj--mode-setup)
+
+;; Wire trit tracking into REPL buffer
+(defun nanoclj--repl-setup ()
+  "Set up the nanoclj REPL buffer with trit tracking."
+  (add-hook 'comint-output-filter-functions
+            #'nanoclj--update-trit-from-output nil t))
+
+(with-eval-after-load 'comint
+  (add-hook 'comint-mode-hook
+            (lambda ()
+              (when (string= (buffer-name) nanoclj-repl-buffer-name)
+                (nanoclj--repl-setup)))))
+
 (provide 'nanoclj-mode)
 ;;; nanoclj-mode.el ends here
