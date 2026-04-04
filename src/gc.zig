@@ -87,6 +87,7 @@ pub const GC = struct {
                 .builtin_ref => .{ .builtin_ref = .{ .func = undefined, .name = "" } },
                 .lazy_seq => .{ .lazy_seq = .{ .thunk = Value.makeNil() } },
                 .partial_fn => .{ .partial_fn = .{ .func = Value.makeNil(), .bound_args = compat.emptyList(Value) } },
+                .multimethod => .{ .multimethod = .{ .name = "", .dispatch_fn = Value.makeNil(), .methods = compat.emptyList(value.MethodEntry), .default_method = null } },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -176,6 +177,14 @@ pub const GC = struct {
                 .partial_fn => {
                     self.enqueueVal(cur.data.partial_fn.func, &worklist);
                     for (cur.data.partial_fn.bound_args.items) |v| self.enqueueVal(v, &worklist);
+                },
+                .multimethod => {
+                    self.enqueueVal(cur.data.multimethod.dispatch_fn, &worklist);
+                    for (cur.data.multimethod.methods.items) |m| {
+                        self.enqueueVal(m.dispatch_val, &worklist);
+                        self.enqueueVal(m.impl_fn, &worklist);
+                    }
+                    if (cur.data.multimethod.default_method) |d| self.enqueueVal(d, &worklist);
                 },
             }
         }

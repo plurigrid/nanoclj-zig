@@ -356,6 +356,9 @@ pub fn main() !void {
     // ── Bytecode prelude: core higher-order functions ────────────
     loadBcPrelude(&gc, allocator, &vm);
 
+    // ── Macro prelude: standard Clojure macros ────────────────────
+    loadMacroPrelude(&env, &gc);
+
     // ── REPL: world=> ─────────────────────────────────────────────
     while (true) {
         // Prompt with world name

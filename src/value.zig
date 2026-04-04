@@ -34,6 +34,7 @@ pub const ObjKind = enum(u8) {
     builtin_ref, // reference to a core builtin function
     lazy_seq, // thunk-based lazy sequence
     partial_fn, // partial application capture
+    multimethod, // defmulti dispatch fn + method table
 };
 
 pub const Obj = struct {
@@ -63,6 +64,19 @@ pub const ObjData = union {
         func: Value, // the original function
         bound_args: std.ArrayListUnmanaged(Value), // pre-bound arguments
     },
+    multimethod: MultimethodData,
+};
+
+pub const MultimethodData = struct {
+    name: []const u8,
+    dispatch_fn: Value, // fn to call on args to get dispatch value
+    methods: std.ArrayListUnmanaged(MethodEntry), // dispatch-val → impl fn
+    default_method: ?Value = null, // :default handler
+};
+
+pub const MethodEntry = struct {
+    dispatch_val: Value,
+    impl_fn: Value,
 };
 
 pub const FnData = struct {
