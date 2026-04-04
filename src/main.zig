@@ -100,8 +100,44 @@ fn bcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) [
     return printer.prStr(result, gc, true) catch "Error: print failed";
 }
 
-/// Benchmark: run bytecode VM and tree-walk on same expression, return timing
-fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator) []const u8 {
+/// Time bytecode execution only (uses persistent VM with globals)
+fn timeBcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) []const u8 {
+    var reader = Reader.init(input, gc);
+    const form = reader.readForm() catch return "Error: read failed";
+
+    var comp = Compiler.init(allocator, gc, null);
+    defer comp.deinit();
+    const dest = comp.allocReg() catch return "Error: compile failed";
+    comp.compile(form, dest) catch return "Error: compile failed";
+    comp.emit(bc.encode_d(.ret, dest)) catch return "Error: emit failed";
+    const func_def = comp.finalize() catch return "Error: finalize failed";
+
+    const closure_obj = gc.allocObj(.bc_closure) catch return "Error: alloc failed";
+    closure_obj.data.bc_closure = .{ .def = func_def, .upvalues = &.{} };
+
+    vm.frame_count = 0;
+    vm.fuel = 10_000_000_000;
+    @memset(&vm.stack, Value.makeNil());
+
+    const start = nanoNow();
+    const result = vm.execute(&closure_obj.data.bc_closure) catch {
+        return "Error: VM execution failed";
+    };
+    const end = nanoNow();
+    const ns: u64 = @intCast(end - start);
+
+    const val_str = printer.prStr(result, gc, true) catch "?";
+
+    var buf: [256]u8 = undefined;
+    const out = std.fmt.bufPrint(&buf, "bytecode: {s} in {d}ms ({d}us)", .{
+        val_str, ns / 1_000_000, ns / 1_000,
+    }) catch return "Error: format failed";
+
+    return allocator.dupe(u8, out) catch "Error: alloc failed";
+}
+
+/// Benchmark: tree-walk vs bytecode side by side (uses persistent VM)
+fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM) []const u8 {
     // Tree-walk timing
     var reader1 = Reader.init(input, gc);
     const form1 = reader1.readForm() catch return "Error: read failed";
@@ -122,16 +158,17 @@ fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator)
 
     var comp = Compiler.init(allocator, gc, null);
     defer comp.deinit();
-    const dest = comp.allocReg() catch return "Error: compile failed";
-    comp.compile(form2, dest) catch return "Error: compile failed";
-    comp.emit(bc.encode_d(.ret, dest)) catch return "Error: emit failed";
+    const dest_reg = comp.allocReg() catch return "Error: compile failed";
+    comp.compile(form2, dest_reg) catch return "Error: compile failed";
+    comp.emit(bc.encode_d(.ret, dest_reg)) catch return "Error: emit failed";
     const func_def = comp.finalize() catch return "Error: finalize failed";
 
     const closure_obj = gc.allocObj(.bc_closure) catch return "Error: alloc failed";
     closure_obj.data.bc_closure = .{ .def = func_def, .upvalues = &.{} };
 
-    var vm = bc.VM.init(gc, 1_000_000_000);
-    defer vm.deinit();
+    vm.frame_count = 0;
+    vm.fuel = 10_000_000_000;
+    @memset(&vm.stack, Value.makeNil());
 
     const bc_start = nanoNow();
     const bc_result = vm.execute(&closure_obj.data.bc_closure) catch {
@@ -142,13 +179,9 @@ fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator)
 
     const bc_str = printer.prStr(bc_result, gc, true) catch "?";
 
-    // Format result
     var buf: [512]u8 = undefined;
     const out = std.fmt.bufPrint(&buf, "tree-walk: {s} in {d}ms | bytecode: {s} in {d}ms | speedup: {d:.1}x", .{
-        tw_str,
-        tw_ns / 1_000_000,
-        bc_str,
-        bc_ns / 1_000_000,
+        tw_str, tw_ns / 1_000_000, bc_str, bc_ns / 1_000_000,
         @as(f64, @floatFromInt(tw_ns)) / @as(f64, @floatFromInt(@max(bc_ns, 1))),
     }) catch return "Error: format failed";
 
@@ -273,11 +306,19 @@ pub fn main() !void {
             compat.fileWriteAll(stdout, "\n");
             continue;
         }
-        // Benchmark: (bench <expr>)
+        // Benchmark: (bench <expr>) — tree-walk vs bytecode
         if (std.mem.startsWith(u8, line, "(bench ") and line[line.len - 1] == ')') {
             const inner = line[7 .. line.len - 1];
-            const bench_result = benchRep(inner, &env, &gc, allocator);
+            const bench_result = benchRep(inner, &env, &gc, allocator, &vm);
             compat.fileWriteAll(stdout, bench_result);
+            compat.fileWriteAll(stdout, "\n");
+            continue;
+        }
+        // Time bytecode only: (time-bc <expr>)
+        if (std.mem.startsWith(u8, line, "(time-bc ") and line[line.len - 1] == ')') {
+            const inner = line[9 .. line.len - 1];
+            const time_result = timeBcRep(inner, &gc, allocator, &vm);
+            compat.fileWriteAll(stdout, time_result);
             compat.fileWriteAll(stdout, "\n");
             continue;
         }
