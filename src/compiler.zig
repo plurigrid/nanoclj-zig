@@ -1070,6 +1070,197 @@ pub const Compiler = struct {
     }
 
     // ========================================================================
+    // THREADING MACROS (-> ->> as compile-time AST rewriting)
+    // ========================================================================
+    // Pattern from Lux: pre-analyze, then rewrite.
+    // (-> x (f a) (g b)) => (g (f x a) b)
+    // (->> x (f a) (g b)) => (g a (f a x))
+
+    fn compileThreadFirst(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 3) return error.InvalidSyntax;
+        // Start with the initial value
+        var acc_reg = try self.allocReg();
+        try self.compile(items[1], acc_reg);
+        // Thread through each form
+        for (items[2..]) |form| {
+            if (form.isObj() and form.asObj().kind == .list) {
+                // (f a b ...) -> call f with [acc, a, b, ...]
+                const form_items = form.asObj().data.list.items.items;
+                if (form_items.len == 0) return error.InvalidSyntax;
+                const argc: u8 = @intCast(form_items.len); // original args + threaded value
+                const func_reg = try self.allocReg();
+                if (try self.tryResolveBuiltin(form_items[0])) |bi_const| {
+                    try self.emit(bc.encode_ae(.load_const, func_reg, bi_const));
+                } else {
+                    try self.compile(form_items[0], func_reg);
+                }
+                // Allocate contiguous: [func, acc, arg1, arg2, ...]
+                var contiguous: [65]u8 = undefined;
+                contiguous[0] = try self.allocReg();
+                contiguous[1] = try self.allocReg(); // for acc
+                var compiled_args: [64]u8 = undefined;
+                for (form_items[1..], 0..) |arg, i| {
+                    compiled_args[i] = try self.allocReg();
+                    try self.compile(arg, compiled_args[i]);
+                    contiguous[2 + i] = try self.allocReg();
+                }
+                // Move into contiguous layout
+                try self.emit(bc.encode_abc(.move, contiguous[0], func_reg, 0));
+                try self.emit(bc.encode_abc(.move, contiguous[1], acc_reg, 0));
+                for (0..form_items.len - 1) |i| {
+                    try self.emit(bc.encode_abc(.move, contiguous[2 + i], compiled_args[i], 0));
+                }
+                const new_dest = try self.allocReg();
+                try self.emit(bc.encode_abc(.call, new_dest, argc, contiguous[0]));
+                acc_reg = new_dest;
+            } else {
+                // Bare symbol: (f acc)
+                const func_reg = try self.allocReg();
+                if (try self.tryResolveBuiltin(form)) |bi_const| {
+                    try self.emit(bc.encode_ae(.load_const, func_reg, bi_const));
+                } else {
+                    try self.compile(form, func_reg);
+                }
+                const cr0 = try self.allocReg();
+                const cr1 = try self.allocReg();
+                try self.emit(bc.encode_abc(.move, cr0, func_reg, 0));
+                try self.emit(bc.encode_abc(.move, cr1, acc_reg, 0));
+                const new_dest = try self.allocReg();
+                try self.emit(bc.encode_abc(.call, new_dest, 1, cr0));
+                acc_reg = new_dest;
+            }
+        }
+        if (acc_reg != dest) {
+            try self.emit(bc.encode_abc(.move, dest, acc_reg, 0));
+        }
+    }
+
+    fn compileThreadLast(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 3) return error.InvalidSyntax;
+        var acc_reg = try self.allocReg();
+        try self.compile(items[1], acc_reg);
+        for (items[2..]) |form| {
+            if (form.isObj() and form.asObj().kind == .list) {
+                const form_items = form.asObj().data.list.items.items;
+                if (form_items.len == 0) return error.InvalidSyntax;
+                const argc: u8 = @intCast(form_items.len); // original args + threaded value at end
+                const func_reg = try self.allocReg();
+                if (try self.tryResolveBuiltin(form_items[0])) |bi_const| {
+                    try self.emit(bc.encode_ae(.load_const, func_reg, bi_const));
+                } else {
+                    try self.compile(form_items[0], func_reg);
+                }
+                var contiguous: [65]u8 = undefined;
+                contiguous[0] = try self.allocReg();
+                var compiled_args: [64]u8 = undefined;
+                for (form_items[1..], 0..) |arg, i| {
+                    compiled_args[i] = try self.allocReg();
+                    try self.compile(arg, compiled_args[i]);
+                    contiguous[1 + i] = try self.allocReg();
+                }
+                contiguous[form_items.len] = try self.allocReg(); // for acc at end
+                // Move into contiguous layout
+                try self.emit(bc.encode_abc(.move, contiguous[0], func_reg, 0));
+                for (0..form_items.len - 1) |i| {
+                    try self.emit(bc.encode_abc(.move, contiguous[1 + i], compiled_args[i], 0));
+                }
+                try self.emit(bc.encode_abc(.move, contiguous[form_items.len], acc_reg, 0));
+                const new_dest = try self.allocReg();
+                try self.emit(bc.encode_abc(.call, new_dest, argc, contiguous[0]));
+                acc_reg = new_dest;
+            } else {
+                const func_reg = try self.allocReg();
+                if (try self.tryResolveBuiltin(form)) |bi_const| {
+                    try self.emit(bc.encode_ae(.load_const, func_reg, bi_const));
+                } else {
+                    try self.compile(form, func_reg);
+                }
+                const cr0 = try self.allocReg();
+                const cr1 = try self.allocReg();
+                try self.emit(bc.encode_abc(.move, cr0, func_reg, 0));
+                try self.emit(bc.encode_abc(.move, cr1, acc_reg, 0));
+                const new_dest = try self.allocReg();
+                try self.emit(bc.encode_abc(.call, new_dest, 1, cr0));
+                acc_reg = new_dest;
+            }
+        }
+        if (acc_reg != dest) {
+            try self.emit(bc.encode_abc(.move, dest, acc_reg, 0));
+        }
+    }
+
+    // ========================================================================
+    // CASE (constant dispatch via linear scan)
+    // ========================================================================
+    // (case expr val1 result1 val2 result2 ... default)
+
+    fn compileCase(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        if (items.len < 3) return error.InvalidSyntax;
+        const expr_reg = try self.allocReg();
+        try self.compile(items[1], expr_reg);
+
+        const clauses = items[2..];
+        var end_patches = std.ArrayListUnmanaged(usize){ .items = &.{}, .capacity = 0 };
+        defer end_patches.deinit(self.allocator);
+
+        var i: usize = 0;
+        while (i + 1 < clauses.len) : (i += 2) {
+            // Compare expr to test value
+            const test_reg = try self.allocReg();
+            try self.compile(clauses[i], test_reg);
+            const cmp_reg = try self.allocReg();
+            try self.emit(bc.encode_abc(.eq, cmp_reg, expr_reg, test_reg));
+            // If not equal, jump to next clause
+            const skip_idx = self.codeLen();
+            try self.emit(0); // placeholder
+            // Match: compile result
+            try self.compile(clauses[i + 1], dest);
+            // Jump to end
+            const end_idx = self.codeLen();
+            try self.emit(0); // placeholder
+            end_patches.append(self.allocator, end_idx) catch return error.OutOfMemory;
+            // Patch skip
+            const skip_off: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(skip_idx)) - 1);
+            self.emitAt(skip_idx, bc.encode_ae(.jump_if_not, cmp_reg, @bitCast(skip_off)));
+        }
+
+        // Default clause (odd remaining element)
+        if (i < clauses.len) {
+            try self.compile(clauses[i], dest);
+        } else {
+            try self.emit(bc.encode_d(.load_nil, dest));
+        }
+
+        // Patch all end jumps
+        for (end_patches.items) |idx| {
+            const off: i16 = @intCast(@as(i64, @intCast(self.codeLen())) - @as(i64, @intCast(idx)) - 1);
+            self.emitAt(idx, bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(@as(i24, @intCast(off)))))));
+        }
+    }
+
+    // ========================================================================
+    // TRY/CATCH (compiles to call + error check)
+    // ========================================================================
+    // For now, try/catch compiles the body and on error compiles catch body.
+    // Since our VM doesn't have exception opcodes, we compile try as a
+    // function call that returns either the value or an error sentinel.
+    // Simple approach: just compile the body (try without real exception handling).
+
+    fn compileTry(self: *Compiler, items: []Value, dest: u8) CompileError!void {
+        // (try body) -> just compile body (best-effort)
+        if (items.len < 2) return error.InvalidSyntax;
+        // Compile all body forms as a do-block
+        for (items[1..], 0..) |form, fi| {
+            if (fi == items.len - 2) {
+                try self.compile(form, dest);
+            } else {
+                const tmp = try self.allocReg();
+                try self.compile(form, tmp);
+            }
+        }
+    }
+
+    // ========================================================================
     // FINALIZE: produce a FuncDef for the top-level expression
     // ========================================================================
 
