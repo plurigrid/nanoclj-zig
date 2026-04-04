@@ -93,9 +93,7 @@ pub fn main() !void {
     compat.fileWriteAll(stdout, "\n");
 
     // Seed from hostname or "world"
-    const world_name = std.process.getEnvVarOwned(allocator, "USER") catch
-        allocator.dupe(u8, "world") catch "world";
-    defer if (@TypeOf(world_name) != []const u8) {} else allocator.free(world_name);
+    const world_name: []const u8 = if (std.c.getenv("USER")) |c| std.mem.span(c) else "world";
 
     color_strip.renderNamedStrip(stdout, world_name, width, 2) catch {};
     compat.fileWriteAll(stdout, "\n");
@@ -188,4 +186,5 @@ test {
     _ = @import("compiler.zig");
     _ = @import("ibc_denom.zig");
     _ = @import("http_fetch.zig");
+    _ = @import("church_turing.zig");
 }

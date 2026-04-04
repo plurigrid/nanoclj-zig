@@ -6,14 +6,14 @@ const compat = @import("compat.zig");
 const color_strip = @import("color_strip.zig");
 const substrate = @import("substrate.zig");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     const stdout = compat.stdoutFile();
-    var args = std.process.args();
-    _ = args.skip();
+    var args_iter = std.process.Args.Iterator.init(init.args);
+    _ = args_iter.next(); // skip argv[0]
 
-    const name = args.next() orelse "bci.horse";
-    const width: u32 = if (args.next()) |w| std.fmt.parseInt(u32, w, 10) catch 80 else 80;
-    const rows: u32 = if (args.next()) |r| std.fmt.parseInt(u32, r, 10) catch 8 else 8;
+    const name = args_iter.next() orelse "bci.horse";
+    const width: u32 = if (args_iter.next()) |w| std.fmt.parseInt(u32, w, 10) catch 80 else 80;
+    const rows: u32 = if (args_iter.next()) |r| std.fmt.parseInt(u32, r, 10) catch 8 else 8;
 
     try color_strip.renderTritWheel(stdout, width);
     compat.fileWriteAll(stdout, "\n");

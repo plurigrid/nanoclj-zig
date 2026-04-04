@@ -184,69 +184,13 @@ fn extractMeta(allocator: std.mem.Allocator, content: []const u8) !struct {
 }
 
 /// Recursively scan a directory for .tree files
+/// TODO: Zig 0.16 removed std.fs.openDirAbsolute; port to std.Io.Dir or C opendir/readdir
 fn scanDir(allocator: std.mem.Allocator, dir_path: []const u8, entries: *std.StringHashMap(TreeEntry)) !void {
-    var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch return;
-    defer dir.close();
-
-    // Collect all entries first to avoid iterator invalidation
-    var subdirs = compat.emptyList([]const u8);
-    defer {
-        for (subdirs.items) |s| allocator.free(s);
-        subdirs.deinit(allocator);
-    }
-    var files = compat.emptyList(struct { id: []const u8, path: []const u8 });
-    defer {
-        // Only free entries not consumed
-        files.deinit(allocator);
-    }
-
-    var iter = dir.iterate();
-    while (try iter.next()) |entry| {
-        if (entry.kind == .directory) {
-            var path_buf: [4096]u8 = undefined;
-            const child_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
-            try subdirs.append(allocator, try allocator.dupe(u8, child_path));
-        } else if (entry.kind == .file) {
-            const raw_id = treeIdFromPath(entry.name) orelse continue;
-            if (entries.contains(raw_id)) continue; // skip duplicates
-            var path_buf: [4096]u8 = undefined;
-            const child_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
-            const id = try allocator.dupe(u8, raw_id);
-            const file = dir.openFile(entry.name, .{}) catch {
-                allocator.free(id);
-                continue;
-            };
-            defer file.close();
-            const content = file.readToEndAlloc(allocator, 1024 * 1024) catch {
-                allocator.free(id);
-                continue;
-            };
-            const transcludes = try extractTranscludes(allocator, content);
-            const imports = try extractImports(allocator, content);
-            const meta = try extractMeta(allocator, content);
-            const title = extractTitle(content);
-            const taxon = extractTaxon(content);
-            const author = extractAuthor(content);
-
-            try entries.put(id, .{
-                .id = id,
-                .path = try allocator.dupe(u8, child_path),
-                .content = content,
-                .title = title,
-                .taxon = taxon,
-                .author = author,
-                .transcludes = transcludes,
-                .imports = imports,
-                .meta_keys = meta.keys,
-                .meta_vals = meta.vals,
-            });
-        }
-    }
-
-    // Recurse into subdirectories after iterator is done
-    for (subdirs.items) |subdir| {
-        try scanDir(allocator, subdir, entries);
-    }
+    _ = allocator;
+    _ = dir_path;
+    _ = entries;
+    // Stubbed: directory iteration API changed in Zig 0.16
+    return;
 }
 
 pub fn deinitForest() void {

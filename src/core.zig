@@ -16,6 +16,7 @@ const inet_compile = @import("inet_compile.zig");
 const http_fetch = @import("http_fetch.zig");
 const peval_mod = @import("peval.zig");
 const ibc_denom = @import("ibc_denom.zig");
+const church_turing = @import("church_turing.zig");
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
@@ -124,6 +125,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "noble-usdc-on", &ibc_denom.nobleUsdcOnFn },
         .{ "noble-precompute", &ibc_denom.noblePrecomputeFn },
         .{ "noble-channels", &ibc_denom.nobleChannelsFn },
+        // Church-Turing ill-posedness witness
+        .{ "ill-posed", &church_turing.illPosedFn },
     };
 
     inline for (builtins) |b| {

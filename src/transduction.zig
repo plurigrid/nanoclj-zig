@@ -23,9 +23,11 @@ const Domain = transclusion.Domain;
 var sf_quote: u48 = 0;
 var sf_def: u48 = 0;
 var sf_let: u48 = 0;
+var sf_let_bare: u48 = 0;
 var sf_if: u48 = 0;
 var sf_do: u48 = 0;
 var sf_fn: u48 = 0;
+var sf_fn_bare: u48 = 0;
 var sf_peval: u48 = 0;
 var sf_initialized: bool = false;
 
@@ -34,9 +36,11 @@ fn ensureSpecialFormIds(gc: *GC) void {
     sf_quote = gc.internString("quote") catch return;
     sf_def = gc.internString("def") catch return;
     sf_let = gc.internString("let*") catch return;
+    sf_let_bare = gc.internString("let") catch return;
     sf_if = gc.internString("if") catch return;
     sf_do = gc.internString("do") catch return;
     sf_fn = gc.internString("fn*") catch return;
+    sf_fn_bare = gc.internString("fn") catch return;
     sf_peval = gc.internString("peval") catch return;
     sf_initialized = true;
 }
@@ -85,20 +89,20 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         if (sf_initialized) {
             if (sym_id == sf_quote) return if (items.len == 2) Domain.pure(items[1]) else Domain.fail(.arity_error);
             if (sym_id == sf_def) return evalBoundedDef(items, env, gc, res);
-            if (sym_id == sf_let) return evalBoundedLet(items, env, gc, res);
+            if (sym_id == sf_let or sym_id == sf_let_bare) return evalBoundedLet(items, env, gc, res);
             if (sym_id == sf_if) return evalBoundedIf(items, env, gc, res);
             if (sym_id == sf_do) return evalBoundedDo(items, env, gc, res);
-            if (sym_id == sf_fn) return evalBoundedFnStar(items, env, gc, res);
+            if (sym_id == sf_fn or sym_id == sf_fn_bare) return evalBoundedFnStar(items, env, gc, res);
             if (sym_id == sf_peval) return evalBoundedPeval(items, env, gc, res);
         } else {
             // Fallback to string compare if interning failed
             const name = gc.getString(sym_id);
             if (std.mem.eql(u8, name, "quote")) return if (items.len == 2) Domain.pure(items[1]) else Domain.fail(.arity_error);
             if (std.mem.eql(u8, name, "def")) return evalBoundedDef(items, env, gc, res);
-            if (std.mem.eql(u8, name, "let*")) return evalBoundedLet(items, env, gc, res);
+            if (std.mem.eql(u8, name, "let*") or std.mem.eql(u8, name, "let")) return evalBoundedLet(items, env, gc, res);
             if (std.mem.eql(u8, name, "if")) return evalBoundedIf(items, env, gc, res);
             if (std.mem.eql(u8, name, "do")) return evalBoundedDo(items, env, gc, res);
-            if (std.mem.eql(u8, name, "fn*")) return evalBoundedFnStar(items, env, gc, res);
+            if (std.mem.eql(u8, name, "fn*") or std.mem.eql(u8, name, "fn")) return evalBoundedFnStar(items, env, gc, res);
             if (std.mem.eql(u8, name, "peval")) return evalBoundedPeval(items, env, gc, res);
         }
 

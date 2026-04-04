@@ -15,6 +15,30 @@ const printer = @import("printer.zig");
 const eval_mod = @import("eval.zig");
 const core = @import("core.zig");
 
+/// Zig 0.16 compat: raw stdin line reader (no deprecatedReader)
+fn readLineFromStdin(buf: []u8) ?[]u8 {
+    var pos: usize = 0;
+    while (pos < buf.len) {
+        var byte: [1]u8 = undefined;
+        const n = compat.stdinRead(&byte);
+        if (n == 0) {
+            if (pos == 0) return null;
+            return buf[0..pos];
+        }
+        if (byte[0] == '\n') return buf[0..pos];
+        buf[pos] = byte[0];
+        pos += 1;
+    }
+    return buf[0..pos]; // truncated
+}
+
+/// Zig 0.16 compat: stdout writer with writeAll interface for writeJsonLine
+const CompatWriter = struct {
+    pub fn writeAll(_: *CompatWriter, bytes: []const u8) !void {
+        compat.stdoutWrite(bytes);
+    }
+};
+
 const SERVER_NAME = "nanoclj-zig";
 const SERVER_VERSION = "0.1.0";
 const PROTOCOL_VERSION = "2024-11-05";
@@ -326,27 +350,29 @@ fn handleBciRead(allocator: std.mem.Allocator, args: json.ObjectMap) !json.Value
         seed +%= global_gc.objects.items.len;
     }
 
-    var buf: [2048]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const w = fbs.writer();
-    try w.writeAll("{\"channels\":[");
+    // Build JSON manually with allocPrint (std.io.fixedBufferStream removed in 0.16)
+    var result_buf = compat.emptyList(u8);
+    try result_buf.appendSlice(allocator, "{\"channels\":[");
 
     var entropy_sum: f64 = 0.0;
+    var fmt_tmp: [64]u8 = undefined;
     for (0..ch_count) |i| {
         seed = splitMix64(seed +% @as(u64, @intCast(i)));
-        // Map to [-1.0, 1.0] range (microvolts normalized)
         const fval: f64 = @as(f64, @floatFromInt(@as(i64, @bitCast(seed)))) / @as(f64, @floatFromInt(@as(i64, std.math.maxInt(i64))));
-        if (i > 0) try w.writeAll(",");
-        try w.print("{d:.6}", .{fval});
+        if (i > 0) try result_buf.appendSlice(allocator, ",");
+        const s = std.fmt.bufPrint(&fmt_tmp, "{d:.6}", .{fval}) catch continue;
+        try result_buf.appendSlice(allocator, s);
         entropy_sum += @abs(fval);
     }
 
     const trit = tritFromHash(seed);
     const entropy = entropy_sum / @as(f64, @floatFromInt(ch_count));
 
-    try w.print("],\"trit\":{d},\"entropy\":{d:.6}}}", .{ trit, entropy });
+    const tail = std.fmt.bufPrint(&fmt_tmp, "],\"trit\":{d},\"entropy\":{d:.6}}}", .{ trit, entropy }) catch return toolError(allocator, "fmt error");
+    try result_buf.appendSlice(allocator, tail);
 
-    const text = try allocator.dupe(u8, fbs.getWritten());
+    const text = try allocator.dupe(u8, result_buf.items);
+    result_buf.deinit(allocator);
     return toolResult(allocator, text);
 }
 
@@ -378,14 +404,10 @@ fn handleHttpFetch(allocator: std.mem.Allocator, args: json.ObjectMap) !json.Val
 
     // Construct and eval: (http-fetch "url") or (http-fetch "url" :method) or (http-fetch "url" :method "body")
     var expr_buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&expr_buf);
-    const w = fbs.writer();
-    if (body_str) |body| {
-        try w.print("(http-fetch \"{s}\" :{s} \"{s}\")", .{ url, method_str, body });
-    } else {
-        try w.print("(http-fetch \"{s}\" :{s})", .{ url, method_str });
-    }
-    const expr = fbs.getWritten();
+    const expr = if (body_str) |body|
+        std.fmt.bufPrint(&expr_buf, "(http-fetch \"{s}\" :{s} \"{s}\")", .{ url, method_str, body }) catch return toolError(allocator, "expr too long")
+    else
+        std.fmt.bufPrint(&expr_buf, "(http-fetch \"{s}\" :{s})", .{ url, method_str }) catch return toolError(allocator, "expr too long");
     const result_str = try rep(allocator, expr);
     return toolResult(allocator, result_str);
 }
@@ -505,16 +527,13 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     const stdin_file = compat.stdinFile();
-    const stdout_file = compat.stdoutFile();
-
-    const reader = stdin_file.deprecatedReader();
-    var stdout = stdout_file.deprecatedWriter();
+    _ = stdin_file;
+    var stdout = CompatWriter{};
 
     var line_buf: [MAX_LINE_SIZE]u8 = undefined;
 
     while (true) {
-        const line = reader.readUntilDelimiterOrEof(&line_buf, '\n') catch return
-            orelse return;
+        const line = readLineFromStdin(&line_buf) orelse return;
 
         if (line.len == 0) continue;
 
