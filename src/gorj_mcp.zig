@@ -53,6 +53,9 @@ fn initRuntime(allocator: std.mem.Allocator) !void {
     global_env.is_root = true;
     try core.initCore(&global_env, &global_gc);
     global_vm = bc.VM.init(&global_gc, 100_000_000);
+    // SPI: index-addressed versioning from canonical seed
+    const gorj_bridge = @import("gorj_bridge.zig");
+    gorj_bridge.initSession(1069); // gorj MCP uses canonical seed
     nanoclj_initialized = true;
 
     // Bootstrap: evaluate the self-hosting prelude

@@ -263,6 +263,10 @@ pub fn main() !void {
     const seed_sym = gc.internString("*seed*") catch 0;
     env.set(gc.getString(seed_sym), Value.makeInt(@bitCast(@as(u48, @truncate(world_seed))))) catch {};
 
+    // ── Initialize gorj session with world seed (SPI: index-addressed) ──
+    const gorj_bridge = @import("gorj_bridge.zig");
+    gorj_bridge.initSession(world_seed);
+
     // ── Bytecode VM (persistent across REPL) ──────────────────────
     var vm = bc.VM.init(&gc, 100_000_000);
     defer vm.deinit();

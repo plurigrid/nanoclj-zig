@@ -43,28 +43,48 @@ const compat = @import("compat.zig");
 // INLINE VERSION ID: no Version struct, no VersionLog append
 // ============================================================================
 
-// Monotonic version counter + running trit sum. No heap allocation.
-var version_counter: u64 = 0;
-var last_version_hash: u64 = 0;
+// Index-addressed versioning (Gay.jl SPI pattern):
+//   version_id(seed, index, expr) = mix64(mix64(seed) + index * GOLDEN + hash(expr))
+// No chained state. Any eval can be reproduced from (root_seed, invocation_index).
+// Trit accumulator uses index mod 3 — deterministic from position alone.
+const GOLDEN = 0x9e3779b97f4a7c15;
+
+var root_seed: u64 = 0;          // set once from world seed via initSession
+var invocation_index: u64 = 0;   // monotonic, but only for ordering — not state
 var trit_accumulator: i32 = 0;
 
-/// SplitMix64 — inlined from braid.zig to avoid cross-module dep for hot path
+/// SplitMix64 — canonical bijection, same constants as Gay.jl/substrate.zig
 inline fn mix64(seed: u64) u64 {
-    var z = seed +% 0x9e3779b97f4a7c15;
+    var z = seed +% GOLDEN;
     z = (z ^ (z >> 30)) *% 0xbf58476d1ce4e5b9;
     z = (z ^ (z >> 27)) *% 0x94d049bb133111eb;
     return z ^ (z >> 31);
 }
 
-/// Hash expr string → u64 version ID, chained from previous version
+/// Initialize session with a root seed (called once at REPL/MCP startup)
+pub fn initSession(seed: u64) void {
+    root_seed = seed;
+    invocation_index = 0;
+    trit_accumulator = 0;
+}
+
+/// Index-addressed version ID: pure function of (root_seed, index, expr).
+/// Reproducible: same (seed, index, expr) → same version_id, always.
 inline fn computeVersionId(expr: []const u8) u64 {
-    var h = last_version_hash;
+    var h = mix64(root_seed +% invocation_index *% GOLDEN);
     for (expr) |byte| {
         h = mix64(h ^ @as(u64, byte));
     }
-    h = mix64(h +% version_counter);
-    version_counter += 1;
-    last_version_hash = h;
+    invocation_index += 1;
+    return h;
+}
+
+/// Version ID at arbitrary index without advancing state (SPI: O(1) random access)
+pub fn versionAt(seed: u64, index: u64, expr: []const u8) u64 {
+    var h = mix64(seed +% index *% GOLDEN);
+    for (expr) |byte| {
+        h = mix64(h ^ @as(u64, byte));
+    }
     return h;
 }
 
@@ -179,12 +199,14 @@ pub fn gorjDecodeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return syrup_bridge.decode_from_bytes(raw, gc, gc.allocator) catch Value.makeNil();
 }
 
-/// (gorj-version) → version counter as integer (no hex, no string alloc)
+/// (gorj-version) → current invocation index (deterministic position in session)
 pub fn gorjVersionFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     _ = args;
     _ = gc;
-    if (version_counter == 0) return Value.makeNil();
-    return Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(last_version_hash))))));
+    if (invocation_index == 0) return Value.makeNil();
+    // Return version at current index — reproducible from (root_seed, index)
+    const vid = mix64(root_seed +% (invocation_index - 1) *% GOLDEN);
+    return Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(vid))))));
 }
 
 /// (gorj-tools) → vector of gorj's 29 MCP tool names
@@ -255,8 +277,8 @@ test "gorj-bridge: gorj-pipe returns 3-element vector [result vid trit]" {
     defer env.deinit();
 
     // Reset state for test isolation
-    version_counter = 0;
-    last_version_hash = 0;
+    invocation_index = 0;
+    root_seed = 0;
     trit_accumulator = 0;
 
     var args = [_]Value{Value.makeString(try gc.internString("42"))};
@@ -282,8 +304,8 @@ test "gorj-bridge: version counter increments across pipe calls" {
     var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
 
-    version_counter = 0;
-    last_version_hash = 0;
+    invocation_index = 0;
+    root_seed = 0;
     trit_accumulator = 0;
 
     var args1 = [_]Value{Value.makeString(try gc.internString("1"))};
@@ -297,7 +319,7 @@ test "gorj-bridge: version counter increments across pipe calls" {
     // Different expressions → different version IDs
     try std.testing.expect(vid1 != vid2);
     // Counter advanced
-    try std.testing.expectEqual(@as(u64, 2), version_counter);
+    try std.testing.expectEqual(@as(u64, 2), invocation_index);
 }
 
 test "gorj-bridge: gorj-tools returns 29 names" {
@@ -319,8 +341,8 @@ test "gorj-bridge: gorj-version nil before first eval" {
     var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
 
-    version_counter = 0;
-    last_version_hash = 0;
+    invocation_index = 0;
+    root_seed = 0;
     var args = [_]Value{};
     const result = try gorjVersionFn(&args, &gc, &env);
     try std.testing.expect(result.isNil());
