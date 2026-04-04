@@ -101,8 +101,26 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         }
         {
             const sname = gc.getString(sym_id);
-            if (std.mem.eql(u8, sname, "deftest")) return evalBoundedDo(items, env, gc, res);
-            if (std.mem.eql(u8, sname, "testing")) return evalBoundedDo(items, env, gc, res);
+            // deftest: items = [deftest, name, body...] — skip name, eval body
+            if (std.mem.eql(u8, sname, "deftest")) {
+                if (items.len < 3) return Domain.pure(Value.makeNil());
+                var result = Domain.pure(Value.makeNil());
+                for (items[2..]) |form| {
+                    result = evalBounded(form, env, gc, res);
+                    if (!result.isValue()) return result;
+                }
+                return result;
+            }
+            // testing: items = [testing, "description", body...] — skip desc, eval body
+            if (std.mem.eql(u8, sname, "testing")) {
+                if (items.len < 3) return Domain.pure(Value.makeNil());
+                var result = Domain.pure(Value.makeNil());
+                for (items[2..]) |form| {
+                    result = evalBounded(form, env, gc, res);
+                    if (!result.isValue()) return result;
+                }
+                return result;
+            }
             if (std.mem.eql(u8, sname, "try")) return evalBoundedTry(items, env, gc, res);
             if (std.mem.eql(u8, sname, "ns") or std.mem.eql(u8, sname, "in-ns")) return Domain.pure(Value.makeNil());
         }
