@@ -6,3 +6,4 @@ zig-cache/
 *.swp
 *.bak
 test_stdout
+theinstitute.csv

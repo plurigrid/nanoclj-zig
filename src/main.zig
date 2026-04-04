@@ -183,4 +183,5 @@ test {
     _ = @import("inet_compile.zig");
     _ = @import("thread_peval.zig");
     _ = @import("peval.zig");
+    _ = @import("bytecode.zig");
 }
