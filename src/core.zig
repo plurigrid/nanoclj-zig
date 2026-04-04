@@ -23,6 +23,12 @@ const computable_sets = @import("computable_sets.zig");
 const avalon_api_example = @import("avalon_api_example.zig");
 const simd_str = @import("simd_str.zig");
 
+fn getSeedMs() i64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC_RAW, &ts);
+    return @as(i64, ts.sec) *% 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000);
+}
+
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
 // We store builtins as a separate lookup rather than in NaN-boxed values.
@@ -117,6 +123,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "trit-sum", &tritSumFn },
         .{ "find-balancer", &findBalancerFn },
         .{ "trit-of", &tritOfContentFn },
+        // Pattern matching: 6 engines (3 regexp + 3 PEG)
+        .{ "re-match", &reMatchFn },
+        .{ "peg-match", &pegMatchFn },
+        .{ "match-all", &matchAllFn },
         // Splittable RNG builtins
         .{ "split-rng", &splitRngFn },
         .{ "rng-next", &rngNextFn },
@@ -244,6 +254,61 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Avalon integration API sample spec
         .{ "avalon-api-spec", &avalon_api_example.avalonApiSpecFn },
         .{ "avalon-api-example", &avalon_api_example.avalonApiExampleFn },
+        // Core data ops
+        .{ "dissoc", &dissocFn },
+        .{ "update", &updateFn },
+        .{ "merge", &mergeFn },
+        .{ "select-keys", &selectKeysFn },
+        .{ "keys", &keysFn },
+        .{ "vals", &valsFn },
+        .{ "contains?", &containsFn },
+        // Sequence extras
+        .{ "second", &secondFn },
+        .{ "last", &lastFn },
+        .{ "some", &someFn },
+        .{ "every?", &everyFn },
+        .{ "not-any?", &notAnyFn },
+        .{ "sort", &sortFn },
+        .{ "sort-by", &sortByFn },
+        .{ "distinct", &distinctFn },
+        .{ "flatten", &flattenFn },
+        .{ "mapcat", &mapcatFn },
+        .{ "interleave", &interleaveFn },
+        .{ "interpose", &interposeFn },
+        .{ "partition", &partitionFn },
+        .{ "frequencies", &frequenciesFn },
+        .{ "group-by", &groupByFn },
+        // Type ops
+        .{ "name", &nameFn },
+        .{ "keyword", &keywordFn },
+        .{ "symbol", &symbolFn },
+        .{ "type", &typeFn },
+        .{ "identity", &identityFn },
+        // Atom / reference types
+        .{ "atom", &atomFn },
+        .{ "deref", &derefFn },
+        .{ "swap!", &swapFn },
+        .{ "reset!", &resetFn },
+        .{ "compare-and-set!", &compareAndSetFn },
+        // IO
+        .{ "slurp", &slurpFn },
+        .{ "spit", &spitFn },
+        .{ "read-line", &readLineFn },
+        // Math extras
+        .{ "abs", &absFn },
+        .{ "min", &minFn },
+        .{ "max", &maxFn },
+        .{ "rand", &randFn },
+        .{ "rand-int", &randIntFn },
+        // Bitwise
+        .{ "bit-and", &bitAndFn },
+        .{ "bit-or", &bitOrFn },
+        .{ "bit-xor", &bitXorFn },
+        .{ "bit-shift-left", &bitShiftLeftFn },
+        .{ "bit-shift-right", &bitShiftRightFn },
+        // String extras (SIMD-backed)
+        .{ "re-find", &reFindFn },
+        .{ "count-str", &countStrFn },
     };
 
     inline for (builtins) |b| {
@@ -1218,6 +1283,7 @@ fn isSequentialP(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 const transitivity = @import("transitivity.zig");
 const jepsen = @import("jepsen.zig");
+const pat_mod = @import("pattern.zig");
 
 /// (trit-phase n) → -1, 0, or 1 — GF(3) phase of tick count n
 fn tritPhaseFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
@@ -1607,5 +1673,800 @@ fn rngTritFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const obj = try gc.allocObj(.vector);
     try obj.data.vector.items.append(gc.allocator, Value.makeInt(@as(i48, gf3.trit)));
     try obj.data.vector.items.append(gc.allocator, try rngToVec(rng, gc));
+    return Value.makeObj(obj);
+}
+
+// ============================================================================
+// CORE DATA OPS
+// ============================================================================
+
+fn dissocFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const src = args[0].asObj();
+    if (src.kind != .map) return error.TypeError;
+    const obj = try gc.allocObj(.map);
+    const keys = src.data.map.keys.items;
+    const vals = src.data.map.vals.items;
+    for (keys, vals) |k, v| {
+        var skip = false;
+        for (args[1..]) |dk| {
+            if (semantics.structuralEq(k, dk, gc)) { skip = true; break; }
+        }
+        if (!skip) {
+            try obj.data.map.keys.append(gc.allocator, k);
+            try obj.data.map.vals.append(gc.allocator, v);
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+fn updateFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 3) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const src = args[0].asObj();
+    if (src.kind != .map) return error.TypeError;
+    const key = args[1];
+    const f = args[2];
+    const obj = try gc.allocObj(.map);
+    const keys = src.data.map.keys.items;
+    const vals = src.data.map.vals.items;
+    var found = false;
+    for (keys, vals) |k, v| {
+        try obj.data.map.keys.append(gc.allocator, k);
+        if (semantics.structuralEq(k, key, gc)) {
+            var call_args = [_]Value{v} ++ [_]Value{Value.makeNil()} ** 3;
+            const extra = args[3..];
+            const n = @min(extra.len, 3);
+            for (0..n) |i| call_args[1 + i] = extra[i];
+            const new_val = try eval_mod.apply(f, call_args[0 .. 1 + n], env, gc);
+            try obj.data.map.vals.append(gc.allocator, new_val);
+            found = true;
+        } else {
+            try obj.data.map.vals.append(gc.allocator, v);
+        }
+    }
+    if (!found) {
+        try obj.data.map.keys.append(gc.allocator, key);
+        var call_args = [_]Value{Value.makeNil()} ** 4;
+        const extra = args[3..];
+        const n = @min(extra.len, 3);
+        for (0..n) |i| call_args[1 + i] = extra[i];
+        const new_val = try eval_mod.apply(f, call_args[0 .. 1 + n], env, gc);
+        try obj.data.map.vals.append(gc.allocator, new_val);
+    }
+    return Value.makeObj(obj);
+}
+
+fn mergeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return Value.makeNil();
+    const obj = try gc.allocObj(.map);
+    for (args) |a| {
+        if (a.isNil()) continue;
+        if (!a.isObj()) return error.TypeError;
+        const m = a.asObj();
+        if (m.kind != .map) return error.TypeError;
+        for (m.data.map.keys.items, m.data.map.vals.items) |k, v| {
+            // overwrite existing key
+            var replaced = false;
+            for (obj.data.map.keys.items, 0..) |ek, i| {
+                if (semantics.structuralEq(ek, k, gc)) {
+                    obj.data.map.vals.items[i] = v;
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                try obj.data.map.keys.append(gc.allocator, k);
+                try obj.data.map.vals.append(gc.allocator, v);
+            }
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+fn selectKeysFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj() or !args[1].isObj()) return error.TypeError;
+    const src = args[0].asObj();
+    const ks = args[1].asObj();
+    if (src.kind != .map) return error.TypeError;
+    const wanted = switch (ks.kind) {
+        .vector => ks.data.vector.items.items,
+        .list => ks.data.list.items.items,
+        else => return error.TypeError,
+    };
+    const obj = try gc.allocObj(.map);
+    for (wanted) |wk| {
+        for (src.data.map.keys.items, src.data.map.vals.items) |k, v| {
+            if (semantics.structuralEq(k, wk, gc)) {
+                try obj.data.map.keys.append(gc.allocator, k);
+                try obj.data.map.vals.append(gc.allocator, v);
+                break;
+            }
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+fn keysFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isNil()) return Value.makeNil();
+    if (!args[0].isObj()) return error.TypeError;
+    const m = args[0].asObj();
+    if (m.kind != .map) return error.TypeError;
+    const obj = try gc.allocObj(.list);
+    for (m.data.map.keys.items) |k| {
+        try obj.data.list.items.append(gc.allocator, k);
+    }
+    return Value.makeObj(obj);
+}
+
+fn valsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isNil()) return Value.makeNil();
+    if (!args[0].isObj()) return error.TypeError;
+    const m = args[0].asObj();
+    if (m.kind != .map) return error.TypeError;
+    const obj = try gc.allocObj(.list);
+    for (m.data.map.vals.items) |v| {
+        try obj.data.list.items.append(gc.allocator, v);
+    }
+    return Value.makeObj(obj);
+}
+
+fn containsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (args[0].isNil()) return Value.makeBool(false);
+    if (!args[0].isObj()) return error.TypeError;
+    const o = args[0].asObj();
+    return switch (o.kind) {
+        .map => blk: {
+            for (o.data.map.keys.items) |k| {
+                if (semantics.structuralEq(k, args[1], gc)) break :blk Value.makeBool(true);
+            }
+            break :blk Value.makeBool(false);
+        },
+        .set => blk: {
+            for (o.data.set.items.items) |item| {
+                if (semantics.structuralEq(item, args[1], gc)) break :blk Value.makeBool(true);
+            }
+            break :blk Value.makeBool(false);
+        },
+        .vector => blk: {
+            if (!args[1].isInt()) break :blk Value.makeBool(false);
+            const idx = args[1].asInt();
+            break :blk Value.makeBool(idx >= 0 and idx < @as(i48, @intCast(o.data.vector.items.items.len)));
+        },
+        else => error.TypeError,
+    };
+}
+
+// ============================================================================
+// SEQUENCE EXTRAS
+// ============================================================================
+
+fn secondFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const items = try seqItems(args[0], gc);
+    return if (items.len > 1) items[1] else Value.makeNil();
+}
+
+fn lastFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const items = try seqItems(args[0], gc);
+    return if (items.len > 0) items[items.len - 1] else Value.makeNil();
+}
+
+fn someFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const f = args[0];
+    const items = try seqItems(args[1], gc);
+    for (items) |item| {
+        var a = [_]Value{item};
+        const r = try eval_mod.apply(f, &a, env, gc);
+        if (r.isTruthy()) return r;
+    }
+    return Value.makeNil();
+}
+
+fn everyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const f = args[0];
+    const items = try seqItems(args[1], gc);
+    for (items) |item| {
+        var a = [_]Value{item};
+        const r = try eval_mod.apply(f, &a, env, gc);
+        if (!r.isTruthy()) return Value.makeBool(false);
+    }
+    return Value.makeBool(true);
+}
+
+fn notAnyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const r = try someFn(args, gc, env);
+    return Value.makeBool(r.isNil());
+}
+
+fn sortFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const items = try seqItems(args[0], gc);
+    const obj = try gc.allocObj(.vector);
+    try obj.data.vector.items.appendSlice(gc.allocator, items);
+    std.sort.insertion(Value, obj.data.vector.items.items, gc, valueLessThan);
+    return Value.makeObj(obj);
+}
+
+fn sortByFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const keyfn = args[0];
+    const items = try seqItems(args[1], gc);
+    const obj = try gc.allocObj(.vector);
+    try obj.data.vector.items.appendSlice(gc.allocator, items);
+    // Compute keys, then sort by key
+    const alloc = gc.allocator;
+    const keys_arr = try alloc.alloc(Value, items.len);
+    defer alloc.free(keys_arr);
+    for (items, 0..) |item, i| {
+        var a = [_]Value{item};
+        keys_arr[i] = try eval_mod.apply(keyfn, &a, env, gc);
+    }
+    // Simple insertion sort (stable) using precomputed keys
+    const out = obj.data.vector.items.items;
+    var i: usize = 1;
+    while (i < out.len) : (i += 1) {
+        const ki = keys_arr[i];
+        const vi = out[i];
+        var j: usize = i;
+        while (j > 0 and valueLessThanSimple(ki, keys_arr[j - 1], gc)) : (j -= 1) {
+            out[j] = out[j - 1];
+            keys_arr[j] = keys_arr[j - 1];
+        }
+        out[j] = vi;
+        keys_arr[j] = ki;
+    }
+    return Value.makeObj(obj);
+}
+
+fn valueLessThan(gc: *GC, a: Value, b: Value) bool {
+    return valueLessThanSimple(a, b, gc);
+}
+
+fn valueLessThanSimple(a: Value, b: Value, gc: *GC) bool {
+    if (a.isInt() and b.isInt()) return a.asInt() < b.asInt();
+    if (a.isFloat() and b.isFloat()) return a.asFloat() < b.asFloat();
+    if (a.isInt() and b.isFloat()) return @as(f64, @floatFromInt(a.asInt())) < b.asFloat();
+    if (a.isFloat() and b.isInt()) return a.asFloat() < @as(f64, @floatFromInt(b.asInt()));
+    if (a.isString() and b.isString()) {
+        return std.mem.order(u8, gc.getString(a.asStringId()), gc.getString(b.asStringId())) == .lt;
+    }
+    if (a.isKeyword() and b.isKeyword()) {
+        return std.mem.order(u8, gc.getString(a.asKeywordId()), gc.getString(b.asKeywordId())) == .lt;
+    }
+    return false;
+}
+
+fn distinctFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const items = try seqItems(args[0], gc);
+    const obj = try gc.allocObj(.vector);
+    for (items) |item| {
+        var dup = false;
+        for (obj.data.vector.items.items) |existing| {
+            if (semantics.structuralEq(item, existing, gc)) { dup = true; break; }
+        }
+        if (!dup) try obj.data.vector.items.append(gc.allocator, item);
+    }
+    return Value.makeObj(obj);
+}
+
+fn flattenFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try gc.allocObj(.vector);
+    try flattenInto(args[0], obj, gc);
+    return Value.makeObj(obj);
+}
+
+fn flattenInto(val: Value, obj: *value.Obj, gc: *GC) !void {
+    if (!val.isObj()) {
+        try obj.data.vector.items.append(gc.allocator, val);
+        return;
+    }
+    const o = val.asObj();
+    const items = switch (o.kind) {
+        .list => o.data.list.items.items,
+        .vector => o.data.vector.items.items,
+        else => {
+            try obj.data.vector.items.append(gc.allocator, val);
+            return;
+        },
+    };
+    for (items) |item| try flattenInto(item, obj, gc);
+}
+
+fn mapcatFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const f = args[0];
+    const items = try seqItems(args[1], gc);
+    const obj = try gc.allocObj(.vector);
+    for (items) |item| {
+        var a = [_]Value{item};
+        const r = try eval_mod.apply(f, &a, env, gc);
+        if (r.isObj()) {
+            const ro = r.asObj();
+            const sub_items = switch (ro.kind) {
+                .list => ro.data.list.items.items,
+                .vector => ro.data.vector.items.items,
+                else => &[_]Value{r},
+            };
+            try obj.data.vector.items.appendSlice(gc.allocator, sub_items);
+        } else if (!r.isNil()) {
+            try obj.data.vector.items.append(gc.allocator, r);
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+fn interleaveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    var seqs: [8][]Value = undefined;
+    var min_len: usize = std.math.maxInt(usize);
+    const n = @min(args.len, 8);
+    for (0..n) |i| {
+        seqs[i] = try seqItems(args[i], gc);
+        min_len = @min(min_len, seqs[i].len);
+    }
+    const obj = try gc.allocObj(.vector);
+    for (0..min_len) |j| {
+        for (0..n) |i| {
+            try obj.data.vector.items.append(gc.allocator, seqs[i][j]);
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+fn interposeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const sep = args[0];
+    const items = try seqItems(args[1], gc);
+    const obj = try gc.allocObj(.vector);
+    for (items, 0..) |item, i| {
+        if (i > 0) try obj.data.vector.items.append(gc.allocator, sep);
+        try obj.data.vector.items.append(gc.allocator, item);
+    }
+    return Value.makeObj(obj);
+}
+
+fn partitionFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt()) return error.TypeError;
+    const n: usize = std.math.cast(usize, @max(@as(i48, 1), args[0].asInt())) orelse 1;
+    const items = try seqItems(args[1], gc);
+    const obj = try gc.allocObj(.vector);
+    var i: usize = 0;
+    while (i + n <= items.len) : (i += n) {
+        const chunk = try gc.allocObj(.vector);
+        try chunk.data.vector.items.appendSlice(gc.allocator, items[i .. i + n]);
+        try obj.data.vector.items.append(gc.allocator, Value.makeObj(chunk));
+    }
+    return Value.makeObj(obj);
+}
+
+fn frequenciesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const items = try seqItems(args[0], gc);
+    const obj = try gc.allocObj(.map);
+    for (items) |item| {
+        var found = false;
+        for (obj.data.map.keys.items, 0..) |k, i| {
+            if (semantics.structuralEq(k, item, gc)) {
+                const old = obj.data.map.vals.items[i].asInt();
+                obj.data.map.vals.items[i] = Value.makeInt(old + 1);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            try obj.data.map.keys.append(gc.allocator, item);
+            try obj.data.map.vals.append(gc.allocator, Value.makeInt(1));
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+fn groupByFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const f = args[0];
+    const items = try seqItems(args[1], gc);
+    const obj = try gc.allocObj(.map);
+    for (items) |item| {
+        var a = [_]Value{item};
+        const key = try eval_mod.apply(f, &a, env, gc);
+        var found = false;
+        for (obj.data.map.keys.items, 0..) |k, i| {
+            if (semantics.structuralEq(k, key, gc)) {
+                const vec = obj.data.map.vals.items[i].asObj();
+                try vec.data.vector.items.append(gc.allocator, item);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            try obj.data.map.keys.append(gc.allocator, key);
+            const vec = try gc.allocObj(.vector);
+            try vec.data.vector.items.append(gc.allocator, item);
+            try obj.data.map.vals.append(gc.allocator, Value.makeObj(vec));
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+// ============================================================================
+// TYPE OPS
+// ============================================================================
+
+fn nameFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isString()) return args[0];
+    if (args[0].isKeyword()) return Value.makeString(args[0].asKeywordId());
+    if (args[0].isSymbol()) return Value.makeString(args[0].asSymbolId());
+    _ = gc;
+    return error.TypeError;
+}
+
+fn keywordFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isKeyword()) return args[0];
+    if (args[0].isString()) return Value.makeKeyword(args[0].asStringId());
+    if (args[0].isSymbol()) return Value.makeKeyword(args[0].asSymbolId());
+    _ = gc;
+    return error.TypeError;
+}
+
+fn symbolFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isSymbol()) return args[0];
+    if (args[0].isString()) {
+        const s = gc.getString(args[0].asStringId());
+        return Value.makeSymbol(try gc.internString(s));
+    }
+    if (args[0].isKeyword()) {
+        return Value.makeSymbol(args[0].asKeywordId());
+    }
+    return error.TypeError;
+}
+
+fn typeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const v = args[0];
+    const t: []const u8 = if (v.isNil()) "nil"
+    else if (v.isBool()) "boolean"
+    else if (v.isInt()) "integer"
+    else if (v.isFloat()) "float"
+    else if (v.isString()) "string"
+    else if (v.isKeyword()) "keyword"
+    else if (v.isSymbol()) "symbol"
+    else if (v.isObj()) switch (v.asObj().kind) {
+        .list => "list",
+        .vector => "vector",
+        .map => "map",
+        .set => "set",
+        .function => "function",
+        .macro_fn => "macro",
+        .atom => "atom",
+        .bc_closure => "function",
+        .builtin_ref => "function",
+    }
+    else "unknown";
+    return Value.makeString(try gc.internString(t));
+}
+
+fn identityFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return args[0];
+}
+
+// ============================================================================
+// ATOM / REFERENCE TYPES
+// ============================================================================
+
+fn atomFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try gc.allocObj(.atom);
+    obj.data.atom.val = args[0];
+    return Value.makeObj(obj);
+}
+
+fn derefFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    if (obj.kind != .atom) return error.TypeError;
+    return obj.data.atom.val;
+}
+
+fn swapFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    if (obj.kind != .atom) return error.TypeError;
+    const old = obj.data.atom.val;
+    var call_args_buf: [8]Value = undefined;
+    call_args_buf[0] = old;
+    const extra = args[2..];
+    const n = @min(extra.len, 7);
+    for (0..n) |i| call_args_buf[1 + i] = extra[i];
+    const new_val = try eval_mod.apply(args[1], call_args_buf[0 .. 1 + n], env, gc);
+    obj.data.atom.val = new_val;
+    return new_val;
+}
+
+fn resetFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    if (obj.kind != .atom) return error.TypeError;
+    obj.data.atom.val = args[1];
+    return args[1];
+}
+
+fn compareAndSetFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    if (obj.kind != .atom) return error.TypeError;
+    if (semantics.structuralEq(obj.data.atom.val, args[1], gc)) {
+        obj.data.atom.val = args[2];
+        return Value.makeBool(true);
+    }
+    return Value.makeBool(false);
+}
+
+// ============================================================================
+// I/O
+// ============================================================================
+
+fn cFopen(path: []const u8, mode: [*c]const u8) ?*std.c.FILE {
+    var pbuf: [4096]u8 = undefined;
+    if (path.len >= pbuf.len) return null;
+    @memcpy(pbuf[0..path.len], path);
+    pbuf[path.len] = 0;
+    return std.c.fopen(@ptrCast(&pbuf), mode);
+}
+
+fn slurpFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const path = gc.getString(args[0].asStringId());
+    const cf = cFopen(path, "r") orelse return Value.makeNil();
+    defer _ = std.c.fclose(cf);
+    var contents = compat.emptyList(u8);
+    defer contents.deinit(gc.allocator);
+    var rbuf: [4096]u8 = undefined;
+    while (true) {
+        const rn = std.c.fread(&rbuf, 1, rbuf.len, cf);
+        if (rn == 0) break;
+        try contents.appendSlice(gc.allocator, rbuf[0..rn]);
+    }
+    return Value.makeString(try gc.internString(contents.items));
+}
+
+fn spitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const path = gc.getString(args[0].asStringId());
+    const data = if (args[1].isString()) gc.getString(args[1].asStringId()) else blk: {
+        var pbuf = compat.emptyList(u8);
+        defer pbuf.deinit(gc.allocator);
+        try printer.prStrInto(&pbuf, args[1], gc, false);
+        break :blk try gc.allocator.dupe(u8, pbuf.items);
+    };
+    const cf = cFopen(path, "w") orelse return Value.makeNil();
+    defer _ = std.c.fclose(cf);
+    _ = std.c.fwrite(data.ptr, 1, data.len, cf);
+    return Value.makeNil();
+}
+
+fn readLineFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const stdin = compat.stdinFile();
+    var buf: [4096]u8 = undefined;
+    var len: usize = 0;
+    while (len < buf.len) {
+        const n = compat.fileRead(stdin, buf[len .. len + 1]);
+        if (n == 0) break;
+        if (buf[len] == '\n') break;
+        len += 1;
+    }
+    if (len == 0) return Value.makeNil();
+    return Value.makeString(try gc.internString(buf[0..len]));
+}
+
+// ============================================================================
+// MATH EXTRAS
+// ============================================================================
+
+fn absFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isInt()) return Value.makeInt(if (args[0].asInt() < 0) -args[0].asInt() else args[0].asInt());
+    if (args[0].isFloat()) return Value.makeFloat(@abs(args[0].asFloat()));
+    return error.TypeError;
+}
+
+fn minFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return error.ArityError;
+    var best = args[0];
+    for (args[1..]) |a| {
+        if (numLt(a, best)) best = a;
+    }
+    return best;
+}
+
+fn maxFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len == 0) return error.ArityError;
+    var best = args[0];
+    for (args[1..]) |a| {
+        if (numLt(best, a)) best = a;
+    }
+    return best;
+}
+
+fn numLt(a: Value, b: Value) bool {
+    if (a.isInt() and b.isInt()) return a.asInt() < b.asInt();
+    const fa: f64 = if (a.isInt()) @floatFromInt(a.asInt()) else if (a.isFloat()) a.asFloat() else return false;
+    const fb: f64 = if (b.isInt()) @floatFromInt(b.asInt()) else if (b.isFloat()) b.asFloat() else return false;
+    return fa < fb;
+}
+
+var rand_state: u64 = 42;
+
+fn randFn(_: []Value, _: *GC, _: *Env) anyerror!Value {
+    const r = substrate.splitmix_next(rand_state);
+    rand_state = r.next;
+    const f: f64 = @as(f64, @floatFromInt(r.val >> 11)) / @as(f64, @floatFromInt(@as(u64, 1) << 53));
+    return Value.makeFloat(f);
+}
+
+fn randIntFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isInt()) return error.TypeError;
+    const n = args[0].asInt();
+    if (n <= 0) return error.ArityError;
+    const r = substrate.splitmix_next(rand_state);
+    rand_state = r.next;
+    return Value.makeInt(@rem(@as(i48, @truncate(@as(i64, @bitCast(r.val)))), n));
+}
+
+// ============================================================================
+// BITWISE
+// ============================================================================
+
+fn bitAndFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    return Value.makeInt(args[0].asInt() & args[1].asInt());
+}
+
+fn bitOrFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    return Value.makeInt(args[0].asInt() | args[1].asInt());
+}
+
+fn bitXorFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    return Value.makeInt(args[0].asInt() ^ args[1].asInt());
+}
+
+fn bitShiftLeftFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const shift: u6 = std.math.cast(u6, @max(@as(i48, 0), args[1].asInt())) orelse return error.ArityError;
+    return Value.makeInt(args[0].asInt() << shift);
+}
+
+fn bitShiftRightFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const shift: u6 = std.math.cast(u6, @max(@as(i48, 0), args[1].asInt())) orelse return error.ArityError;
+    return Value.makeInt(args[0].asInt() >> shift);
+}
+
+// ============================================================================
+// STRING EXTRAS (SIMD-backed)
+// ============================================================================
+
+fn reFindFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    const needle = gc.getString(args[0].asStringId());
+    const s = gc.getString(args[1].asStringId());
+    if (simd_str.findSubstring(s, needle)) |idx| {
+        return Value.makeString(try gc.internString(s[idx .. idx + needle.len]));
+    }
+    return Value.makeNil();
+}
+
+fn countStrFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    const s = gc.getString(args[0].asStringId());
+    const needle = gc.getString(args[1].asStringId());
+    return Value.makeInt(@intCast(simd_str.countSubstring(s, needle)));
+}
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+fn seqItems(val: Value, gc: *GC) ![]Value {
+    _ = gc;
+    if (val.isNil()) return &[_]Value{};
+    if (!val.isObj()) return error.TypeError;
+    const obj = val.asObj();
+    return switch (obj.kind) {
+        .list => obj.data.list.items.items,
+        .vector => obj.data.vector.items.items,
+        else => error.TypeError,
+    };
+}
+
+// ============================================================================
+// PATTERN MATCHING BUILTINS
+// ============================================================================
+
+fn matchResultToValue(r: pat_mod.MatchResult, gc: *GC) !Value {
+    const obj = try gc.allocObj(.map);
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("matched?")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(r.matched));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("consumed")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.consumed)));
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("trit")));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@as(i48, r.trit)));
+    return Value.makeObj(obj);
+}
+
+/// (re-match engine pattern input) → {:matched? bool :consumed N :trit T}
+fn reMatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 3) return error.ArityError;
+    if (!args[0].isKeyword() or !args[1].isString() or !args[2].isString()) return error.TypeError;
+    const engine_name = gc.getString(args[0].asKeywordId());
+    const pat = gc.getString(args[1].asStringId());
+    const input = gc.getString(args[2].asStringId());
+    const engine: pat_mod.Engine = if (std.mem.eql(u8, engine_name, "thompson")) .thompson
+        else if (std.mem.eql(u8, engine_name, "derivative")) .derivative
+        else if (std.mem.eql(u8, engine_name, "backtrack")) .backtrack
+        else return error.TypeError;
+    return matchResultToValue(pat_mod.matchWith(engine, pat, input), gc);
+}
+
+/// (peg-match engine pattern input) → {:matched? bool :consumed N :trit T}
+fn pegMatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 3) return error.ArityError;
+    if (!args[0].isKeyword() or !args[1].isString() or !args[2].isString()) return error.TypeError;
+    const engine_name = gc.getString(args[0].asKeywordId());
+    const pat = gc.getString(args[1].asStringId());
+    const input = gc.getString(args[2].asStringId());
+    const engine: pat_mod.Engine = if (std.mem.eql(u8, engine_name, "recursive")) .peg_rd
+        else if (std.mem.eql(u8, engine_name, "packrat")) .peg_packrat
+        else if (std.mem.eql(u8, engine_name, "vm")) .peg_vm
+        else return error.TypeError;
+    return matchResultToValue(pat_mod.matchWith(engine, pat, input), gc);
+}
+
+/// (match-all pattern input) → vector of 6 results, one per engine
+fn matchAllFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    const pat = gc.getString(args[0].asStringId());
+    const input = gc.getString(args[1].asStringId());
+    const engines = [_]pat_mod.Engine{ .thompson, .derivative, .backtrack, .peg_rd, .peg_packrat, .peg_vm };
+    const names = [_][]const u8{ "thompson", "derivative", "backtrack", "peg-rd", "peg-packrat", "peg-vm" };
+    const obj = try gc.allocObj(.vector);
+    for (engines, names) |e, name| {
+        const r = pat_mod.matchWith(e, pat, input);
+        const entry = try gc.allocObj(.map);
+        try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("engine")));
+        try entry.data.map.vals.append(gc.allocator, Value.makeKeyword(try gc.internString(name)));
+        try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("matched?")));
+        try entry.data.map.vals.append(gc.allocator, Value.makeBool(r.matched));
+        try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("consumed")));
+        try entry.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(r.consumed)));
+        try obj.data.vector.items.append(gc.allocator, Value.makeObj(entry));
+    }
     return Value.makeObj(obj);
 }

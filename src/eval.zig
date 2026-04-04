@@ -182,7 +182,7 @@ fn evalFnStar(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     return Value.makeObj(fn_obj);
 }
 
-pub fn apply(func: Value, args: []Value, _: *Env, gc: *GC) EvalError!Value {
+pub fn apply(func: Value, args: []const Value, _: *Env, gc: *GC) EvalError!Value {
     if (!func.isObj()) return error.NotAFunction;
     const obj = func.asObj();
 

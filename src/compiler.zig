@@ -355,6 +355,61 @@ pub const Compiler = struct {
                     self.emitAt(jend, bc.encode_d(.jump, @bitCast(@as(u24, @bitCast(@as(i24, @intCast(eeo)))))));
                     return;
                 }
+
+                // ── List operations ──
+                if (std.mem.eql(u8, name, "cons")) {
+                    if (items.len != 3) return error.InvalidSyntax;
+                    const rb = try self.allocReg();
+                    const rc = try self.allocReg();
+                    try self.compile(items[1], rb);
+                    try self.compile(items[2], rc);
+                    try self.emit(bc.encode_abc(.cons, dest, rb, rc));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "first")) {
+                    if (items.len != 2) return error.InvalidSyntax;
+                    try self.compile(items[1], dest);
+                    try self.emit(bc.encode_abc(.first, dest, dest, 0));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "rest")) {
+                    if (items.len != 2) return error.InvalidSyntax;
+                    try self.compile(items[1], dest);
+                    try self.emit(bc.encode_abc(.rest, dest, dest, 0));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "list")) {
+                    if (items.len == 1) {
+                        // (list) → empty list
+                        const r = try self.allocReg();
+                        try self.emit(bc.encode_abc(.make_list, dest, r, 0));
+                        return;
+                    }
+                    // Compile elements into contiguous registers
+                    const base_reg = self.next_reg;
+                    for (items[1..]) |item| {
+                        const r = try self.allocReg();
+                        try self.compile(item, r);
+                    }
+                    const cnt: u8 = @intCast(items.len - 1);
+                    try self.emit(bc.encode_abc(.make_list, dest, base_reg, cnt));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "count")) {
+                    if (items.len != 2) return error.InvalidSyntax;
+                    try self.compile(items[1], dest);
+                    try self.emit(bc.encode_abc(.count, dest, dest, 0));
+                    return;
+                }
+                if (std.mem.eql(u8, name, "nth")) {
+                    if (items.len != 3) return error.InvalidSyntax;
+                    const rb = try self.allocReg();
+                    const rc = try self.allocReg();
+                    try self.compile(items[1], rb);
+                    try self.compile(items[2], rc);
+                    try self.emit(bc.encode_abc(.nth, dest, rb, rc));
+                    return;
+                }
             }
         }
 

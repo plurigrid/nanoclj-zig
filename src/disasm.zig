@@ -163,16 +163,22 @@ fn disassembleInst(
         },
 
         // ABC-format (8-bit A, B, C)
-        .add, .sub, .mul, .div, .quot, .rem, .eq, .lt, .lte => {
+        .add, .sub, .mul, .div, .quot, .rem, .eq, .lt, .lte, .cons, .nth => {
             const a = bc.decode_a(inst);
             const b = bc.decode_b(inst);
             const c = bc.decode_c(inst);
             try appendFmt(buf, allocator, "{s:<14} R{d}, R{d}, R{d}", .{ name, a, b, c });
         },
-        .move => {
+        .move, .first, .rest, .count => {
             const a = bc.decode_a(inst);
             const b = bc.decode_b(inst);
             try appendFmt(buf, allocator, "{s:<14} R{d}, R{d}", .{ name, a, b });
+        },
+        .make_list => {
+            const a = bc.decode_a(inst);
+            const b = bc.decode_b(inst);
+            const c = bc.decode_c(inst);
+            try appendFmt(buf, allocator, "{s:<14} R{d}, R{d}..R{d} ({d} elems)", .{ name, a, b, b + c, c });
         },
         .call => {
             const a = bc.decode_a(inst);

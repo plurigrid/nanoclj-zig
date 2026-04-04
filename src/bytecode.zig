@@ -62,6 +62,14 @@ pub const Op = enum(u8) {
     // Globals (2)
     get_global,   // $A = globals[constants[E]]
     set_global,   // globals[constants[E]] = $A
+
+    // List operations (6)
+    cons,         // $A = cons($B, $C)  — prepend B to list C
+    first,        // $A = first($B)     — head of list
+    rest,         // $A = rest($B)      — tail of list (new list)
+    make_list,    // $A = list(R[B..B+C]) — build list from C regs starting at B
+    count,        // $A = count($B)     — length of list/vector
+    nth,          // $A = nth($B, $C)   — element at index C in collection B
 };
 
 // ============================================================================
@@ -522,6 +530,106 @@ pub const VM = struct {
                     if (name_val.isSymbol()) {
                         const name = self.gc.getString(name_val.asSymbolId());
                         self.globals.put(name, self.reg(a).*) catch return error.TypeError;
+                    } else return error.TypeError;
+                },
+
+                // ── List operations ──
+                .cons => {
+                    const a = decode_a(inst);
+                    const b = decode_b(inst);
+                    const c = decode_c(inst);
+                    const elem = self.reg(b).*;
+                    const coll = self.reg(c).*;
+                    const obj = self.gc.allocObj(.list) catch return error.TypeError;
+                    if (coll.isObj() and coll.asObj().kind == .list) {
+                        const src = &coll.asObj().data.list.items;
+                        obj.data.list.items.ensureTotalCapacity(self.gc.allocator, src.items.len + 1) catch return error.TypeError;
+                        obj.data.list.items.appendAssumeCapacity(elem);
+                        obj.data.list.items.appendSliceAssumeCapacity(src.items);
+                    } else if (coll.isNil()) {
+                        obj.data.list.items.append(self.gc.allocator, elem) catch return error.TypeError;
+                    } else return error.TypeError;
+                    self.reg(a).* = Value.makeObj(obj);
+                },
+                .first => {
+                    const a = decode_a(inst);
+                    const b = decode_b(inst);
+                    const bv = self.reg(b).*;
+                    if (bv.isNil()) {
+                        self.reg(a).* = Value.makeNil();
+                    } else if (bv.isObj()) {
+                        const o = bv.asObj();
+                        if (o.kind == .list or o.kind == .vector) {
+                            const items = if (o.kind == .list) o.data.list.items else o.data.vector.items;
+                            self.reg(a).* = if (items.items.len > 0) items.items[0] else Value.makeNil();
+                        } else return error.TypeError;
+                    } else return error.TypeError;
+                },
+                .rest => {
+                    const a = decode_a(inst);
+                    const b = decode_b(inst);
+                    const bv = self.reg(b).*;
+                    const obj = self.gc.allocObj(.list) catch return error.TypeError;
+                    if (bv.isNil()) {
+                        // rest of nil = empty list
+                    } else if (bv.isObj()) {
+                        const o = bv.asObj();
+                        if (o.kind == .list or o.kind == .vector) {
+                            const items = if (o.kind == .list) o.data.list.items else o.data.vector.items;
+                            if (items.items.len > 1) {
+                                obj.data.list.items.appendSlice(self.gc.allocator, items.items[1..]) catch return error.TypeError;
+                            }
+                        } else return error.TypeError;
+                    } else return error.TypeError;
+                    self.reg(a).* = Value.makeObj(obj);
+                },
+                .make_list => {
+                    const a = decode_a(inst);
+                    const b = decode_b(inst);
+                    const c = decode_c(inst); // count
+                    const base = self.currentFrame().base;
+                    const obj = self.gc.allocObj(.list) catch return error.TypeError;
+                    obj.data.list.items.ensureTotalCapacity(self.gc.allocator, c) catch return error.TypeError;
+                    for (0..c) |i| {
+                        obj.data.list.items.appendAssumeCapacity(self.stack[base + b + i]);
+                    }
+                    self.reg(a).* = Value.makeObj(obj);
+                },
+                .count => {
+                    const a = decode_a(inst);
+                    const b = decode_b(inst);
+                    const bv = self.reg(b).*;
+                    if (bv.isNil()) {
+                        self.reg(a).* = Value.makeInt(0);
+                    } else if (bv.isObj()) {
+                        const o = bv.asObj();
+                        const len: i48 = switch (o.kind) {
+                            .list => @intCast(o.data.list.items.items.len),
+                            .vector => @intCast(o.data.vector.items.items.len),
+                            .map => @intCast(o.data.map.keys.items.len),
+                            .set => @intCast(o.data.set.items.items.len),
+                            else => return error.TypeError,
+                        };
+                        self.reg(a).* = Value.makeInt(len);
+                    } else return error.TypeError;
+                },
+                .nth => {
+                    const a = decode_a(inst);
+                    const b = decode_b(inst);
+                    const c = decode_c(inst);
+                    const bv = self.reg(b).*;
+                    const cv = self.reg(c).*;
+                    if (!cv.isInt()) return error.TypeError;
+                    const idx_raw = cv.asInt();
+                    if (idx_raw < 0) return error.TypeError;
+                    const idx: usize = @intCast(idx_raw);
+                    if (bv.isObj()) {
+                        const o = bv.asObj();
+                        if (o.kind == .list or o.kind == .vector) {
+                            const items = if (o.kind == .list) o.data.list.items else o.data.vector.items;
+                            if (idx >= items.items.len) return error.TypeError;
+                            self.reg(a).* = items.items[idx];
+                        } else return error.TypeError;
                     } else return error.TypeError;
                 },
             }

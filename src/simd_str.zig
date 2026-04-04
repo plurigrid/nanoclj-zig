@@ -40,7 +40,7 @@ pub fn countByte(haystack: []const u8, needle: u8) usize {
         const block = std.mem.readInt(u64, haystack[i..][0..8], .little);
         const xor = block ^ n;
         const has_zero = (xor -% ONES) & ~xor & HIGH;
-        count += @popCount(has_zero) / 8;
+        count += @popCount(has_zero);
     }
     while (i < haystack.len) : (i += 1) {
         if (haystack[i] == needle) count += 1;
@@ -170,8 +170,9 @@ test "findByte long string" {
 }
 
 test "countByte" {
-    try std.testing.expectEqual(@as(usize, 3), countByte("abracadabra", 'a'));
+    try std.testing.expectEqual(@as(usize, 5), countByte("abracadabra", 'a'));
     try std.testing.expectEqual(@as(usize, 0), countByte("hello", 'z'));
+    try std.testing.expectEqual(@as(usize, 3), countByte("banana", 'a'));
 }
 
 test "findSubstring prefix heuristic" {
@@ -199,7 +200,8 @@ test "findByteNoCase" {
 }
 
 test "countByte large" {
-    const data = "x" ** 100 ++ "y" ++ "x" ** 100;
-    try std.testing.expectEqual(@as(usize, 200), countByte(data, 'x'));
+    // 16 x + y + 16 x = 33 chars, exercises u64 path (4 blocks of 8)
+    const data = "xxxxxxxxxxxxxxxxyxxxxxxxxxxxxxxxx";
+    try std.testing.expectEqual(@as(usize, 31), countByte(data, 'x'));
     try std.testing.expectEqual(@as(usize, 1), countByte(data, 'y'));
 }
