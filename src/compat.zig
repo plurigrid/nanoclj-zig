@@ -52,3 +52,66 @@ pub const Mutex = struct {
         self.inner.unlock();
     }
 };
+
+/// Cross-version stdout/stdin/stderr write helpers.
+/// 0.15: std.fs.File with .writeAll()
+/// 0.16: std.io.File — no direct writeAll, use system call
+const has_fs_file = @hasDecl(std.fs, "File");
+
+pub fn stdoutWrite(bytes: []const u8) void {
+    if (has_fs_file) {
+        const f = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+        f.writeAll(bytes) catch {};
+    } else {
+        writeAllFd(std.posix.STDOUT_FILENO, bytes);
+    }
+}
+
+pub fn stderrWrite(bytes: []const u8) void {
+    if (has_fs_file) {
+        const f = std.fs.File{ .handle = std.posix.STDERR_FILENO };
+        f.writeAll(bytes) catch {};
+    } else {
+        writeAllFd(std.posix.STDERR_FILENO, bytes);
+    }
+}
+
+fn writeAllFd(fd: std.posix.fd_t, bytes: []const u8) void {
+    var written: usize = 0;
+    while (written < bytes.len) {
+        const rc = std.c.write(fd, bytes.ptr + written, bytes.len - written);
+        if (rc <= 0) break;
+        written += @intCast(rc);
+    }
+}
+
+/// Cross-version GeneralPurposeAllocator / DebugAllocator.
+const has_gpa = @hasDecl(std.heap, "GeneralPurposeAllocator");
+
+pub fn DebugAllocator() type {
+    if (has_gpa) {
+        return std.heap.GeneralPurposeAllocator(.{});
+    } else {
+        return std.heap.DebugAllocator(.{});
+    }
+}
+
+pub fn makeDebugAllocator() DebugAllocator() {
+    if (has_gpa) {
+        return std.heap.GeneralPurposeAllocator(.{}){};
+    } else {
+        return std.heap.DebugAllocator(.{}).init;
+    }
+}
+
+/// Cross-version stdin reader.  Returns bytes read into buf.
+pub fn stdinRead(buf: []u8) usize {
+    if (has_fs_file) {
+        const f = std.fs.File{ .handle = std.posix.STDIN_FILENO };
+        return f.read(buf) catch 0;
+    } else {
+        const rc = std.c.read(std.posix.STDIN_FILENO, buf.ptr, buf.len);
+        if (rc <= 0) return 0;
+        return @intCast(rc);
+    }
+}
