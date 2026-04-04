@@ -38,6 +38,7 @@ pub const ObjKind = enum(u8) {
     protocol, // defprotocol: method sigs + type→impl dispatch table
     dense_f64, // Neanderthal-compatible: contiguous f64 buffer + stride
     trace, // Anglican-compatible: weighted execution trace (sample sites + log-weight)
+    rational, // exact rational number: numerator/denominator (always GCD-normalized, denominator > 0)
 };
 
 pub const Obj = struct {
@@ -73,6 +74,7 @@ pub const ObjData = union {
     protocol: ProtocolData,
     dense_f64: DenseF64,
     trace: TraceData,
+    rational: Rational,
 };
 
 /// Neanderthal-compatible dense f64 vector.
@@ -137,6 +139,44 @@ pub const TraceData = struct {
         try self.site_values.append(allocator, val);
         try self.site_log_probs.append(allocator, log_prob);
         self.log_weight += log_prob;
+    }
+};
+
+/// GCD helper for rational normalization (Euclidean algorithm on absolute values).
+fn gcd(a_raw: i64, b_raw: i64) u64 {
+    var a: u64 = if (a_raw < 0) @intCast(-a_raw) else @intCast(a_raw);
+    var b: u64 = if (b_raw < 0) @intCast(-b_raw) else @intCast(b_raw);
+    while (b != 0) {
+        const t = b;
+        b = a % b;
+        a = t;
+    }
+    return if (a == 0) 1 else a;
+}
+
+/// Exact rational number: numerator / denominator.
+/// Invariants: denominator > 0, gcd(|numerator|, denominator) == 1.
+pub const Rational = struct {
+    numerator: i64,
+    denominator: i64,
+
+    /// Create a normalized rational. Denominator is always positive and
+    /// the fraction is reduced to lowest terms.
+    pub fn init(num: i64, den: i64) Rational {
+        if (den == 0) return .{ .numerator = 0, .denominator = 1 }; // fallback
+        var n = num;
+        var d = den;
+        if (d < 0) { n = -n; d = -d; } // ensure denominator > 0
+        const g: i64 = @intCast(gcd(n, d));
+        return .{ .numerator = @divTrunc(n, g), .denominator = @divTrunc(d, g) };
+    }
+
+    pub fn isInteger(self: *const Rational) bool {
+        return self.denominator == 1;
+    }
+
+    pub fn toFloat(self: *const Rational) f64 {
+        return @as(f64, @floatFromInt(self.numerator)) / @as(f64, @floatFromInt(self.denominator));
     }
 };
 

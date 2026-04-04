@@ -18,6 +18,13 @@ const transclusion = @import("transclusion.zig");
 const Domain = transclusion.Domain;
 
 // ============================================================================
+// RECUR SIGNAL: loop/recur communication via thread-local state
+// ============================================================================
+var recur_pending: bool = false;
+var recur_args: [16]Value = undefined;
+var recur_count: usize = 0;
+
+// ============================================================================
 // SPECIAL FORM IDS: u48 integer dispatch (avoids string comparisons)
 // ============================================================================
 
@@ -138,6 +145,20 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
             if (std.mem.eql(u8, sname, "try")) return evalBoundedTry(items, env, gc, res);
             if (std.mem.eql(u8, sname, "ns") or std.mem.eql(u8, sname, "in-ns")) return Domain.pure(Value.makeNil());
             if (std.mem.eql(u8, sname, "comment")) return Domain.pure(Value.makeNil());
+            // recur: set signal args for loop to catch
+            if (std.mem.eql(u8, sname, "recur")) {
+                recur_count = 0;
+                for (items[1..]) |arg| {
+                    const d = evalBounded(arg, env, gc, res);
+                    if (!d.isValue()) return d;
+                    if (recur_count < 16) {
+                        recur_args[recur_count] = d.value;
+                        recur_count += 1;
+                    }
+                }
+                recur_pending = true;
+                return Domain.pure(Value.makeNil()); // sentinel — loop will catch
+            }
             // and: short-circuit, return first falsy or last value
             if (std.mem.eql(u8, sname, "and")) {
                 var result = Domain.pure(Value.makeBool(true));
@@ -221,6 +242,97 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
                     }
                 }
                 return Domain.pure(Value.makeNil());
+            }
+            // loop/recur: (loop [x init y init] body...)
+            if (std.mem.eql(u8, sname, "loop")) {
+                if (items.len < 3) return Domain.fail(.arity_error);
+                if (!items[1].isObj()) return Domain.fail(.type_error);
+                const bindings = switch (items[1].asObj().kind) {
+                    .vector => items[1].asObj().data.vector.items.items,
+                    .list => items[1].asObj().data.list.items.items,
+                    else => return Domain.fail(.type_error),
+                };
+                if (bindings.len % 2 != 0) return Domain.fail(.type_error);
+                // Create env with bindings
+                const loop_env = env.createChild() catch return Domain.fail(.type_error);
+                gc.trackEnv(loop_env) catch return Domain.fail(.type_error);
+                var bi: usize = 0;
+                while (bi < bindings.len) : (bi += 2) {
+                    if (!bindings[bi].isSymbol()) return Domain.fail(.type_error);
+                    const bname = gc.getString(bindings[bi].asSymbolId());
+                    const bval_d = evalBounded(bindings[bi + 1], env, gc, res);
+                    if (!bval_d.isValue()) return bval_d;
+                    loop_env.set(bname, bval_d.value) catch return Domain.fail(.type_error);
+                }
+                // Eval body, handle recur via signal
+                recur_pending = false;
+                var iterations: u32 = 0;
+                while (iterations < 10000) : (iterations += 1) {
+                    var result = Domain.pure(Value.makeNil());
+                    recur_pending = false;
+                    for (items[2..]) |form| {
+                        result = evalBounded(form, loop_env, gc, res);
+                        if (!result.isValue()) return result;
+                        if (recur_pending) break;
+                    }
+                    if (recur_pending) {
+                        recur_pending = false;
+                        // Re-bind loop vars from recur_args
+                        var rbi: usize = 0;
+                        while (rbi < bindings.len and rbi / 2 < recur_count) : (rbi += 2) {
+                            const rbname = gc.getString(bindings[rbi].asSymbolId());
+                            loop_env.set(rbname, recur_args[rbi / 2]) catch return Domain.fail(.type_error);
+                        }
+                        continue;
+                    }
+                    return result;
+                }
+                return Domain.fail(.type_error); // max iterations
+            }
+            // for: (for [x coll] body) — list comprehension
+            if (std.mem.eql(u8, sname, "for")) {
+                if (items.len < 3) return Domain.fail(.arity_error);
+                if (!items[1].isObj()) return Domain.fail(.type_error);
+                const bindings = switch (items[1].asObj().kind) {
+                    .vector => items[1].asObj().data.vector.items.items,
+                    .list => items[1].asObj().data.list.items.items,
+                    else => return Domain.fail(.type_error),
+                };
+                if (bindings.len < 2 or !bindings[0].isSymbol()) return Domain.fail(.type_error);
+                const for_name = gc.getString(bindings[0].asSymbolId());
+                const coll_d = evalBounded(bindings[1], env, gc, res);
+                if (!coll_d.isValue()) return coll_d;
+                const coll_items = getItemsDomain(coll_d.value) orelse return Domain.pure(Value.makeNil());
+                const result_obj = gc.allocObj(.list) catch return Domain.fail(.type_error);
+                for (coll_items) |item| {
+                    const child = env.createChild() catch return Domain.fail(.type_error);
+                    gc.trackEnv(child) catch return Domain.fail(.type_error);
+                    child.set(for_name, item) catch return Domain.fail(.type_error);
+                    // Handle nested bindings: [x coll y coll2]
+                    if (bindings.len >= 4 and bindings[2].isSymbol()) {
+                        const for_name2 = gc.getString(bindings[2].asSymbolId());
+                        const coll2_d = evalBounded(bindings[3], child, gc, res);
+                        if (!coll2_d.isValue()) return coll2_d;
+                        const coll2_items = getItemsDomain(coll2_d.value) orelse continue;
+                        for (coll2_items) |item2| {
+                            child.set(for_name2, item2) catch continue;
+                            for (items[2..]) |form| {
+                                const d = evalBounded(form, child, gc, res);
+                                if (d.isValue()) {
+                                    result_obj.data.list.items.append(gc.allocator, d.value) catch continue;
+                                }
+                            }
+                        }
+                    } else {
+                        for (items[2..]) |form| {
+                            const d = evalBounded(form, child, gc, res);
+                            if (d.isValue()) {
+                                result_obj.data.list.items.append(gc.allocator, d.value) catch continue;
+                            }
+                        }
+                    }
+                }
+                return Domain.pure(Value.makeObj(result_obj));
             }
         }
         if (!sf_initialized) {

@@ -128,6 +128,19 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
                 try buf.appendSlice(gc.allocator, s);
                 try buf.append(gc.allocator, '>');
             },
+            .rational => {
+                const r = &obj.data.rational;
+                if (r.denominator == 1) {
+                    // Integer promotion: 5/1 prints as "5"
+                    var tmp: [21]u8 = undefined;
+                    const s = std.fmt.bufPrint(&tmp, "{d}", .{r.numerator}) catch "?";
+                    try buf.appendSlice(gc.allocator, s);
+                } else {
+                    var tmp: [43]u8 = undefined;
+                    const s = std.fmt.bufPrint(&tmp, "{d}/{d}", .{ r.numerator, r.denominator }) catch "?";
+                    try buf.appendSlice(gc.allocator, s);
+                }
+            },
         }
     } else {
         // float

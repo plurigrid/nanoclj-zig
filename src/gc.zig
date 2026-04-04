@@ -91,6 +91,7 @@ pub const GC = struct {
                 .protocol => .{ .protocol = .{ .name = "", .method_names = compat.emptyList([]const u8), .impls = compat.emptyList(value.TypeImpl) } },
                 .dense_f64 => .{ .dense_f64 = .{ .data = &.{}, .len = 0 } },
                 .trace => .{ .trace = .{ .site_names = compat.emptyList(u32), .site_values = compat.emptyList(Value), .site_log_probs = compat.emptyList(f64) } },
+                .rational => .{ .rational = .{ .numerator = 0, .denominator = 1 } },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -205,6 +206,7 @@ pub const GC = struct {
                     }
                 },
                 .dense_f64 => {}, // no Value refs
+                .rational => {}, // no Value refs, no heap
                 .trace => {
                     for (cur.data.trace.site_values.items) |v| self.enqueueVal(v, &worklist);
                 },
@@ -283,6 +285,7 @@ pub const GC = struct {
                 obj.data.trace.site_values.deinit(self.allocator);
                 obj.data.trace.site_log_probs.deinit(self.allocator);
             },
+            .rational => {}, // no heap data
         }
         self.allocator.destroy(obj);
         self.bytes_allocated -|= @sizeOf(Obj);

@@ -1,0 +1,11 @@
+;; nanoclj-zig scratch — C-x C-e eval inline, C-c C-i inet-eval
+
+(+ 21 21)
+
+(color-at 1069 0)
+
+(gf3-conserved? 1 0 -1)
+
+(def fib (fn [n] (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
+
+(fib 10)

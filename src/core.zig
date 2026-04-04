@@ -533,6 +533,12 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "trace-observe!", &traceObserveBangFn },
         .{ "trace-log-weight", &traceLogWeightFn },
         .{ "trace-sites", &traceSitesFn },
+        // Rational numbers (exact arithmetic)
+        .{ "rational", &rationalFn },
+        .{ "numerator", &numeratorFn },
+        .{ "denominator", &denominatorFn },
+        .{ "rationalize", &rationalizeFn },
+        .{ "rational?", &isRationalObjP },
     };
 
     inline for (builtins) |b| {
@@ -705,11 +711,52 @@ fn hashMapFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn first(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn first(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
+    // Handle lazy-seq: force the first element only
+    if (obj.kind == .lazy_seq) {
+        const thunk = obj.data.lazy_seq.thunk;
+        if (thunk.isObj() and thunk.asObj().kind == .vector) {
+            const payload = thunk.asObj().data.vector.items.items;
+            if (payload.len >= 2 and payload[0].isKeyword()) {
+                const marker = gc.getString(payload[0].asKeywordId());
+                if (std.mem.eql(u8, marker, "__repeat__")) {
+                    // (repeat val) or (repeat n val): first element is val
+                    const val = if (payload.len >= 3) payload[2] else payload[1];
+                    // Check finite repeat with 0 count
+                    if (payload.len >= 3 and payload[1].isInt() and payload[1].asInt() <= 0) return Value.makeNil();
+                    return val;
+                }
+                if (std.mem.eql(u8, marker, "__iterate__")) {
+                    // (iterate f init): first element is init
+                    return payload[2];
+                }
+                if (std.mem.eql(u8, marker, "__repeatedly__")) {
+                    // (repeatedly f): call f once
+                    const f = payload[1];
+                    return eval_mod.apply(f, &.{}, env, gc) catch Value.makeNil();
+                }
+                if (std.mem.eql(u8, marker, "__range__")) {
+                    // (range): first element is start
+                    return payload[1];
+                }
+            }
+        }
+        // Generic lazy-seq: call thunk and get first of result
+        if (!thunk.isNil()) {
+            const realized = eval_mod.apply(thunk, &.{}, env, gc) catch return Value.makeNil();
+            if (realized.isObj()) {
+                const ritems = getItems(realized) orelse return Value.makeNil();
+                return if (ritems.len > 0) ritems[0] else Value.makeNil();
+            }
+            // If thunk returned a non-collection value, return it directly
+            if (!realized.isNil()) return realized;
+        }
+        return Value.makeNil();
+    }
     const items = switch (obj.kind) {
         .list => obj.data.list.items.items,
         .vector => obj.data.vector.items.items,
@@ -718,12 +765,79 @@ fn first(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (items.len > 0) items[0] else Value.makeNil();
 }
 
-fn rest(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn rest(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const new = try gc.allocObj(.list);
     if (args[0].isNil()) return Value.makeObj(new);
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
+    // Handle lazy-seq: return a new lazy_seq representing the rest
+    if (obj.kind == .lazy_seq) {
+        const thunk = obj.data.lazy_seq.thunk;
+        if (thunk.isObj() and thunk.asObj().kind == .vector) {
+            const payload = thunk.asObj().data.vector.items.items;
+            if (payload.len >= 2 and payload[0].isKeyword()) {
+                const marker = gc.getString(payload[0].asKeywordId());
+                if (std.mem.eql(u8, marker, "__iterate__")) {
+                    // (iterate f init) → rest is (iterate f (f init))
+                    const f = payload[1];
+                    var call_args = [_]Value{payload[2]};
+                    const next_val = eval_mod.apply(f, &call_args, env, gc) catch return Value.makeObj(new);
+                    const rest_obj = try gc.allocObj(.lazy_seq);
+                    const rest_payload = try gc.allocObj(.vector);
+                    try rest_payload.data.vector.items.append(gc.allocator, payload[0]); // marker
+                    try rest_payload.data.vector.items.append(gc.allocator, f); // same fn
+                    try rest_payload.data.vector.items.append(gc.allocator, next_val); // new init
+                    rest_obj.data.lazy_seq.thunk = Value.makeObj(rest_payload);
+                    return Value.makeObj(rest_obj);
+                }
+                if (std.mem.eql(u8, marker, "__range__")) {
+                    // (range) with start, step → rest is (range) with start+step, step
+                    const range_start = payload[1].asInt();
+                    const range_step = payload[2].asInt();
+                    const rest_obj = try gc.allocObj(.lazy_seq);
+                    const rest_payload = try gc.allocObj(.vector);
+                    try rest_payload.data.vector.items.append(gc.allocator, payload[0]); // marker
+                    try rest_payload.data.vector.items.append(gc.allocator, Value.makeInt(range_start +% range_step));
+                    try rest_payload.data.vector.items.append(gc.allocator, payload[2]); // same step
+                    rest_obj.data.lazy_seq.thunk = Value.makeObj(rest_payload);
+                    return Value.makeObj(rest_obj);
+                }
+                if (std.mem.eql(u8, marker, "__repeat__")) {
+                    // (repeat val) → rest is same infinite repeat
+                    // (repeat n val) → rest is (repeat (n-1) val)
+                    if (payload.len >= 3 and payload[1].isInt()) {
+                        const cnt = payload[1].asInt();
+                        if (cnt <= 1) return Value.makeObj(new); // empty rest
+                        const rest_obj = try gc.allocObj(.lazy_seq);
+                        const rest_payload = try gc.allocObj(.vector);
+                        try rest_payload.data.vector.items.append(gc.allocator, payload[0]);
+                        try rest_payload.data.vector.items.append(gc.allocator, Value.makeInt(cnt - 1));
+                        try rest_payload.data.vector.items.append(gc.allocator, payload[2]);
+                        rest_obj.data.lazy_seq.thunk = Value.makeObj(rest_payload);
+                        return Value.makeObj(rest_obj);
+                    }
+                    // Infinite repeat — return same lazy_seq
+                    return args[0];
+                }
+                if (std.mem.eql(u8, marker, "__repeatedly__")) {
+                    // (repeatedly f) → rest is same infinite repeatedly
+                    return args[0];
+                }
+            }
+        }
+        // Generic lazy-seq: realize and return rest as list
+        if (!thunk.isNil()) {
+            const realized = eval_mod.apply(thunk, &.{}, env, gc) catch return Value.makeObj(new);
+            if (realized.isObj()) {
+                const ritems = getItems(realized) orelse return Value.makeObj(new);
+                if (ritems.len > 1) {
+                    for (ritems[1..]) |item| try new.data.list.items.append(gc.allocator, item);
+                }
+            }
+        }
+        return Value.makeObj(new);
+    }
     const items = switch (obj.kind) {
         .list => obj.data.list.items.items,
         .vector => obj.data.vector.items.items,
@@ -1239,13 +1353,74 @@ fn applyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return eval_mod.apply(func, real_args.items, env, gc);
 }
 
-fn takeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn takeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     const n: usize = @intCast(@max(@as(i48, 0), args[0].asInt()));
     if (args[1].isNil()) return Value.makeObj(try gc.allocObj(.list));
     if (!args[1].isObj()) return error.TypeError;
     const obj = args[1].asObj();
+    // Handle lazy-seq: realize n elements by inspecting the thunk marker
+    if (obj.kind == .lazy_seq) {
+        const result = try gc.allocObj(.list);
+        const thunk = obj.data.lazy_seq.thunk;
+        if (thunk.isObj() and thunk.asObj().kind == .vector) {
+            const payload = thunk.asObj().data.vector.items.items;
+            if (payload.len >= 2 and payload[0].isKeyword()) {
+                const marker = gc.getString(payload[0].asKeywordId());
+                if (std.mem.eql(u8, marker, "__repeat__")) {
+                    // (repeat val) or (repeat n val)
+                    const val = if (payload.len >= 3) payload[2] else payload[1];
+                    const limit = if (payload.len >= 3 and payload[1].isInt())
+                        @min(n, @as(usize, @intCast(@max(@as(i48, 0), payload[1].asInt()))))
+                    else n;
+                    for (0..limit) |_| try result.data.list.items.append(gc.allocator, val);
+                    return Value.makeObj(result);
+                }
+                if (std.mem.eql(u8, marker, "__iterate__")) {
+                    // (iterate f init)
+                    const f = payload[1];
+                    var current = payload[2];
+                    for (0..n) |_| {
+                        try result.data.list.items.append(gc.allocator, current);
+                        var call_args = [_]Value{current};
+                        current = eval_mod.apply(f, &call_args, env, gc) catch break;
+                    }
+                    return Value.makeObj(result);
+                }
+                if (std.mem.eql(u8, marker, "__repeatedly__")) {
+                    // (repeatedly f) — call f n times
+                    const f = payload[1];
+                    for (0..n) |_| {
+                        const val = eval_mod.apply(f, &.{}, env, gc) catch break;
+                        try result.data.list.items.append(gc.allocator, val);
+                    }
+                    return Value.makeObj(result);
+                }
+                if (std.mem.eql(u8, marker, "__range__")) {
+                    // (range) — infinite lazy range: start, start+step, ...
+                    const range_start = payload[1].asInt();
+                    const range_step = payload[2].asInt();
+                    var current = range_start;
+                    for (0..n) |_| {
+                        try result.data.list.items.append(gc.allocator, Value.makeInt(current));
+                        current +%= range_step;
+                    }
+                    return Value.makeObj(result);
+                }
+            }
+        }
+        // Generic lazy-seq: try calling thunk as zero-arg fn
+        if (!thunk.isNil()) {
+            const realized = eval_mod.apply(thunk, &.{}, env, gc) catch return Value.makeObj(result);
+            if (realized.isObj()) {
+                const ritems = getItems(realized) orelse return Value.makeObj(result);
+                const limit = @min(n, ritems.len);
+                for (ritems[0..limit]) |item| try result.data.list.items.append(gc.allocator, item);
+            }
+        }
+        return Value.makeObj(result);
+    }
     const items = switch (obj.kind) {
         .list => obj.data.list.items.items,
         .vector => obj.data.vector.items.items,
@@ -1337,8 +1512,22 @@ fn reduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 }
 
 fn rangeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    // (range) — infinite lazy sequence 0, 1, 2, ...
     // (range end), (range start end), (range start end step)
-    if (args.len == 0 or args.len > 3) return error.ArityError;
+    if (args.len > 3) return error.ArityError;
+
+    // Zero-arity: infinite lazy range starting from 0
+    if (args.len == 0) {
+        const obj = try gc.allocObj(.lazy_seq);
+        const payload = try gc.allocObj(.vector);
+        const marker = Value.makeKeyword(try gc.internString("__range__"));
+        try payload.data.vector.items.append(gc.allocator, marker);
+        try payload.data.vector.items.append(gc.allocator, Value.makeInt(0)); // start
+        try payload.data.vector.items.append(gc.allocator, Value.makeInt(1)); // step
+        obj.data.lazy_seq.thunk = Value.makeObj(payload);
+        return Value.makeObj(obj);
+    }
+
     var start: i48 = 0;
     var end: i48 = undefined;
     var step: i48 = 1;
@@ -2381,6 +2570,7 @@ fn typeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         .protocol => "protocol",
         .dense_f64 => "dense-f64",
         .trace => "trace",
+        .rational => "rational",
     }
     else "unknown";
     return Value.makeString(try gc.internString(t));
@@ -3752,10 +3942,13 @@ fn natIntP(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 fn specialSymbolP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
 fn varP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
-fn ratioP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
+fn ratioP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .rational);
+}
 fn rationalP(args: []Value, _: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
-    return Value.makeBool(args[0].isInt());
+    return Value.makeBool(args[0].isInt() or (args[0].isObj() and args[0].asObj().kind == .rational));
 }
 fn decimalP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
 fn uuidP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
@@ -4386,5 +4579,89 @@ fn traceSitesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         try result.data.vector.items.append(gc.allocator, Value.makeObj(site));
     }
     return Value.makeObj(result);
+}
+
+// ============================================================================
+// RATIONAL NUMBERS (exact arithmetic)
+// ============================================================================
+
+/// (rational n d) — create a normalized rational number
+fn rationalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
+    const num: i64 = args[0].asInt();
+    const den: i64 = args[1].asInt();
+    if (den == 0) return error.DivisionByZero;
+    const obj = try gc.allocObj(.rational);
+    obj.data.rational = value.Rational.init(num, den);
+    return Value.makeObj(obj);
+}
+
+/// (numerator r) — get numerator of a rational
+fn numeratorFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isInt()) return args[0]; // integer numerator is itself
+    if (!args[0].isObj() or args[0].asObj().kind != .rational) return error.TypeError;
+    return Value.makeInt(@intCast(args[0].asObj().data.rational.numerator));
+}
+
+/// (denominator r) — get denominator of a rational
+fn denominatorFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isInt()) return Value.makeInt(1); // integer denominator is 1
+    if (!args[0].isObj() or args[0].asObj().kind != .rational) return error.TypeError;
+    return Value.makeInt(@intCast(args[0].asObj().data.rational.denominator));
+}
+
+/// (rationalize x) — convert a float to its nearest rational approximation
+/// Uses continued fraction expansion (Stern-Brocot mediant convergence).
+fn rationalizeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    // If already rational or integer, return as-is
+    if (args[0].isInt()) return args[0];
+    if (args[0].isObj() and args[0].asObj().kind == .rational) return args[0];
+    if (!args[0].isFloat()) return error.TypeError;
+    const x = args[0].asFloat();
+    if (std.math.isNan(x) or std.math.isInf(x)) return error.TypeError;
+
+    // Continued fraction convergents with tolerance 1e-10
+    const tolerance: f64 = 1e-10;
+    var p0: i64 = 0;
+    var q0: i64 = 1;
+    var p1: i64 = 1;
+    var q1: i64 = 0;
+    var val = x;
+    const negative = x < 0;
+    if (negative) val = -val;
+
+    var i: u32 = 0;
+    while (i < 64) : (i += 1) {
+        const a: i64 = @intFromFloat(val);
+        const p2 = a * p1 + p0;
+        const q2 = a * q1 + q0;
+        if (q2 > 1_000_000_000) break; // prevent overflow
+        p0 = p1;
+        q0 = q1;
+        p1 = p2;
+        q1 = q2;
+        const approx = @as(f64, @floatFromInt(p1)) / @as(f64, @floatFromInt(q1));
+        if (@abs(approx - val) < tolerance) break;
+        const rem = val - @as(f64, @floatFromInt(a));
+        if (@abs(rem) < tolerance) break;
+        val = 1.0 / rem;
+    }
+
+    const num = if (negative) -p1 else p1;
+    const den = q1;
+    if (den == 1) return Value.makeInt(@intCast(num));
+    const obj = try gc.allocObj(.rational);
+    obj.data.rational = value.Rational.init(num, den);
+    return Value.makeObj(obj);
+}
+
+/// (rational? x) — true if x is a rational object
+fn isRationalObjP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .rational);
 }
 
