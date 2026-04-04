@@ -14,12 +14,61 @@ const Env = @import("env.zig").Env;
 
 const MAX_RESPONSE_BYTES = 1024 * 1024; // 1 MiB
 
+/// CVE-2 fix: block SSRF via private/metadata URLs
+fn isSafeUrl(url: []const u8) bool {
+    // Must start with http:// or https://
+    const after_scheme = if (std.mem.startsWith(u8, url, "https://"))
+        url[8..]
+    else if (std.mem.startsWith(u8, url, "http://"))
+        url[7..]
+    else
+        return false; // block file://, ftp://, etc.
+
+    // Extract host (before first / or :)
+    var host_end: usize = 0;
+    while (host_end < after_scheme.len and after_scheme[host_end] != '/' and after_scheme[host_end] != ':') : (host_end += 1) {}
+    const host = after_scheme[0..host_end];
+    if (host.len == 0) return false;
+
+    // Block cloud metadata endpoints
+    if (std.mem.eql(u8, host, "169.254.169.254")) return false;
+    if (std.mem.eql(u8, host, "metadata.google.internal")) return false;
+
+    // Block localhost variants
+    if (std.mem.eql(u8, host, "localhost")) return false;
+    if (std.mem.eql(u8, host, "127.0.0.1")) return false;
+    if (std.mem.eql(u8, host, "[::1]")) return false;
+    if (std.mem.eql(u8, host, "0.0.0.0")) return false;
+
+    // Block private IP ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
+    if (std.mem.startsWith(u8, host, "10.")) return false;
+    if (std.mem.startsWith(u8, host, "172.")) {
+        // Check for 172.16.x.x through 172.31.x.x
+        if (host.len > 4) {
+            const second_octet = std.fmt.parseInt(u8, blk: {
+                var end: usize = 4;
+                while (end < host.len and host[end] != '.') : (end += 1) {}
+                break :blk host[4..end];
+            }, 10) catch return true;
+            if (second_octet >= 16 and second_octet <= 31) return false;
+        }
+    }
+    if (std.mem.startsWith(u8, host, "192.168.")) return false;
+    if (std.mem.startsWith(u8, host, "169.254.")) return false;
+
+    return true;
+}
+
 pub fn httpFetchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len < 1 or args.len > 3) return error.ArityError;
 
     // Arg 0: URL (string)
     if (!args[0].isString()) return error.TypeError;
     const url = gc.getString(args[0].asStringId());
+
+    if (!isSafeUrl(url)) {
+        return Value.makeString(try gc.internString("error: blocked URL (private/metadata)"));
+    }
 
     // Arg 1 (optional): method keyword (:get, :post, :put, :delete)
     var method: std.http.Method = .GET;
@@ -51,39 +100,11 @@ pub fn httpFetchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 fn doFetch(gc: *GC, url: []const u8, method: std.http.Method, payload: ?[]const u8) anyerror!Value {
-    var client: std.http.Client = .{ .allocator = gc.allocator };
-    defer client.deinit();
-
-    var allocating = std.Io.Writer.Allocating.init(gc.allocator);
-
-    const result = client.fetch(.{
-        .location = .{ .url = url },
-        .method = method,
-        .payload = payload,
-        .response_writer = &allocating.writer,
-    }) catch {
-        return Value.makeString(try gc.internString("error: fetch failed"));
-    };
-
-    const body = allocating.toOwnedSlice() catch "";
-    defer if (body.len > 0) gc.allocator.free(body);
-
-    // Build result map: {:status N :body "..."}
-    const obj = try gc.allocObj(.map);
-    const kw = struct {
-        fn intern(g: *GC, s: []const u8) !Value {
-            return Value.makeKeyword(try g.internString(s));
-        }
-    }.intern;
-
-    try obj.data.map.keys.append(gc.allocator, try kw(gc, "status"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(@intFromEnum(result.status))));
-
-    try obj.data.map.keys.append(gc.allocator, try kw(gc, "body"));
-    const body_id = try gc.internString(body);
-    try obj.data.map.vals.append(gc.allocator, Value.makeString(body_id));
-
-    return Value.makeObj(obj);
+    // Zig 0.16 requires std.Io context for HTTP — stub until Io threading is wired up
+    _ = url;
+    _ = method;
+    _ = payload;
+    return Value.makeString(try gc.internString("error: http-fetch not yet ported to zig 0.16"));
 }
 
 // ============================================================================

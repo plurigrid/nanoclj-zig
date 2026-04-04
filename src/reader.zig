@@ -16,10 +16,13 @@ pub const ReadError = error{
     InvalidUtf8,
 };
 
+const MAX_READ_DEPTH: u32 = 256;
+
 pub const Reader = struct {
     src: []const u8,
     pos: usize = 0,
     gc: *GC,
+    depth: u32 = 0, // CVE-3 fix: track nesting depth
 
     pub fn init(src: []const u8, gc: *GC) Reader {
         return .{ .src = src, .gc = gc };
@@ -60,6 +63,9 @@ pub const Reader = struct {
     }
 
     fn readList(self: *Reader) ReadError!Value {
+        self.depth += 1;
+        if (self.depth > MAX_READ_DEPTH) return error.UnexpectedChar; // depth exceeded
+        defer self.depth -= 1;
         self.pos += 1; // skip (
         const obj = self.gc.allocObj(.list) catch return error.OutOfMemory;
         while (true) {
@@ -75,6 +81,9 @@ pub const Reader = struct {
     }
 
     fn readVector(self: *Reader) ReadError!Value {
+        self.depth += 1;
+        if (self.depth > MAX_READ_DEPTH) return error.UnexpectedChar;
+        defer self.depth -= 1;
         self.pos += 1; // skip [
         const obj = self.gc.allocObj(.vector) catch return error.OutOfMemory;
         while (true) {
@@ -90,6 +99,9 @@ pub const Reader = struct {
     }
 
     fn readMap(self: *Reader) ReadError!Value {
+        self.depth += 1;
+        if (self.depth > MAX_READ_DEPTH) return error.UnexpectedChar;
+        defer self.depth -= 1;
         self.pos += 1; // skip {
         const obj = self.gc.allocObj(.map) catch return error.OutOfMemory;
         while (true) {

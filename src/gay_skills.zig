@@ -96,7 +96,7 @@ pub fn depthFuelCost(depth: u32) u64 {
 }
 
 /// RGB to hue (local copy to avoid import cycles)
-fn rgbToHue(r: u8, g: u8, b: u8) f64 {
+pub fn rgbToHue(r: u8, g: u8, b: u8) f64 {
     const rf: f64 = @as(f64, @floatFromInt(r)) / 255.0;
     const gf: f64 = @as(f64, @floatFromInt(g)) / 255.0;
     const bf: f64 = @as(f64, @floatFromInt(b)) / 255.0;

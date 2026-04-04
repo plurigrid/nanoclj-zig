@@ -200,11 +200,12 @@ pub fn inetFromForestFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 pub fn inetDotFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const net = try getNet(args);
     var buf = compat.emptyList(u8);
-    const w = buf.writer(gc.allocator);
 
-    try w.writeAll("digraph inet {\n  rankdir=LR;\n  node [shape=circle];\n");
+    // 0.16: ArrayListUnmanaged no longer has .writer(); use appendSlice + bufPrint
+    try buf.appendSlice(gc.allocator, "digraph inet {\n  rankdir=LR;\n  node [shape=circle];\n");
 
     // Cells
+    var fmt_buf: [256]u8 = undefined;
     for (net.cells.items, 0..) |cell, i| {
         if (!cell.alive) continue;
         const shape: []const u8 = switch (cell.kind) {
@@ -219,20 +220,22 @@ pub fn inetDotFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
             .epsilon => "ε",
             .iota => "ι",
         };
-        try w.print("  c{d} [shape={s} label=\"{s}{d}\"];\n", .{ i, shape, label, i });
+        const line = std.fmt.bufPrint(&fmt_buf, "  c{d} [shape={s} label=\"{s}{d}\"];\n", .{ i, shape, label, i }) catch continue;
+        try buf.appendSlice(gc.allocator, line);
     }
 
     // Wires
     for (net.wires.items) |wire| {
         const style: []const u8 = if (wire.a.port == 0 and wire.b.port == 0) "bold" else "solid";
-        try w.print("  c{d}:p{d} -> c{d}:p{d} [style={s} dir=none];\n", .{
+        const line = std.fmt.bufPrint(&fmt_buf, "  c{d}:p{d} -> c{d}:p{d} [style={s} dir=none];\n", .{
             wire.a.cell, wire.a.port,
             wire.b.cell, wire.b.port,
             style,
-        });
+        }) catch continue;
+        try buf.appendSlice(gc.allocator, line);
     }
 
-    try w.writeAll("}\n");
+    try buf.appendSlice(gc.allocator, "}\n");
 
     const str_id = try gc.internString(buf.items);
     return Value.makeString(str_id);

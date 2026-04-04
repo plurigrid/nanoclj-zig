@@ -2,11 +2,12 @@
 //! Usage: nanoclj-strip [name] [width] [rows]
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const color_strip = @import("color_strip.zig");
 const substrate = @import("substrate.zig");
 
 pub fn main() !void {
-    const stdout = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+    const stdout = compat.stdoutFile();
     var args = std.process.args();
     _ = args.skip();
 
@@ -15,9 +16,9 @@ pub fn main() !void {
     const rows: u32 = if (args.next()) |r| std.fmt.parseInt(u32, r, 10) catch 8 else 8;
 
     try color_strip.renderTritWheel(stdout, width);
-    try stdout.writeAll("\n");
+    compat.fileWriteAll(stdout, "\n");
     try color_strip.renderNamedStrip(stdout, name, width, rows);
-    try stdout.writeAll("\n");
+    compat.fileWriteAll(stdout, "\n");
 
     var name_seed: u64 = 0;
     for (name) |c| {

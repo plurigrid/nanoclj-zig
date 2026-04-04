@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat.zig");
 
 /// VCV Rack CV bridge via shared memory ring buffer.
 ///
@@ -230,7 +231,7 @@ pub fn writeWav(allocator: std.mem.Allocator, frames: []const CvFrame, path: []c
 
 /// CLI: read a .f32 file → WAV, or attach to live shm
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = compat.makeDebugAllocator();
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

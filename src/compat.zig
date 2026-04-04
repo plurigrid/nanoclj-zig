@@ -104,6 +104,47 @@ pub fn makeDebugAllocator() DebugAllocator() {
     }
 }
 
+/// Cross-version File type alias.
+/// 0.15: std.fs.File
+/// 0.16: std.io.File
+pub const File = if (has_fs_file) std.fs.File else std.Io.File;
+
+pub fn stdoutFile() File {
+    if (has_fs_file) {
+        return std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+    } else {
+        return std.Io.File.stdout();
+    }
+}
+
+pub fn stdinFile() File {
+    if (has_fs_file) {
+        return std.fs.File{ .handle = std.posix.STDIN_FILENO };
+    } else {
+        return std.Io.File.stdin();
+    }
+}
+
+/// Cross-version writeAll for a File.
+pub fn fileWriteAll(f: File, bytes: []const u8) void {
+    if (has_fs_file) {
+        f.writeAll(bytes) catch {};
+    } else {
+        writeAllFd(f.handle, bytes);
+    }
+}
+
+/// Cross-version read for a File. Returns bytes read.
+pub fn fileRead(f: File, buf: []u8) usize {
+    if (has_fs_file) {
+        return f.read(buf) catch 0;
+    } else {
+        const rc = std.c.read(f.handle, buf.ptr, buf.len);
+        if (rc <= 0) return 0;
+        return @intCast(rc);
+    }
+}
+
 /// Cross-version stdin reader.  Returns bytes read into buf.
 pub fn stdinRead(buf: []u8) usize {
     if (has_fs_file) {

@@ -268,8 +268,8 @@ fn loadForest(allocator: std.mem.Allocator) !*Forest {
     var f = &forest.?;
 
     // Scan horse directories
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch return f;
-    defer allocator.free(home);
+    const home_c = std.c.getenv("HOME") orelse return f;
+    const home = std.mem.span(home_c);
 
     var horse_path_buf: [4096]u8 = undefined;
     const horse_path = std.fmt.bufPrint(&horse_path_buf, "{s}/i/horse", .{home}) catch return f;

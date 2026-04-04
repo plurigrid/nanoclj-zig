@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat.zig");
 const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
@@ -6,6 +7,7 @@ const Env = @import("env.zig").Env;
 const eval_mod = @import("eval.zig");
 const printer = @import("printer.zig");
 const reader_mod = @import("reader.zig");
+const semantics = @import("semantics.zig");
 
 // ─── SplitMix64 ───────────────────────────────────────────────────────
 pub const GOLDEN: u64 = 0x9e3779b97f4a7c15;
@@ -293,37 +295,10 @@ const NreplCtx = struct {
 };
 
 fn nreplThreadFn(ctx: NreplCtx) void {
-    const addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, ctx.port);
-    var server = addr.listen(.{}) catch return;
-    defer server.deinit();
-
-    while (true) {
-        const conn = server.accept() catch continue;
-        defer conn.stream.close();
-        var buf: [4096]u8 = undefined;
-        while (true) {
-            const n = conn.stream.read(&buf) catch break;
-            if (n == 0) break;
-            const line = std.mem.trimRight(u8, buf[0..n], "\r\n");
-            // eval the line
-            var r = reader_mod.Reader.init(line, ctx.gc);
-            const form = r.readForm() catch {
-                conn.stream.writeAll("nil\n") catch break;
-                continue;
-            };
-            const result = eval_mod.eval(form, ctx.env, ctx.gc) catch {
-                conn.stream.writeAll("nil\n") catch break;
-                continue;
-            };
-            const s = printer.prStr(result, ctx.gc, true) catch {
-                conn.stream.writeAll("nil\n") catch break;
-                continue;
-            };
-            defer ctx.gc.allocator.free(s);
-            conn.stream.writeAll(s) catch break;
-            conn.stream.writeAll("\n") catch break;
-        }
-    }
+    // TODO: nREPL server requires std.net (removed in Zig 0.16).
+    // Port to std.Io.net or std.posix socket API when networking is needed.
+    _ = ctx;
+    return;
 }
 
 pub fn nreplStartFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
@@ -339,10 +314,10 @@ pub fn nreplStartFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
         .gc = gc,
         .env = env,
     }});
-    const out = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+    const out = compat.stdoutFile();
     var msg_buf: [64]u8 = undefined;
     const msg = std.fmt.bufPrint(&msg_buf, "nREPL started on port {d}\n", .{port}) catch "nREPL started\n";
-    out.writeAll(msg) catch {};
+    compat.fileWriteAll(out, msg);
     return Value.makeInt(@intCast(port));
 }
 
@@ -380,17 +355,17 @@ pub fn substrateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 pub fn traverseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
-    const out = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
-    out.writeAll("traversing to ") catch {};
+    const out = compat.stdoutFile();
+    compat.fileWriteAll(out, "traversing to ");
     if (args[0].isString()) {
         const s = gc.getString(args[0].asStringId());
-        out.writeAll(s) catch {};
+        compat.fileWriteAll(out, s);
     } else if (args[0].isSymbol()) {
         const s = gc.getString(args[0].asSymbolId());
-        out.writeAll(s) catch {};
+        compat.fileWriteAll(out, s);
     } else {
-        out.writeAll("<unknown>") catch {};
+        compat.fileWriteAll(out, "<unknown>");
     }
-    out.writeAll("\n") catch {};
+    compat.fileWriteAll(out, "\n");
     return Value.makeNil();
 }

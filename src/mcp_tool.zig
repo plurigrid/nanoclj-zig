@@ -4,6 +4,7 @@
 //! Tools: nanoclj_eval, nanoclj_color_at, nanoclj_bci_read, nanoclj_substrate, nanoclj_traverse
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const json = std.json;
 const value = @import("value.zig");
 const Value = value.Value;
@@ -499,12 +500,12 @@ fn handleMethod(allocator: std.mem.Allocator, method: []const u8, obj: json.Obje
 // ============================================================================
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = compat.makeDebugAllocator();
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const stdin_file = std.fs.File.stdin();
-    const stdout_file = std.fs.File.stdout();
+    const stdin_file = compat.stdinFile();
+    const stdout_file = compat.stdoutFile();
 
     const reader = stdin_file.deprecatedReader();
     var stdout = stdout_file.deprecatedWriter();

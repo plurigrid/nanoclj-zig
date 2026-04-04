@@ -57,7 +57,8 @@ fn rep(input: []const u8, env: *Env, gc: *GC) ![]const u8 {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const compat = @import("compat.zig");
+    var gpa = compat.makeDebugAllocator();
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -80,16 +81,16 @@ pub fn main() !void {
     const pe_count = peval.pevalEnv(&env, &gc);
     _ = pe_count;
 
-    const stdout = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
-    const stdin_file = std.fs.File{ .handle = std.posix.STDIN_FILENO };
+    const stdout = compat.stdoutFile();
+    const stdin_file = compat.stdinFile();
 
     // ── Demo: color strip banner ──────────────────────────────────
     // Detect terminal width (fallback 80)
     const width: u32 = 80;
 
-    stdout.writeAll("\x1b[1mnanoclj-zig v0.1.0\x1b[0m\n") catch {};
+    compat.fileWriteAll(stdout, "\x1b[1mnanoclj-zig v0.1.0\x1b[0m\n");
     color_strip.renderTritWheel(stdout, width) catch {};
-    stdout.writeAll("\n") catch {};
+    compat.fileWriteAll(stdout, "\n");
 
     // Seed from hostname or "world"
     const world_name = std.process.getEnvVarOwned(allocator, "USER") catch
@@ -97,7 +98,7 @@ pub fn main() !void {
     defer if (@TypeOf(world_name) != []const u8) {} else allocator.free(world_name);
 
     color_strip.renderNamedStrip(stdout, world_name, width, 2) catch {};
-    stdout.writeAll("\n") catch {};
+    compat.fileWriteAll(stdout, "\n");
 
     // Bind world identity into env
     const world_sym = gc.internString("*world*") catch 0;
@@ -118,16 +119,16 @@ pub fn main() !void {
         // Prompt with world name
         var prompt_buf: [128]u8 = undefined;
         const prompt = std.fmt.bufPrint(&prompt_buf, "\x1b[36m{s}\x1b[0m=> ", .{world_name}) catch "world=> ";
-        stdout.writeAll(prompt) catch {};
+        compat.fileWriteAll(stdout, prompt);
 
         var line_buf = @import("compat.zig").emptyList(u8);
         defer line_buf.deinit(allocator);
         while (true) {
             var byte: [1]u8 = undefined;
-            const n = stdin_file.read(&byte) catch break;
+            const n = compat.fileRead(stdin_file, &byte);
             if (n == 0) {
                 if (line_buf.items.len == 0) {
-                    stdout.writeAll("\n") catch {};
+                    compat.fileWriteAll(stdout, "\n");
                     return;
                 }
                 break;
@@ -164,8 +165,8 @@ pub fn main() !void {
         }
 
         const result = rep(line, &env, &gc) catch "Error: internal error";
-        stdout.writeAll(result) catch {};
-        stdout.writeAll("\n") catch {};
+        compat.fileWriteAll(stdout, result);
+        compat.fileWriteAll(stdout, "\n");
         if (result.len > 0 and result[0] != 'E') {
             allocator.free(result);
         }
@@ -185,4 +186,6 @@ test {
     _ = @import("peval.zig");
     _ = @import("bytecode.zig");
     _ = @import("compiler.zig");
+    _ = @import("ibc_denom.zig");
+    _ = @import("http_fetch.zig");
 }

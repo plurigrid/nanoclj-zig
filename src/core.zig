@@ -15,6 +15,7 @@ const inet_builtins = @import("inet_builtins.zig");
 const inet_compile = @import("inet_compile.zig");
 const http_fetch = @import("http_fetch.zig");
 const peval_mod = @import("peval.zig");
+const ibc_denom = @import("ibc_denom.zig");
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
 
@@ -117,6 +118,12 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "peval", &peval_mod.pevalFn },
         // HTTP fetch
         .{ "http-fetch", &http_fetch.httpFetchFn },
+        // IBC denom (bmorphism/shitcoin geodesic)
+        .{ "ibc-denom", &ibc_denom.ibcDenomFn },
+        .{ "ibc-trit", &ibc_denom.ibcTritFn },
+        .{ "noble-usdc-on", &ibc_denom.nobleUsdcOnFn },
+        .{ "noble-precompute", &ibc_denom.noblePrecomputeFn },
+        .{ "noble-channels", &ibc_denom.nobleChannelsFn },
     };
 
     inline for (builtins) |b| {
@@ -468,14 +475,14 @@ fn isFnP(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 // IO
 fn printlnFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
-    const stdout = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+    const stdout = compat.stdoutFile();
     for (args, 0..) |a, i| {
-        if (i > 0) stdout.writeAll(" ") catch {};
+        if (i > 0) compat.fileWriteAll(stdout, " ");
         const s = try printer.prStr(a, gc, false);
         defer gc.allocator.free(s);
-        stdout.writeAll(s) catch {};
+        compat.fileWriteAll(stdout, s);
     }
-    stdout.writeAll("\n") catch {};
+    compat.fileWriteAll(stdout, "\n");
     return Value.makeNil();
 }
 
