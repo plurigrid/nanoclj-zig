@@ -32,6 +32,8 @@ pub const ObjKind = enum(u8) {
     atom,
     bc_closure, // bytecode VM closure
     builtin_ref, // reference to a core builtin function
+    lazy_seq, // thunk-based lazy sequence
+    partial_fn, // partial application capture
 };
 
 pub const Obj = struct {
@@ -52,6 +54,14 @@ pub const ObjData = union {
     builtin_ref: struct {
         func: *const fn (args: []Value, gc: *@import("gc.zig").GC, env: *@import("env.zig").Env) anyerror!Value,
         name: []const u8,
+    },
+    lazy_seq: struct {
+        thunk: Value, // fn to call (zero-arg) to produce [first rest-thunk] or nil
+        cached: ?Value = null, // memoized result once realized
+    },
+    partial_fn: struct {
+        func: Value, // the original function
+        bound_args: std.ArrayListUnmanaged(Value), // pre-bound arguments
     },
 };
 

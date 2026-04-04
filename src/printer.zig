@@ -98,6 +98,8 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
                 try buf.appendSlice(gc.allocator, obj.data.builtin_ref.name);
                 try buf.append(gc.allocator, '>');
             },
+            .lazy_seq => try buf.appendSlice(gc.allocator, "#<lazy-seq>"),
+            .partial_fn => try buf.appendSlice(gc.allocator, "#<partial>"),
         }
     } else {
         // float

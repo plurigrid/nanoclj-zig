@@ -85,6 +85,8 @@ pub const GC = struct {
                 .atom => .{ .atom = .{ .val = Value.makeNil() } },
                 .bc_closure => .{ .bc_closure = .{ .def = undefined, .upvalues = &.{} } },
                 .builtin_ref => .{ .builtin_ref = .{ .func = undefined, .name = "" } },
+                .lazy_seq => .{ .lazy_seq = .{ .thunk = Value.makeNil() } },
+                .partial_fn => .{ .partial_fn = .{ .func = Value.makeNil(), .bound_args = compat.emptyList(Value) } },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -167,6 +169,14 @@ pub const GC = struct {
                 },
                 .atom => self.enqueueVal(cur.data.atom.val, &worklist),
                 .bc_closure => {}, // FuncDef + upvalues managed by allocator, not GC
+                .lazy_seq => {
+                    self.enqueueVal(cur.data.lazy_seq.thunk, &worklist);
+                    if (cur.data.lazy_seq.cached) |c| self.enqueueVal(c, &worklist);
+                },
+                .partial_fn => {
+                    self.enqueueVal(cur.data.partial_fn.func, &worklist);
+                    for (cur.data.partial_fn.bound_args.items) |v| self.enqueueVal(v, &worklist);
+                },
             }
         }
     }
@@ -218,6 +228,8 @@ pub const GC = struct {
                 }
             },
             .builtin_ref => {},
+            .lazy_seq => {},
+            .partial_fn => {},
         }
         self.allocator.destroy(obj);
         self.bytes_allocated -|= @sizeOf(Obj);

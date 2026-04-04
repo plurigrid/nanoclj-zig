@@ -2163,6 +2163,8 @@ fn typeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         .atom => "atom",
         .bc_closure => "function",
         .builtin_ref => "function",
+        .lazy_seq => "lazy-seq",
+        .partial_fn => "function",
     }
     else "unknown";
     return Value.makeString(try gc.internString(t));
