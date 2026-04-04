@@ -707,6 +707,19 @@ pub fn listProblemsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // MÖBIUS INVERSION & REALIZABILITY
 // ============================================================================
 
+fn isPrimeImpl(n: i48) bool {
+    if (n < 2) return false;
+    if (n < 4) return true;
+    if (@mod(n, 2) == 0 or @mod(n, 3) == 0) return false;
+    var d: i48 = 5;
+    while (d * d <= n) : (d += 2) {
+        if (@mod(n, d) == 0) return false;
+        d += 1;
+        if (d * d <= n and @mod(n, d) == 0) return false;
+    }
+    return true;
+}
+
 fn mobiusFn_impl(n: i48) i48 {
     if (n <= 0) return 0;
     if (n == 1) return 1;
@@ -787,7 +800,7 @@ pub fn moebiusBoundaryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     var flip_index: i48 = -1;
     var p: i48 = 2;
     while (p <= seed) : (p += 1) {
-        if (mobiusFn_impl(p) != -1) continue; // not prime
+        if (!isPrimeImpl(p)) continue;
         const pt = mertensTritImpl(p - 1);
         const qt = mertensTritImpl(p);
         if (pt == -1 and qt == 1) {
