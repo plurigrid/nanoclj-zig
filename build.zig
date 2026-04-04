@@ -51,6 +51,26 @@ pub fn build(b: *std.Build) void {
     const mcp_step = b.step("mcp", "Run nanoclj MCP server");
     mcp_step.dependOn(&mcp_run.step);
 
+    // gorj MCP server (self-hosted: tool handlers defined in nanoclj Clojure)
+    const gorj_mcp = b.addExecutable(.{
+        .name = "gorj-mcp",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gorj_mcp.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "syrup", .module = syrup_mod },
+            },
+        }),
+    });
+    b.installArtifact(gorj_mcp);
+
+    const gorj_mcp_run = b.addRunArtifact(gorj_mcp);
+    gorj_mcp_run.step.dependOn(b.getInstallStep());
+    if (b.args) |args| gorj_mcp_run.addArgs(args);
+    const gorj_mcp_step = b.step("gorj", "Run gorj MCP server (self-hosted)");
+    gorj_mcp_step.dependOn(&gorj_mcp_run.step);
+
     // Color strip demo
     const strip = b.addExecutable(.{
         .name = "nanoclj-strip",

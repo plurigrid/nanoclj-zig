@@ -310,4 +310,5 @@ test {
     _ = @import("syrup_bridge.zig");
     _ = @import("gorj_bridge.zig");
     _ = @import("avalon_api_example.zig");
+    _ = @import("gorj_mcp.zig");
 }

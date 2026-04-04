@@ -211,15 +211,96 @@ fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
 
     const child = env.createChild() catch return Domain.fail(.type_error);
     gc.trackEnv(child) catch return Domain.fail(.type_error);
-    var i: usize = 0;
-    while (i < bindings.len) : (i += 2) {
-        if (!bindings[i].isSymbol()) return Domain.fail(.type_error);
-        const sym_id = bindings[i].asSymbolId();
-        const name = gc.getString(sym_id);
-        const d = evalBounded(bindings[i + 1], child, gc, res);
-        if (!d.isValue()) return d;
-        child.set(name, d.value) catch return Domain.fail(.type_error);
-        child.setById(sym_id, d.value) catch {};
+    const n_bindings = bindings.len / 2;
+
+    // Level 2: DAG analysis — find independent binding layers.
+    // A binding is independent if its RHS doesn't reference any prior let* binding.
+    // Independent bindings form a "layer" that can eval with forked fuel.
+    if (n_bindings >= 2 and n_bindings <= 32) {
+        // Collect binding names (u48 symbol ids for fast comparison)
+        var bind_ids: [32]u48 = undefined;
+        for (0..n_bindings) |bi| {
+            if (!bindings[bi * 2].isSymbol()) return Domain.fail(.type_error);
+            bind_ids[bi] = bindings[bi * 2].asSymbolId();
+        }
+
+        // Build dependency bitmask: deps[i] bit j set = binding i depends on binding j
+        var deps: [32]u32 = .{0} ** 32;
+        for (0..n_bindings) |bi| {
+            deps[bi] = scanDeps(bindings[bi * 2 + 1], bind_ids[0..n_bindings], gc);
+        }
+
+        // Topological layer assignment: layer[i] = max(layer[dep]) + 1 for each dep
+        var layer: [32]u8 = .{0} ** 32;
+        for (0..n_bindings) |bi| {
+            var max_dep_layer: u8 = 0;
+            for (0..n_bindings) |dj| {
+                if (deps[bi] & (@as(u32, 1) << @intCast(dj)) != 0) {
+                    if (layer[dj] + 1 > max_dep_layer) max_dep_layer = layer[dj] + 1;
+                }
+            }
+            layer[bi] = max_dep_layer;
+        }
+
+        // Find max layer
+        var max_layer: u8 = 0;
+        for (0..n_bindings) |bi| {
+            if (layer[bi] > max_layer) max_layer = layer[bi];
+        }
+
+        // Evaluate layer by layer; within each layer, fork fuel
+        var current_layer: u8 = 0;
+        while (current_layer <= max_layer) : (current_layer += 1) {
+            // Count bindings in this layer
+            var layer_count: usize = 0;
+            var layer_indices: [32]usize = undefined;
+            for (0..n_bindings) |bi| {
+                if (layer[bi] == current_layer) {
+                    layer_indices[layer_count] = bi;
+                    layer_count += 1;
+                }
+            }
+
+            if (layer_count == 1) {
+                // Single binding: no fork overhead
+                const bi = layer_indices[0];
+                const name = gc.getString(bind_ids[bi]);
+                const d = evalBounded(bindings[bi * 2 + 1], child, gc, res);
+                if (!d.isValue()) return d;
+                child.set(name, d.value) catch return Domain.fail(.type_error);
+                child.setById(bind_ids[bi], d.value) catch {};
+            } else {
+                // Multiple independent bindings: fork fuel
+                var child_res = res.fork(layer_count);
+                var results: [32]Domain = undefined;
+                for (0..layer_count) |li| {
+                    const bi = layer_indices[li];
+                    results[li] = evalBounded(bindings[bi * 2 + 1], child, gc, &child_res[li]);
+                }
+                res.join(&child_res, layer_count);
+
+                // Bind all results
+                for (0..layer_count) |li| {
+                    const bi = layer_indices[li];
+                    if (!results[li].isValue()) return results[li];
+                    const name = gc.getString(bind_ids[bi]);
+                    child.set(name, results[li].value) catch return Domain.fail(.type_error);
+                    child.setById(bind_ids[bi], results[li].value) catch {};
+                }
+            }
+        }
+    } else {
+        // Fallback: sequential (0-1 bindings or >32)
+        var i: usize = 0;
+        while (i < bindings.len) : (i += 2) {
+            if (!bindings[i].isSymbol()) return Domain.fail(.type_error);
+            const sym_id = bindings[i].asSymbolId();
+            const name = gc.getString(sym_id);
+            const d = evalBounded(bindings[i + 1], child, gc, res);
+            if (!d.isValue()) return d;
+            child.set(name, d.value) catch return Domain.fail(.type_error);
+            child.setById(sym_id, d.value) catch {};
+        }
     }
 
     var result = Domain.pure(Value.makeNil());
@@ -228,6 +309,31 @@ fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
         if (!result.isValue()) return result;
     }
     return result;
+}
+
+/// Scan an expression for references to any of the given binding symbol ids.
+/// Returns a bitmask: bit i set = expression references bind_ids[i].
+fn scanDeps(expr: Value, bind_ids: []const u48, gc: *GC) u32 {
+    if (expr.isSymbol()) {
+        const sid = expr.asSymbolId();
+        for (bind_ids, 0..) |bid, i| {
+            if (sid == bid) return @as(u32, 1) << @intCast(i);
+        }
+        return 0;
+    }
+    if (!expr.isObj()) return 0;
+    const obj = expr.asObj();
+    var mask: u32 = 0;
+    switch (obj.kind) {
+        .list => for (obj.data.list.items.items) |item| {
+            mask |= scanDeps(item, bind_ids, gc);
+        },
+        .vector => for (obj.data.vector.items.items) |item| {
+            mask |= scanDeps(item, bind_ids, gc);
+        },
+        else => {},
+    }
+    return mask;
 }
 
 fn evalBoundedIf(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
