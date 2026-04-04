@@ -51,11 +51,12 @@ pub const Compiler = struct {
     parent: ?*Compiler, // for nested fn* compilation
     in_tail: bool, // true when compiling in tail position of fn*
     self_name: ?[]const u8, // for self-recursive fn* (set by compileFnStar caller)
+    vm_globals: ?*std.StringHashMap(Value), // VM globals — checked before builtins
     loop_entry: ?usize = null, // instruction index of loop head (for recur in loop)
     loop_regs: [64]u8 = undefined, // registers holding loop bindings
     loop_arity: u8 = 0, // number of loop bindings
 
-    pub fn init(allocator: std.mem.Allocator, gc: *GC, parent: ?*Compiler) Compiler {
+    pub fn init(allocator: std.mem.Allocator, gc: *GC, parent: ?*Compiler, vm_globals: ?*std.StringHashMap(Value)) Compiler {
         return .{
             .code = .{ .items = &.{}, .capacity = 0 },
             .constants = .{ .items = &.{}, .capacity = 0 },
@@ -69,6 +70,7 @@ pub const Compiler = struct {
             .parent = parent,
             .in_tail = false,
             .self_name = null,
+            .vm_globals = if (parent) |p| p.vm_globals else vm_globals,
         };
     }
 
@@ -774,7 +776,7 @@ pub const Compiler = struct {
         else
             return error.InvalidSyntax;
 
-        var child = Compiler.init(self.allocator, self.gc, self);
+        var child = Compiler.init(self.allocator, self.gc, self, null);
 
         // Params become locals in registers 0..n-1
         for (params) |p| {
@@ -975,6 +977,10 @@ pub const Compiler = struct {
         // Don't resolve if it shadows a local or upvalue
         if (self.resolveLocal(name) != null) return null;
         if ((try self.resolveUpvalue(name)) != null) return null;
+        // If a VM global exists with this name, prefer it over builtins
+        if (self.vm_globals) |globals| {
+            if (globals.contains(name)) return null;
+        }
         const builtin_fn = core.lookupBuiltin(name) orelse return null;
         // Create builtin_ref Obj as constant
         const obj = self.gc.allocObj(.builtin_ref) catch return error.OutOfMemory;
@@ -1056,7 +1062,7 @@ test "compiler: integer literal" {
     var gc = GC.init(std.testing.allocator);
     defer gc.deinit();
 
-    var c = Compiler.init(std.testing.allocator, &gc, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null);
     defer c.deinit();
 
     const dest = try c.allocReg();
@@ -1079,7 +1085,7 @@ test "compiler: if expression" {
     try list.data.list.items.append(gc.allocator, Value.makeInt(1));
     try list.data.list.items.append(gc.allocator, Value.makeInt(2));
 
-    var c = Compiler.init(std.testing.allocator, &gc, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null);
     defer c.deinit();
 
     const dest = try c.allocReg();
@@ -1101,7 +1107,7 @@ test "compiler: add expression -> inline binop" {
     try list.data.list.items.append(gc.allocator, Value.makeInt(10));
     try list.data.list.items.append(gc.allocator, Value.makeInt(20));
 
-    var c = Compiler.init(std.testing.allocator, &gc, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null);
     defer c.deinit();
 
     const dest = try c.allocReg();
@@ -1127,7 +1133,7 @@ test "compiler: compile + execute roundtrip" {
     try list.data.list.items.append(gc.allocator, Value.makeInt(10));
     try list.data.list.items.append(gc.allocator, Value.makeInt(20));
 
-    var c = Compiler.init(std.testing.allocator, &gc, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null);
     const dest = try c.allocReg();
     try c.compile(Value.makeObj(list), dest);
     try c.emit(bc.encode_d(.ret, dest));
@@ -1176,7 +1182,7 @@ fn compileAndRunWithBuiltins(src: []const u8, allocator: std.mem.Allocator, init
     const Reader = @import("reader.zig").Reader;
     var reader = Reader.init(src, &gc);
     const form = try reader.readForm();
-    var comp = Compiler.init(allocator, &gc, null);
+    var comp = Compiler.init(allocator, &gc, null, null);
     const dest = try comp.allocReg();
     try comp.compile(form, dest);
     try comp.emit(bc.encode_d(.ret, dest));
@@ -1245,7 +1251,7 @@ test "compiler: move opcode emitted for local access" {
     const Reader = @import("reader.zig").Reader;
     var reader = Reader.init("(let* [x 42] x)", &gc);
     const form = try reader.readForm();
-    var c = Compiler.init(std.testing.allocator, &gc, null);
+    var c = Compiler.init(std.testing.allocator, &gc, null, null);
     defer c.deinit();
     const dest = try c.allocReg();
     try c.compile(form, dest);

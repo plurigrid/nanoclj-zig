@@ -342,6 +342,11 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "is", &isFn },
         .{ "is=", &isEqualFn },
         .{ "run-tests", &runTestsFn },
+        // Namespace ops
+        .{ "*ns*", &currentNsFn },
+        .{ "ns-name", &nsNameFn },
+        .{ "all-ns", &allNsFn },
+        .{ "require", &requireFn },
     };
 
     inline for (builtins) |b| {

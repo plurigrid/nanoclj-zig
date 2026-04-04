@@ -56,6 +56,8 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "defn")) return evalDefn(items, env, gc);
         if (std.mem.eql(u8, name, "deftest")) return evalDeftest(items, env, gc);
         if (std.mem.eql(u8, name, "testing")) return evalTesting(items, env, gc);
+        if (std.mem.eql(u8, name, "ns")) return evalNs(items, env, gc);
+        if (std.mem.eql(u8, name, "in-ns")) return evalInNs(items, env, gc);
         if (std.mem.eql(u8, name, "try")) return evalTry(items, env, gc);
         if (std.mem.eql(u8, name, "throw")) {
             if (items.len != 2) return error.ArityError;
@@ -356,6 +358,48 @@ fn evalTesting(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     }
     current_testing_label = "";
     return result;
+}
+
+// ============================================================================
+// NAMESPACES
+// ============================================================================
+
+const namespace = @import("namespace.zig");
+pub var ns_registry: ?namespace.NamespaceRegistry = null;
+
+pub fn initNamespaces(allocator: std.mem.Allocator, core_env: *Env) !void {
+    ns_registry = try namespace.NamespaceRegistry.init(allocator, core_env);
+}
+
+/// (ns name) — switch to namespace, creating if needed
+fn evalNs(items: []Value, _: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    const ns_name = if (items[1].isSymbol())
+        gc.getString(items[1].asSymbolId())
+    else if (items[1].isString())
+        gc.getString(items[1].asStringId())
+    else
+        return error.TypeError;
+    if (ns_registry) |*reg| {
+        _ = reg.switchTo(ns_name) catch return error.OutOfMemory;
+    }
+    return Value.makeSymbol(items[1].asSymbolId());
+}
+
+/// (in-ns 'name) — switch to namespace
+fn evalInNs(items: []Value, _: *Env, gc: *GC) EvalError!Value {
+    if (items.len != 2) return error.ArityError;
+    // (in-ns 'name) — the arg is quoted, so eval it first
+    const ns_name = if (items[1].isSymbol())
+        gc.getString(items[1].asSymbolId())
+    else if (items[1].isString())
+        gc.getString(items[1].asStringId())
+    else
+        return error.TypeError;
+    if (ns_registry) |*reg| {
+        _ = reg.switchTo(ns_name) catch return error.OutOfMemory;
+    }
+    return Value.makeNil();
 }
 
 fn evalIf(items: []Value, env: *Env, gc: *GC) EvalError!Value {
