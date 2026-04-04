@@ -211,7 +211,11 @@ pub const GC = struct {
                 obj.data.macro_fn.body.deinit(self.allocator);
             },
             .atom => {},
-            .bc_closure => {},
+            .bc_closure => {
+                if (obj.data.bc_closure.upvalues.len > 0) {
+                    self.allocator.free(obj.data.bc_closure.upvalues);
+                }
+            },
         }
         self.allocator.destroy(obj);
         self.bytes_allocated -|= @sizeOf(Obj);

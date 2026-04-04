@@ -773,3 +773,47 @@ test "compiler: move opcode emitted for local access" {
     }
     try std.testing.expect(found_move);
 }
+
+test "compiler: closure captures outer let binding" {
+    // (let* [x 10] ((fn* [y] (+ x y)) 32))  =>  42
+    const result = try compileAndRun(
+        \\(let* [x 10] ((fn* [y] (+ x y)) 32))
+    , std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: closure captures multiple outer locals" {
+    // (let* [a 100 b 20 c 3] ((fn* [] (+ a (+ b c)))))  =>  123
+    const result = try compileAndRun(
+        \\(let* [a 100 b 20 c 3] ((fn* [] (+ a (+ b c)))))
+    , std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 123), result.asInt());
+}
+
+test "compiler: nested closures — two levels of capture" {
+    // (let* [x 5] ((fn* [y] ((fn* [z] (+ x (+ y z))) 3)) 2))  =>  10
+    const result = try compileAndRun(
+        \\(let* [x 5] ((fn* [y] ((fn* [z] (+ x (+ y z))) 3)) 2))
+    , std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 10), result.asInt());
+}
+
+test "compiler: closure as higher-order return value" {
+    // (let* [make-adder (fn* [x] (fn* [y] (+ x y)))
+    //        add5 (make-adder 5)]
+    //   (add5 37))  =>  42
+    const result = try compileAndRun(
+        \\(let* [make-adder (fn* [x] (fn* [y] (+ x y))) add5 (make-adder 5)] (add5 37))
+    , std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 42), result.asInt());
+}
+
+test "compiler: closure with recur still works" {
+    // (let* [base 1000
+    //        sum (fn* [n acc] (if (<= n 0) (+ acc base) (recur (- n 1) (+ acc n))))]
+    //   (sum 10 0))  =>  1055
+    const result = try compileAndRun(
+        \\(let* [base 1000 sum (fn* [n acc] (if (<= n 0) (+ acc base) (recur (- n 1) (+ acc n))))] (sum 10 0))
+    , std.testing.allocator);
+    try std.testing.expectEqual(@as(i48, 1055), result.asInt());
+}
