@@ -72,3 +72,21 @@
 (println (str "Gorard tower:  " tower-gf3))
 (println (str "Stacks tags:   " stacks-gf3))
 (println (str "TOTAL mod 3:   " total (if (= 0 total) "  ALL CONSERVED" "  BROKEN")))
+(println "")
+
+;; 7. Transport mesh (Thread Border Routers → horse-0008)
+(println "=== TRANSPORT MESH ===")
+(def lamp (matter-lamp 0 254 200))
+(println (str "VARMBLIXT HSV(0,254,200): trit=" (get lamp :trit) " rgb=" (get lamp :r) "," (get lamp :g) "," (get lamp :b)))
+(println (str "BILRESA trit sum: " (bilresa-trit-sum) " (6 commands, conserved)"))
+(def warm (matter-scene "warm"))
+(println (str "Scene 'warm': H=" (get warm :h) " S=" (get warm :s) " V=" (get warm :v) " trit=" (get warm :trit)))
+(println "")
+
+;; 8. Deployment triple: HomePod(+1) + nRF5340(-1) + VARMBLIXT(0) = 0
+(def deploy-gf3 (mod (+ 1 -1 0 3) 3))
+(println "=== DEPLOYMENT TRIPLE ===")
+(println (str "HomePod TBR:  +1 (hub-primary)"))
+(println (str "nRF5340 dev:  -1 (mesh-native)"))
+(println (str "VARMBLIXT:     0 (Matter endpoint)"))
+(println (str "Deploy mod 3: " deploy-gf3 (if (= 0 deploy-gf3) "  CONSERVED" "  BROKEN")))
