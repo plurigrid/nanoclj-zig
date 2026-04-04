@@ -2994,6 +2994,124 @@ fn reMatchesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 // ============================================================================
+// NESTED MAP OPS
+// ============================================================================
+
+/// (get-in m [k1 k2 ...]) — nested lookup
+fn getInFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    var current = args[0];
+    const keys = try seqItems(args[1], gc);
+    for (keys) |k| {
+        if (!current.isObj()) return if (args.len > 2) args[2] else Value.makeNil();
+        const obj = current.asObj();
+        if (obj.kind == .map) {
+            var found = false;
+            for (obj.data.map.keys.items, 0..) |mk, i| {
+                if (semantics.structuralEq(mk, k, gc)) {
+                    current = obj.data.map.vals.items[i];
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return if (args.len > 2) args[2] else Value.makeNil();
+        } else if (obj.kind == .vector) {
+            if (k.isInt()) {
+                const idx: usize = @intCast(k.asInt());
+                if (idx < obj.data.vector.items.items.len) {
+                    current = obj.data.vector.items.items[idx];
+                } else return if (args.len > 2) args[2] else Value.makeNil();
+            } else return if (args.len > 2) args[2] else Value.makeNil();
+        } else return if (args.len > 2) args[2] else Value.makeNil();
+    }
+    return current;
+}
+
+/// (assoc-in m [k1 k2 ...] v) — nested assoc
+fn assocInFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    const keys = try seqItems(args[1], gc);
+    if (keys.len == 0) return args[0];
+    if (keys.len == 1) {
+        // Base case: (assoc m k v)
+        return assocSingle(args[0], keys[0], args[2], gc);
+    }
+    // Recursive: (assoc m k0 (assoc-in (get m k0) [k1..] v))
+    const inner = getFromMap(args[0], keys[0], gc);
+    // Build rest-keys vector
+    const rest_keys_obj = try gc.allocObj(.vector);
+    try rest_keys_obj.data.vector.items.appendSlice(gc.allocator, keys[1..]);
+    var inner_args = [3]Value{ inner, Value.makeObj(rest_keys_obj), args[2] };
+    const nested = try assocInFn(&inner_args, gc, env);
+    return assocSingle(args[0], keys[0], nested, gc);
+}
+
+fn getFromMap(m: Value, k: Value, gc: *GC) Value {
+    if (!m.isObj()) return Value.makeNil();
+    const obj = m.asObj();
+    if (obj.kind != .map) return Value.makeNil();
+    for (obj.data.map.keys.items, 0..) |mk, i| {
+        if (semantics.structuralEq(mk, k, gc)) return obj.data.map.vals.items[i];
+    }
+    return Value.makeNil();
+}
+
+fn assocSingle(m: Value, k: Value, v: Value, gc: *GC) !Value {
+    const obj = try gc.allocObj(.map);
+    if (m.isObj() and m.asObj().kind == .map) {
+        const src = m.asObj();
+        var replaced = false;
+        for (src.data.map.keys.items, 0..) |mk, i| {
+            if (semantics.structuralEq(mk, k, gc)) {
+                try obj.data.map.keys.append(gc.allocator, mk);
+                try obj.data.map.vals.append(gc.allocator, v);
+                replaced = true;
+            } else {
+                try obj.data.map.keys.append(gc.allocator, mk);
+                try obj.data.map.vals.append(gc.allocator, src.data.map.vals.items[i]);
+            }
+        }
+        if (!replaced) {
+            try obj.data.map.keys.append(gc.allocator, k);
+            try obj.data.map.vals.append(gc.allocator, v);
+        }
+    } else {
+        try obj.data.map.keys.append(gc.allocator, k);
+        try obj.data.map.vals.append(gc.allocator, v);
+    }
+    return Value.makeObj(obj);
+}
+
+/// (update-in m [k1 k2 ...] f) — apply f to nested value
+fn updateInFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len < 3) return error.ArityError;
+    const keys = try seqItems(args[1], gc);
+    if (keys.len == 0) return args[0];
+    // Get the current nested value
+    var get_in_args = [_]Value{ args[0], args[1] };
+    const current = try getInFn(&get_in_args, gc, env);
+    // Apply f to it
+    var fn_args = [_]Value{current};
+    const new_val = try eval_mod.apply(args[2], &fn_args, env, gc);
+    // assoc-in the result
+    var assoc_args = [_]Value{ args[0], args[1], new_val };
+    return assocInFn(&assoc_args, gc, env);
+}
+
+/// (reduce-kv f init map) — reduce over map entries as (f acc k v)
+fn reduceKvFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    if (!args[2].isObj() or args[2].asObj().kind != .map) return error.TypeError;
+    const m = args[2].asObj();
+    var acc = args[1];
+    for (m.data.map.keys.items, 0..) |k, i| {
+        var fn_args = [_]Value{ acc, k, m.data.map.vals.items[i] };
+        acc = try eval_mod.apply(args[0], &fn_args, env, gc);
+    }
+    return acc;
+}
+
+// ============================================================================
 // TRANSIENTS
 // ============================================================================
 
