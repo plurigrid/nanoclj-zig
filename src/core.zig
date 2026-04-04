@@ -200,6 +200,11 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "stacks-tags", &computable_sets.stacksTagsFn },
         .{ "stacks-trit-sum", &computable_sets.stacksTritSumFn },
         .{ "stacks-lookup", &computable_sets.stacksLookupFn },
+        // Matter lamp (IKEA VARMBLIXT + BILRESA)
+        .{ "matter-lamp", &computable_sets.matterLampFn },
+        .{ "bilresa-commands", &computable_sets.bilresaCommandsFn },
+        .{ "bilresa-trit-sum", &computable_sets.bilresaTritSumFn },
+        .{ "matter-scene", &computable_sets.matterSceneFn },
         // Diophantine equations
         .{ "pythagorean-triples", &computable_sets.pythagoreanTriplesFn },
         .{ "pell-solve", &computable_sets.pellSolveFn },

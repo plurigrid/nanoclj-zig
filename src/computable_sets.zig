@@ -1456,3 +1456,143 @@ pub fn stacksLookupFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     }
     return Value.makeNil();
 }
+
+// ============================================================================
+// MATTER LAMP — IKEA VARMBLIXT (torus/donut) + BILRESA remote
+//
+// VARMBLIXT: Matter-over-Thread, ZCL Color Control cluster
+//   hue (0-254), saturation (0-254), level (0-254)
+//
+// BILRESA: 2 buttons × 3 actions = 6 commands:
+//   A-single=toggle(0), A-double=bright+(+1), A-long=dim-(-1)
+//   B-single=next-color(+1), B-double=prev-color(-1), B-long=white(0)
+//   Trit sum = 0 mod 3 — conserved!
+//
+// HSV → GF(3): hue/3 sectors → red(+1)/green(0)/blue(-1)
+// ============================================================================
+
+const BilresaCommand = struct { button: u8, action: []const u8, effect: []const u8, trit: i48 };
+
+const bilresa_commands = [_]BilresaCommand{
+    .{ .button = 0, .action = "single", .effect = "toggle", .trit = 0 },
+    .{ .button = 0, .action = "double", .effect = "bright+", .trit = 1 },
+    .{ .button = 0, .action = "long", .effect = "dim-", .trit = -1 },
+    .{ .button = 1, .action = "single", .effect = "next-color", .trit = 1 },
+    .{ .button = 1, .action = "double", .effect = "prev-color", .trit = -1 },
+    .{ .button = 1, .action = "long", .effect = "white", .trit = 0 },
+};
+
+fn hsvTrit(hue: i48) i48 {
+    const h: u8 = @intCast(@mod(hue, 255));
+    if (h < 85) return 1; // red (Σ)
+    if (h < 170) return 0; // green (Δ)
+    return -1; // blue (Π)
+}
+
+fn hsvToRgb(hue: i48, sat: i48, val: i48) [3]u8 {
+    const h: u32 = @intCast(@mod(hue, 255));
+    const s: u32 = @intCast(@max(0, @min(sat, 254)));
+    const v: u32 = @intCast(@max(0, @min(val, 254)));
+    if (s == 0) { const g: u8 = @intCast(v); return [3]u8{ g, g, g }; }
+    const region = h / 43;
+    const remainder = (h - region * 43) * 6;
+    const p: u8 = @intCast((v * (255 - s)) >> 8);
+    const q: u8 = @intCast((v * (255 - ((s * remainder) >> 8))) >> 8);
+    const t: u8 = @intCast((v * (255 - ((s * (255 - remainder)) >> 8))) >> 8);
+    const vv: u8 = @intCast(v);
+    return switch (region) {
+        0 => [3]u8{ vv, t, p },
+        1 => [3]u8{ q, vv, p },
+        2 => [3]u8{ p, vv, t },
+        3 => [3]u8{ p, q, vv },
+        4 => [3]u8{ t, p, vv },
+        else => [3]u8{ vv, p, q },
+    };
+}
+
+/// (matter-lamp hue sat level) → {:hue h :sat s :level l :r R :g G :b B :trit t :hex "#RRGGBB"}
+pub fn matterLampFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 3) return error.ArityError;
+    if (!args[0].isInt() or !args[1].isInt() or !args[2].isInt()) return error.TypeError;
+    const hue = args[0].asInt();
+    const sat = args[1].asInt();
+    const level = args[2].asInt();
+    const rgb = hsvToRgb(hue, sat, level);
+    const trit = hsvTrit(hue);
+    const obj = try gc.allocObj(.map);
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "hue"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(hue));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "sat"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(sat));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "level"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(level));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "r"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(rgb[0])));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "g"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(rgb[1])));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "b"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(rgb[2])));
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(trit));
+    var hex_buf: [7]u8 = undefined;
+    _ = std.fmt.bufPrint(&hex_buf, "#{X:0>2}{X:0>2}{X:0>2}", .{ rgb[0], rgb[1], rgb[2] }) catch {};
+    try obj.data.map.keys.append(gc.allocator, try kw.intern(gc, "hex"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(&hex_buf)));
+    return Value.makeObj(obj);
+}
+
+/// (bilresa-commands) → vector of 6 commands with GF(3) trits
+pub fn bilresaCommandsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    const obj = try gc.allocObj(.vector);
+    for (&bilresa_commands) |*cmd| {
+        const entry = try gc.allocObj(.map);
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "button"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(cmd.button)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "action"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(cmd.action)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "effect"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(cmd.effect)));
+        try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
+        try entry.data.map.vals.append(gc.allocator, Value.makeInt(cmd.trit));
+        try obj.data.vector.items.append(gc.allocator, Value.makeObj(entry));
+    }
+    return Value.makeObj(obj);
+}
+
+/// (bilresa-trit-sum) → 0 (GF(3) conserved across 6 commands)
+pub fn bilresaTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    _ = args;
+    var sum: i48 = 0;
+    for (&bilresa_commands) |*cmd| sum += cmd.trit;
+    return Value.makeInt(@mod(sum + 300, 3));
+}
+
+/// (matter-scene name) → preset scene: "warm" "cool" "red" "green" "blue" "party"
+pub fn matterSceneFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1 or !args[0].isString()) return error.ArityError;
+    const name = gc.getString(args[0].asStringId());
+    const S = struct { h: i48, s: i48, l: i48 };
+    const scene: ?S =
+        if (std.mem.eql(u8, name, "warm")) S{ .h = 20, .s = 200, .l = 200 }
+    else if (std.mem.eql(u8, name, "cool")) S{ .h = 160, .s = 180, .l = 200 }
+    else if (std.mem.eql(u8, name, "red")) S{ .h = 0, .s = 254, .l = 254 }
+    else if (std.mem.eql(u8, name, "green")) S{ .h = 85, .s = 254, .l = 254 }
+    else if (std.mem.eql(u8, name, "blue")) S{ .h = 170, .s = 254, .l = 254 }
+    else if (std.mem.eql(u8, name, "party")) S{ .h = 210, .s = 254, .l = 254 }
+    else null;
+    if (scene == null) return Value.makeNil();
+    const sc = scene.?;
+    var lamp_args = [3]Value{ Value.makeInt(sc.h), Value.makeInt(sc.s), Value.makeInt(sc.l) };
+    return matterLampFn(&lamp_args, gc, undefined);
+}
