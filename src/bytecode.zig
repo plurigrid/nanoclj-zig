@@ -412,7 +412,13 @@ pub const VM = struct {
                     const base = self.currentFrame().base;
                     const func_val = self.stack[base + c];
 
-                    if (!func_val.isObj()) return error.TypeError;
+                    if (!func_val.isObj()) {
+                        const compat2 = @import("compat.zig");
+                        var dbg2: [256]u8 = undefined;
+                        const msg2 = std.fmt.bufPrint(&dbg2, "DBG CALL not obj! a={d} b={d} c={d} base={d} isInt={} isNil={} bits=0x{x}\n", .{ a, b, c, base, func_val.isInt(), func_val.isNil(), func_val.bits }) catch "?";
+                        compat2.fileWriteAll(compat2.stderrFile(), msg2);
+                        return error.TypeError;
+                    }
                     const func_obj = func_val.asObj();
 
                     // Dispatch: bc_closure (bytecode) or builtin_ref (native)
