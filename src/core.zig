@@ -8,6 +8,7 @@ const Env = @import("env.zig").Env;
 const reader_mod = @import("reader.zig");
 const printer = @import("printer.zig");
 const eval_mod = @import("eval.zig");
+const semantics = @import("semantics.zig");
 const substrate = @import("substrate.zig");
 const gay_skills = @import("gay_skills.zig");
 const tree_vfs = @import("tree_vfs.zig");
@@ -51,7 +52,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "symbol?", &isSymbolP }, .{ "list?", &isListP },
         .{ "vector?", &isVectorP }, .{ "map?", &isMapP },
         .{ "fn?", &isFnP },    .{ "println", &printlnFn },
-        .{ "pr-str", &prStrFn }, .{ "read-string", &readStringFn },
+        .{ "pr-str", &prStrFn }, .{ "read-string", &readStringFn }, .{ "load-file", &loadFileFn },
         .{ "str", &strFn },    .{ "subs", &subsFn },
         .{ "not", &notFn },    .{ "mod", &modFn },
         .{ "inc", &incFn },    .{ "dec", &decFn },
@@ -340,7 +341,6 @@ fn modFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // Comparison
 fn eql(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 2) return error.ArityError;
-    const semantics = @import("semantics.zig");
     return Value.makeBool(semantics.structuralEq(args[0], args[1], gc));
 }
 
@@ -615,6 +615,50 @@ fn readStringFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const s = gc.getString(args[0].asStringId());
     var r = reader_mod.Reader.init(s, gc);
     return r.readForm() catch Value.makeNil();
+}
+
+/// (load-file path) → result of last form
+fn loadFileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isString()) return error.TypeError;
+    const path = gc.getString(args[0].asStringId());
+
+    // Read file contents via C stdio (compat with 0.16)
+    // Need null-terminated path for fopen
+    var path_buf: [4096]u8 = undefined;
+    if (path.len >= path_buf.len) return Value.makeNil();
+    @memcpy(path_buf[0..path.len], path);
+    path_buf[path.len] = 0;
+    const c_path: [*c]const u8 = @ptrCast(&path_buf);
+    const file = std.c.fopen(c_path, "r") orelse return Value.makeNil();
+    defer _ = std.c.fclose(file);
+
+    var contents = compat.emptyList(u8);
+    defer contents.deinit(gc.allocator);
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const n = std.c.fread(&buf, 1, buf.len, file);
+        if (n == 0) break;
+        try contents.appendSlice(gc.allocator, buf[0..n]);
+    }
+
+    // Read and eval each form sequentially
+    var r = reader_mod.Reader.init(contents.items, gc);
+    var last_result = Value.makeNil();
+    while (true) {
+        const form = r.readForm() catch break;
+        if (form.isNil()) {
+            // Skip nil from comments, try next form
+            if (r.pos >= r.src.len) break;
+            continue;
+        }
+        var res = semantics.Resources.initDefault();
+        const domain = semantics.evalBounded(form, env, gc, &res);
+        last_result = switch (domain) {
+            .value => |v| v,
+            else => Value.makeNil(),
+        };
+    }
+    return last_result;
 }
 
 fn strFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
