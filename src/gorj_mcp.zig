@@ -143,6 +143,22 @@ const prelude_forms = [_][]const u8{
     \\           result (gorj-pipe code)]
     \\      (pr-str {:compiled true :result (first result) :version-id (nth result 1) :trit (nth result 2)}))))
     ,
+    // gorj_spacetime: information spacetime metrics
+    \\(def gorj-mcp-spacetime
+    \\  (fn* [args]
+    \\    (let* [distance (or (get args "distance") 0)
+    \\           budget (or (get args "budget") 1)
+    \\           branching (or (get args "branching") 3)
+    \\           depth (or (get args "depth") 3)
+    \\           sep (separation distance budget)
+    \\           vol (cone-volume branching depth)
+    \\           cones (padic-cones depth)]
+    \\      (pr-str {:separation sep
+    \\               :cone-volume vol
+    \\               :padic-cones cones
+    \\               :branching branching
+    \\               :depth depth}))))
+    ,
     // MCP dispatch table: tool name → handler function symbol
     \\(def gorj-mcp-dispatch-table
     \\  {"gorj_eval" gorj-mcp-eval
@@ -154,7 +170,8 @@ const prelude_forms = [_][]const u8{
     \\   "gorj_trit_tick" gorj-mcp-trit-tick
     \\   "gorj_color" gorj-mcp-color
     \\   "gorj_substrate" gorj-mcp-substrate
-    \\   "gorj_compile" gorj-mcp-compile})
+    \\   "gorj_compile" gorj-mcp-compile
+    \\   "gorj_spacetime" gorj-mcp-spacetime})
     ,
     // The dispatch function itself — self-hosted MCP routing
     \\(def gorj-mcp-dispatch
@@ -302,6 +319,12 @@ const tool_defs = [_]ToolDef{
         .description = "Compile expression to bytecode and execute via register VM. Returns result + version + trit.",
         .input_schema =
         \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression to compile"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_spacetime",
+        .description = "Information spacetime metrics. Classifies separation (timelike/lightlike/spacelike), computes light cone volumes at each p-adic prime [2,3,5,7,1069]. Matter=density, energy=exchange rate, c=info speed limit.",
+        .input_schema =
+        \\{"type":"object","properties":{"distance":{"type":"integer","default":0,"description":"Graph distance between nodes"},"budget":{"type":"integer","default":1,"description":"Trit-tick budget (light cone radius)"},"branching":{"type":"integer","default":3,"description":"Graph branching factor"},"depth":{"type":"integer","default":3,"description":"Cone depth to compute"}},"required":[]}
     },
 };
 

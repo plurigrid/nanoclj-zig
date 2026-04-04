@@ -196,6 +196,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "color-sort-trit-sum", &computable_sets.colorSortTritSumFn },
         .{ "turn-state", &computable_sets.turnStateFn },
         .{ "consensus-classify", &computable_sets.consensusClassifyFn },
+        // Stacks Project
+        .{ "stacks-tags", &computable_sets.stacksTagsFn },
+        .{ "stacks-trit-sum", &computable_sets.stacksTritSumFn },
+        .{ "stacks-lookup", &computable_sets.stacksLookupFn },
         // Diophantine equations
         .{ "pythagorean-triples", &computable_sets.pythagoreanTriplesFn },
         .{ "pell-solve", &computable_sets.pellSolveFn },
