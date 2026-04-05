@@ -92,6 +92,8 @@ pub const GC = struct {
                 .dense_f64 => .{ .dense_f64 = .{ .data = &.{}, .len = 0 } },
                 .trace => .{ .trace = .{ .site_names = compat.emptyList(u32), .site_values = compat.emptyList(Value), .site_log_probs = compat.emptyList(f64) } },
                 .rational => .{ .rational = .{ .numerator = 0, .denominator = 1 } },
+                .color => .{ .color = .{} },
+                .channel => .{ .channel = .{} },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -207,6 +209,11 @@ pub const GC = struct {
                 },
                 .dense_f64 => {}, // no Value refs
                 .rational => {}, // no Value refs, no heap
+                .color => {}, // no Value refs, inline f32s
+                .channel => {
+                    for (cur.data.channel.buf.items) |v| self.enqueueVal(v, &worklist);
+                    for (cur.data.channel.pending_puts.items) |v| self.enqueueVal(v, &worklist);
+                },
                 .trace => {
                     for (cur.data.trace.site_values.items) |v| self.enqueueVal(v, &worklist);
                 },
@@ -286,6 +293,11 @@ pub const GC = struct {
                 obj.data.trace.site_log_probs.deinit(self.allocator);
             },
             .rational => {}, // no heap data
+            .color => {}, // no heap data, inline f32s
+            .channel => {
+                obj.data.channel.buf.deinit(self.allocator);
+                obj.data.channel.pending_puts.deinit(self.allocator);
+            },
         }
         self.allocator.destroy(obj);
         self.bytes_allocated -|= @sizeOf(Obj);

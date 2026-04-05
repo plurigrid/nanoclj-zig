@@ -29,6 +29,18 @@ fn hashValue(v: Value, gc: *GC) u32 {
         const s = gc.getString(v.asStringId());
         return @truncate(std.hash.Wyhash.hash(3, s));
     }
+    if (v.isObj()) {
+        const obj = v.asObj();
+        if (obj.kind == .color) {
+            const c = obj.data.color;
+            var buf: [16]u8 = undefined;
+            std.mem.writeInt(u32, buf[0..4], @bitCast(c.L), .little);
+            std.mem.writeInt(u32, buf[4..8], @bitCast(c.a), .little);
+            std.mem.writeInt(u32, buf[8..12], @bitCast(c.b), .little);
+            std.mem.writeInt(u32, buf[12..16], @bitCast(c.alpha), .little);
+            return @truncate(std.hash.Wyhash.hash(4, &buf));
+        }
+    }
     // fallback: treat as zero hash
     return 0;
 }

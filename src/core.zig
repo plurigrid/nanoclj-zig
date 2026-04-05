@@ -39,6 +39,9 @@ const decomp = @import("decomp.zig");
 const brainfloj = @import("brainfloj.zig");
 const congrunet = @import("congrunet.zig");
 const holy = @import("holy.zig");
+const zipf = @import("zipf.zig");
+const channel = @import("channel.zig");
+const srcloc = @import("srcloc.zig");
 
 fn getSeedMs() i64 {
     var ts: std.c.timespec = undefined;
@@ -439,6 +442,20 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "cs-chroma", &csChromaFn },
         .{ "cs-resolve", &csResolveFn },
         .{ "cs-radius", &csRadiusFn },
+        // First-class color ops
+        .{ "color", &colorCtorFn },
+        .{ "color?", &colorPredFn },
+        .{ "color-blend", &colorBlendFn },
+        .{ "color-complement", &colorComplementFn },
+        .{ "color-analogous", &colorAnalogousFn },
+        .{ "color-triadic", &colorTriadicFn },
+        .{ "color-distance", &colorDistanceFn },
+        .{ "color-hue", &colorHueFn },
+        .{ "color-chroma", &colorChromaFn },
+        .{ "color-L", &colorLFn },
+        .{ "color-a", &colorAFn },
+        .{ "color-b", &colorBFn },
+        .{ "color-alpha", &colorAlphaFn },
         // Regex
         .{ "re-pattern", &rePatternFn },
         .{ "re-matches", &reMatchesFn },
@@ -632,6 +649,24 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "extend-section", &decomp.extendSectionFn },
         .{ "trit-trajectory", &decomp.tritTrajectoryFn },
         .{ "decomp-gf3", &decomp.decompGf3Fn },
+        // Zipf's law — power-law rank-frequency distributions
+        .{ "zipf-rank", &zipf.zipfRankFn },
+        .{ "zipf-pmf", &zipf.zipfPmfFn },
+        .{ "zipf-harmonic", &zipf.zipfHarmonicFn },
+        .{ "zipf-top-share", &zipf.zipfTopShareFn },
+        .{ "zipf-sample", &zipf.zipfSampleFn },
+        .{ "zipf-taper", &zipf.zipfTaperFn },
+        .{ "zipf-mandelbrot", &zipf.zipfMandelbrotFn },
+        // CSP channels (core.async-style)
+        .{ "chan", &channel.chanFn },
+        .{ "chan?", &channel.chanPredFn },
+        .{ "chan!", &channel.chanPutFn },
+        .{ "<!", &channel.chanTakeFn },
+        .{ "close!", &channel.chanCloseFn },
+        .{ "closed?", &channel.chanClosedPredFn },
+        .{ "chan-count", &channel.chanCountFn },
+        .{ "offer!", &channel.chanOfferFn },
+        .{ "poll!", &channel.chanPollFn },
     };
 
     inline for (builtins) |b| {
@@ -2664,6 +2699,8 @@ fn typeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         .dense_f64 => "dense-f64",
         .trace => "trace",
         .rational => "rational",
+        .color => "color",
+        .channel => "channel",
     }
     else "unknown";
     return Value.makeString(try gc.internString(t));
@@ -3329,13 +3366,15 @@ fn requireFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 const colorspace_mod = @import("colorspace.zig");
 
-fn colorToVector(color: colorspace_mod.Color, gc: *GC) !Value {
-    const obj = try gc.allocObj(.vector);
-    try obj.data.vector.items.append(gc.allocator, Value.makeFloat(color.L));
-    try obj.data.vector.items.append(gc.allocator, Value.makeFloat(color.a));
-    try obj.data.vector.items.append(gc.allocator, Value.makeFloat(color.b));
-    try obj.data.vector.items.append(gc.allocator, Value.makeFloat(color.alpha));
+fn makeColorValue(color: colorspace_mod.Color, gc: *GC) !Value {
+    const obj = try gc.allocObj(.color);
+    obj.data = .{ .color = color };
     return Value.makeObj(obj);
+}
+
+/// Legacy compat — still available but prefer makeColorValue
+fn colorToVector(color: colorspace_mod.Color, gc: *GC) !Value {
+    return makeColorValue(color, gc);
 }
 
 /// (*cs*) — return current colorspace name as symbol
@@ -3419,6 +3458,119 @@ fn csRadiusFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
         }
     }
     return Value.makeNil();
+}
+
+// ============================================================================
+// FIRST-CLASS COLOR BUILTINS
+// ============================================================================
+
+fn asColor(v: Value) ?colorspace_mod.Color {
+    if (!v.isObj()) return null;
+    const obj = v.asObj();
+    if (obj.kind != .color) return null;
+    return obj.data.color;
+}
+
+fn toF32(v: Value) ?f32 {
+    if (v.isFloat()) return @floatCast(v.asFloat());
+    if (v.isInt()) return @floatFromInt(v.asInt());
+    return null;
+}
+
+/// (color L a b) or (color L a b alpha) — construct a first-class OKLAB color
+fn colorCtorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 3) return error.ArityError;
+    const L = toF32(args[0]) orelse return error.TypeError;
+    const a = toF32(args[1]) orelse return error.TypeError;
+    const b = toF32(args[2]) orelse return error.TypeError;
+    const alpha = if (args.len > 3) (toF32(args[3]) orelse return error.TypeError) else @as(f32, 1.0);
+    return makeColorValue(.{ .L = L, .a = a, .b = b, .alpha = alpha }, gc);
+}
+
+/// (color? x) — true if x is a first-class color value
+fn colorPredFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return Value.makeBool(asColor(args[0]) != null);
+}
+
+/// (color-blend c1 c2 t) — perceptual blend in OKLAB
+fn colorBlendFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    const c1 = asColor(args[0]) orelse return error.TypeError;
+    const c2 = asColor(args[1]) orelse return error.TypeError;
+    const t = toF32(args[2]) orelse return error.TypeError;
+    return makeColorValue(c1.blend(c2, t), gc);
+}
+
+/// (color-complement c) — 180° rotation in a-b plane + lightness inversion
+fn colorComplementFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const c = asColor(args[0]) orelse return error.TypeError;
+    return makeColorValue(c.complement(), gc);
+}
+
+/// (color-analogous c angle-deg) — rotate in a-b chroma plane
+fn colorAnalogousFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const c = asColor(args[0]) orelse return error.TypeError;
+    const angle = toF32(args[1]) orelse return error.TypeError;
+    return makeColorValue(c.analogous(angle), gc);
+}
+
+/// (color-triadic c) — [c c+120° c+240°]
+fn colorTriadicFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const c = asColor(args[0]) orelse return error.TypeError;
+    const tri = c.triadic();
+    const obj = try gc.allocObj(.vector);
+    for (tri) |tc| {
+        try obj.data.vector.items.append(gc.allocator, try makeColorValue(tc, gc));
+    }
+    return Value.makeObj(obj);
+}
+
+/// (color-distance c1 c2) — Euclidean distance in OKLAB (≈ perceptual JND)
+fn colorDistanceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const c1 = asColor(args[0]) orelse return error.TypeError;
+    const c2 = asColor(args[1]) orelse return error.TypeError;
+    return Value.makeFloat(c1.distance(c2));
+}
+
+/// (color-hue c) — hue angle in degrees [0,360)
+fn colorHueFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const c = asColor(args[0]) orelse return error.TypeError;
+    return Value.makeFloat(c.hue());
+}
+
+/// (color-chroma c) — chroma magnitude
+fn colorChromaFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const c = asColor(args[0]) orelse return error.TypeError;
+    return Value.makeFloat(c.chroma());
+}
+
+/// (color-L c), (color-a c), (color-b c), (color-alpha c) — accessors
+fn colorLFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const c = asColor(args[0]) orelse return error.TypeError;
+    return Value.makeFloat(c.L);
+}
+fn colorAFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const c = asColor(args[0]) orelse return error.TypeError;
+    return Value.makeFloat(c.a);
+}
+fn colorBFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const c = asColor(args[0]) orelse return error.TypeError;
+    return Value.makeFloat(c.b);
+}
+fn colorAlphaFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const c = asColor(args[0]) orelse return error.TypeError;
+    return Value.makeFloat(c.alpha);
 }
 
 // ============================================================================

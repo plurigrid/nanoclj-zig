@@ -517,6 +517,7 @@ fn structuralEqObj(a: *Obj, b: *Obj, gc: *GC) bool {
         .map => structuralEqMap(a, b, gc),
         .set => structuralEqSeq(a.data.set.items.items, b.data.set.items.items, gc),
         .rational => a.data.rational.numerator == b.data.rational.numerator and a.data.rational.denominator == b.data.rational.denominator,
+        .color => a.data.color.eql(b.data.color),
         .function, .macro_fn, .bc_closure, .builtin_ref, .lazy_seq, .partial_fn, .multimethod, .protocol, .dense_f64, .trace => false,
         .atom => structuralEq(a.data.atom.val, b.data.atom.val, gc),
     };

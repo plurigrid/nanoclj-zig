@@ -141,6 +141,27 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
                     try buf.appendSlice(gc.allocator, s);
                 }
             },
+            .channel => {
+                const ch = &obj.data.channel;
+                var tmp: [64]u8 = undefined;
+                const status = if (ch.closed) "closed" else "open";
+                const s = std.fmt.bufPrint(&tmp, "#channel[{s} buf={d} cap={d}]", .{ status, ch.buf.items.len, ch.capacity }) catch "?";
+                try buf.appendSlice(gc.allocator, s);
+            },
+            .color => {
+                const c = &obj.data.color;
+                // OKLAB → linear sRGB → sRGB for ANSI true-color swatch
+                const rgb = oklabToSrgb8(c.L, c.a, c.b);
+                // Emit: ██ swatch in true color, then the readable form
+                var swatch: [32]u8 = undefined;
+                const sw = std.fmt.bufPrint(&swatch, "\x1b[38;2;{d};{d};{d}m\u{2588}\u{2588}\x1b[0m ", .{ rgb[0], rgb[1], rgb[2] }) catch "";
+                try buf.appendSlice(gc.allocator, sw);
+                try buf.appendSlice(gc.allocator, "#color[");
+                var tmp: [64]u8 = undefined;
+                const s = std.fmt.bufPrint(&tmp, "{d:.3} {d:.3} {d:.3} {d:.3}", .{ c.L, c.a, c.b, c.alpha }) catch "?";
+                try buf.appendSlice(gc.allocator, s);
+                try buf.append(gc.allocator, ']');
+            },
         }
     } else {
         // float
@@ -148,4 +169,30 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
         const s = std.fmt.bufPrint(&tmp, "{d}", .{val.asFloat()}) catch unreachable;
         try buf.appendSlice(gc.allocator, s);
     }
+}
+
+/// OKLAB → linear sRGB → gamma-compressed sRGB [0..255]
+fn oklabToSrgb8(L: f32, a: f32, b: f32) [3]u8 {
+    // OKLAB → LMS (cube roots)
+    const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+    const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+    const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+    const l = l_ * l_ * l_;
+    const m = m_ * m_ * m_;
+    const s = s_ * s_ * s_;
+    // LMS → linear sRGB
+    const r_lin = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+    const g_lin = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+    const b_lin = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+    return .{
+        gammaCompress(r_lin),
+        gammaCompress(g_lin),
+        gammaCompress(b_lin),
+    };
+}
+
+fn gammaCompress(x: f32) u8 {
+    const c = if (x <= 0.0) @as(f32, 0.0) else if (x >= 1.0) @as(f32, 1.0) else x;
+    const g = if (c <= 0.0031308) 12.92 * c else 1.055 * std.math.pow(f32, c, 1.0 / 2.4) - 0.055;
+    return @intFromFloat(g * 255.0);
 }

@@ -39,6 +39,8 @@ pub const ObjKind = enum(u8) {
     dense_f64, // Neanderthal-compatible: contiguous f64 buffer + stride
     trace, // Anglican-compatible: weighted execution trace (sample sites + log-weight)
     rational, // exact rational number: numerator/denominator (always GCD-normalized, denominator > 0)
+    color, // first-class OKLAB color value (L, a, b, alpha as 4×f32)
+    channel, // CSP channel (core.async-style buffered/unbuffered)
 };
 
 pub const Obj = struct {
@@ -75,6 +77,8 @@ pub const ObjData = union {
     dense_f64: DenseF64,
     trace: TraceData,
     rational: Rational,
+    color: @import("colorspace.zig").Color,
+    channel: @import("channel.zig").ChannelData,
 };
 
 /// Neanderthal-compatible dense f64 vector.
