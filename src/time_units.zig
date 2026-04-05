@@ -114,6 +114,51 @@ pub const notable_ratios = [_]struct { from: u8, to: u8, label: []const u8 }{
 };
 
 // ============================================================================
+// HELPERS — extracted to reduce cyclomatic complexity
+// ============================================================================
+
+fn resolveString(arg: Value, gc: *GC) ![]const u8 {
+    if (arg.isString()) return gc.getString(arg.asStringId());
+    if (arg.isKeyword()) return gc.getString(arg.asKeywordId());
+    return error.TypeError;
+}
+
+fn resolveNumber(arg: Value) !f64 {
+    if (arg.isInt()) return @floatFromInt(arg.asInt());
+    if (arg.isFloat()) return arg.asFloat();
+    return error.TypeError;
+}
+
+fn findUnit(needle: []const u8) ?TimeUnit {
+    for (catalog) |unit| {
+        if (std.mem.eql(u8, unit.name, needle) or std.mem.eql(u8, unit.symbol, needle))
+            return unit;
+    }
+    return null;
+}
+
+fn unitSecondsOrNull(needle: []const u8) ?f64 {
+    const unit = findUnit(needle) orelse return null;
+    return if (std.math.isNan(unit.seconds)) null else unit.seconds;
+}
+
+fn unitToMap(unit: TimeUnit, gc: *GC) !Value {
+    const m = try gc.allocObj(.map);
+    const fields = [_]struct { k: []const u8, v: Value }{
+        .{ .k = "name", .v = Value.makeKeyword(try gc.internString(unit.name)) },
+        .{ .k = "symbol", .v = Value.makeKeyword(try gc.internString(unit.symbol)) },
+        .{ .k = "seconds", .v = if (std.math.isNan(unit.seconds)) Value.makeNil() else Value.makeFloat(unit.seconds) },
+        .{ .k = "domain", .v = Value.makeKeyword(try gc.internString(@tagName(unit.domain))) },
+        .{ .k = "trit", .v = Value.makeInt(@as(i48, unit.domain.trit())) },
+    };
+    for (fields) |f| {
+        try m.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString(f.k)));
+        try m.data.map.vals.append(gc.allocator, f.v);
+    }
+    return Value.makeObj(m);
+}
+
+// ============================================================================
 // CLOJURE BUILTINS
 // ============================================================================
 
@@ -122,36 +167,7 @@ pub fn timeUnitsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     const result = try gc.allocObj(.list);
     for (catalog) |unit| {
-        const m = try gc.allocObj(.map);
-        // :name
-        const kn = try gc.internString("name");
-        try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kn));
-        const vn = try gc.internString(unit.name);
-        try m.data.map.vals.append(gc.allocator, Value.makeKeyword(vn));
-        // :symbol
-        const ks = try gc.internString("symbol");
-        try m.data.map.keys.append(gc.allocator, Value.makeKeyword(ks));
-        const vs = try gc.internString(unit.symbol);
-        try m.data.map.vals.append(gc.allocator, Value.makeKeyword(vs));
-        // :seconds (float or nil for NaN)
-        const ksc = try gc.internString("seconds");
-        try m.data.map.keys.append(gc.allocator, Value.makeKeyword(ksc));
-        if (std.math.isNan(unit.seconds)) {
-            try m.data.map.vals.append(gc.allocator, Value.makeNil());
-        } else {
-            try m.data.map.vals.append(gc.allocator, Value.makeFloat(unit.seconds));
-        }
-        // :domain
-        const kd = try gc.internString("domain");
-        try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kd));
-        const vd = try gc.internString(@tagName(unit.domain));
-        try m.data.map.vals.append(gc.allocator, Value.makeKeyword(vd));
-        // :trit
-        const kt = try gc.internString("trit");
-        try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kt));
-        try m.data.map.vals.append(gc.allocator, Value.makeInt(@as(i48, unit.domain.trit())));
-
-        try result.data.list.items.append(gc.allocator, Value.makeObj(m));
+        try result.data.list.items.append(gc.allocator, try unitToMap(unit, gc));
     }
     return Value.makeObj(result);
 }
@@ -159,78 +175,19 @@ pub fn timeUnitsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// (time-unit name) → map for a single unit, or nil
 pub fn timeUnitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
-    const needle = if (args[0].isString())
-        gc.getString(args[0].asStringId())
-    else if (args[0].isKeyword())
-        gc.getString(args[0].asKeywordId())
-    else
-        return error.TypeError;
-
-    for (catalog) |unit| {
-        if (std.mem.eql(u8, unit.name, needle) or std.mem.eql(u8, unit.symbol, needle)) {
-            const m = try gc.allocObj(.map);
-            const kn = try gc.internString("name");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kn));
-            const vn = try gc.internString(unit.name);
-            try m.data.map.vals.append(gc.allocator, Value.makeKeyword(vn));
-            const ks = try gc.internString("symbol");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(ks));
-            const vs = try gc.internString(unit.symbol);
-            try m.data.map.vals.append(gc.allocator, Value.makeKeyword(vs));
-            const ksc = try gc.internString("seconds");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(ksc));
-            if (std.math.isNan(unit.seconds)) {
-                try m.data.map.vals.append(gc.allocator, Value.makeNil());
-            } else {
-                try m.data.map.vals.append(gc.allocator, Value.makeFloat(unit.seconds));
-            }
-            const kd = try gc.internString("domain");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kd));
-            const vd = try gc.internString(@tagName(unit.domain));
-            try m.data.map.vals.append(gc.allocator, Value.makeKeyword(vd));
-            const kt = try gc.internString("trit");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kt));
-            try m.data.map.vals.append(gc.allocator, Value.makeInt(@as(i48, unit.domain.trit())));
-            return Value.makeObj(m);
-        }
-    }
-    return Value.makeNil();
+    const needle = try resolveString(args[0], gc);
+    const unit = findUnit(needle) orelse return Value.makeNil();
+    return unitToMap(unit, gc);
 }
 
 /// (convert-time from-name to-name count) → float seconds, or nil
 pub fn convertTimeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 3) return error.ArityError;
-    const from_name = if (args[0].isString())
-        gc.getString(args[0].asStringId())
-    else if (args[0].isKeyword())
-        gc.getString(args[0].asKeywordId())
-    else
-        return error.TypeError;
-    const to_name = if (args[1].isString())
-        gc.getString(args[1].asStringId())
-    else if (args[1].isKeyword())
-        gc.getString(args[1].asKeywordId())
-    else
-        return error.TypeError;
-    const count: f64 = if (args[2].isInt())
-        @floatFromInt(args[2].asInt())
-    else if (args[2].isFloat())
-        args[2].asFloat()
-    else
-        return error.TypeError;
-
-    var from_sec: ?f64 = null;
-    var to_sec: ?f64 = null;
-    for (catalog) |unit| {
-        if (std.mem.eql(u8, unit.name, from_name) or std.mem.eql(u8, unit.symbol, from_name)) {
-            from_sec = if (std.math.isNan(unit.seconds)) null else unit.seconds;
-        }
-        if (std.mem.eql(u8, unit.name, to_name) or std.mem.eql(u8, unit.symbol, to_name)) {
-            to_sec = if (std.math.isNan(unit.seconds)) null else unit.seconds;
-        }
-    }
-    const fs = from_sec orelse return Value.makeNil();
-    const ts = to_sec orelse return Value.makeNil();
+    const from_name = try resolveString(args[0], gc);
+    const to_name = try resolveString(args[1], gc);
+    const count = try resolveNumber(args[2]);
+    const fs = unitSecondsOrNull(from_name) orelse return Value.makeNil();
+    const ts = unitSecondsOrNull(to_name) orelse return Value.makeNil();
     return Value.makeFloat(count * fs / ts);
 }
 
@@ -474,10 +431,7 @@ pub fn nreplPortSpread(base_path: []const u8, n: usize, out: []u16) void {
 /// Clojure builtin: (nrepl-port-for path) → port number
 pub fn nreplPortForFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
-    const path = if (args[0].isString())
-        gc.getString(args[0].asStringId())
-    else
-        return error.TypeError;
+    const path = try resolveString(args[0], gc);
     return Value.makeInt(@intCast(nreplPortFromPath(path)));
 }
 
@@ -487,25 +441,22 @@ pub fn nreplColorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     const port: u16 = @intCast(@max(@as(i48, 0), args[0].asInt()));
     const c = nreplColor(port);
     const m = try gc.allocObj(.map);
-    const kr = try gc.internString("r");
-    try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kr));
-    try m.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(c.r)));
-    const kg = try gc.internString("g");
-    try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kg));
-    try m.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(c.g)));
-    const kb = try gc.internString("b");
-    try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kb));
-    try m.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(c.b)));
+    const fields = [_]struct { k: []const u8, v: Value }{
+        .{ .k = "r", .v = Value.makeInt(@intCast(c.r)) },
+        .{ .k = "g", .v = Value.makeInt(@intCast(c.g)) },
+        .{ .k = "b", .v = Value.makeInt(@intCast(c.b)) },
+    };
+    for (fields) |f| {
+        try m.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString(f.k)));
+        try m.data.map.vals.append(gc.allocator, f.v);
+    }
     return Value.makeObj(m);
 }
 
 /// Clojure builtin: (nrepl-spread path n) → vector of n deconflicted ports
 pub fn nreplSpreadFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 2) return error.ArityError;
-    const path = if (args[0].isString())
-        gc.getString(args[0].asStringId())
-    else
-        return error.TypeError;
+    const path = try resolveString(args[0], gc);
     if (!args[1].isInt()) return error.TypeError;
     const n: usize = @intCast(@max(@as(i48, 1), @min(args[1].asInt(), 16)));
     var ports: [16]u16 = undefined;
@@ -520,57 +471,39 @@ pub fn nreplSpreadFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// Clojure builtin: (hyperreal-time unit-name) → {:standard :infinitesimal :infinite}
 pub fn hyperrealTimeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
-    const needle = if (args[0].isString())
-        gc.getString(args[0].asStringId())
-    else if (args[0].isKeyword())
-        gc.getString(args[0].asKeywordId())
-    else
-        return error.TypeError;
-    for (catalog) |unit| {
-        if (std.mem.eql(u8, unit.name, needle) or std.mem.eql(u8, unit.symbol, needle)) {
-            const ht = HyperrealTime.transfer(unit);
-            const m = try gc.allocObj(.map);
-            const ks = try gc.internString("standard");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(ks));
-            try m.data.map.vals.append(gc.allocator, Value.makeFloat(ht.standard));
-            const ki = try gc.internString("infinitesimal");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(ki));
-            try m.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(ht.infinitesimal)));
-            const kw = try gc.internString("infinite");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kw));
-            try m.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(ht.infinite)));
-            return Value.makeObj(m);
-        }
+    const needle = try resolveString(args[0], gc);
+    const unit = findUnit(needle) orelse return Value.makeNil();
+    const ht = HyperrealTime.transfer(unit);
+    const m = try gc.allocObj(.map);
+    const fields = [_]struct { k: []const u8, v: Value }{
+        .{ .k = "standard", .v = Value.makeFloat(ht.standard) },
+        .{ .k = "infinitesimal", .v = Value.makeInt(@intCast(ht.infinitesimal)) },
+        .{ .k = "infinite", .v = Value.makeInt(@intCast(ht.infinite)) },
+    };
+    for (fields) |f| {
+        try m.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString(f.k)));
+        try m.data.map.vals.append(gc.allocator, f.v);
     }
-    return Value.makeNil();
+    return Value.makeObj(m);
 }
 
 /// Clojure builtin: (surreal-birthday unit-name) → {:birthday :sign :real}
 pub fn surrealBirthdayFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
-    const needle = if (args[0].isString())
-        gc.getString(args[0].asStringId())
-    else if (args[0].isKeyword())
-        gc.getString(args[0].asKeywordId())
-    else
-        return error.TypeError;
-    for (catalog) |unit| {
-        if (std.mem.eql(u8, unit.name, needle) or std.mem.eql(u8, unit.symbol, needle)) {
-            const sb = surrealBirthday(unit);
-            const m = try gc.allocObj(.map);
-            const kb = try gc.internString("birthday");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kb));
-            try m.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(sb.birthday)));
-            const ks = try gc.internString("sign");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(ks));
-            try m.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(sb.sign)));
-            const kr = try gc.internString("real");
-            try m.data.map.keys.append(gc.allocator, Value.makeKeyword(kr));
-            try m.data.map.vals.append(gc.allocator, Value.makeFloat(sb.real_approx));
-            return Value.makeObj(m);
-        }
+    const needle = try resolveString(args[0], gc);
+    const unit = findUnit(needle) orelse return Value.makeNil();
+    const sb = surrealBirthday(unit);
+    const m = try gc.allocObj(.map);
+    const fields = [_]struct { k: []const u8, v: Value }{
+        .{ .k = "birthday", .v = Value.makeInt(@intCast(sb.birthday)) },
+        .{ .k = "sign", .v = Value.makeInt(@intCast(sb.sign)) },
+        .{ .k = "real", .v = Value.makeFloat(sb.real_approx) },
+    };
+    for (fields) |f| {
+        try m.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString(f.k)));
+        try m.data.map.vals.append(gc.allocator, f.v);
     }
-    return Value.makeNil();
+    return Value.makeObj(m);
 }
 
 // ============================================================================
