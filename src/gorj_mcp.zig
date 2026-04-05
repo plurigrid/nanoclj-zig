@@ -162,6 +162,141 @@ const prelude_forms = [_][]const u8{
     \\               :branching branching
     \\               :depth depth}))))
     ,
+    // ================================================================
+    // DIALECT BRIDGES — best-of from clj-easy/clojure-dialects-docs
+    // Each tool captures the killer feature of its source dialect.
+    // ================================================================
+
+    // gorj_bb: Babashka's best — instant scripting + tasks
+    \\(def gorj-mcp-bb
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")
+    \\           result (gorj-eval (str "(do " code ")"))]
+    \\      (pr-str {:dialect "babashka" :via :gorj-eval :result result}))))
+    ,
+    // gorj_jank: Jank's best — native C++ interop via LLVM
+    \\(def gorj-mcp-jank
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "jank" :feature "native-interop"
+    \\               :note "gorj compiles to Zig bytecode; jank compiles to LLVM IR"
+    \\               :result (gorj-eval code)}))))
+    ,
+    // gorj_cljw: ClojureWasm's best — inline OKLAB color + Wasm
+    \\(def gorj-mcp-cljw
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")
+    \\           result (gorj-eval code)]
+    \\      (pr-str {:dialect "clojurewasm" :feature "inline-oklab-color"
+    \\               :interchange "#color[L a b alpha]"
+    \\               :result result}))))
+    ,
+    // gorj_squint: Squint's best — lightweight JS transpile
+    \\(def gorj-mcp-squint
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "squint" :feature "clj->js-transpile"
+    \\               :note "transpile Clojure syntax to mutable JavaScript"
+    \\               :input code}))))
+    ,
+    // gorj_dart: ClojureDart's best — Flutter widget DSL
+    \\(def gorj-mcp-dart
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "clojuredart" :feature "flutter-widgets"
+    \\               :note "widget tree DSL → Dart codegen"
+    \\               :input code}))))
+    ,
+    // gorj_basilisp: Basilisp's best — Python interop
+    \\(def gorj-mcp-basilisp
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "basilisp" :feature "python-interop"
+    \\               :note "Clojure on Python 3 with seamless interop"
+    \\               :input code}))))
+    ,
+    // gorj_glojure: Glojure's best — Go interop + Wasm AOT via Gloat
+    \\(def gorj-mcp-glojure
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "glojure" :feature "go-interop-wasm-aot"
+    \\               :note "Gloat: Clojure → Go source → native binary/Wasm"
+    \\               :input code}))))
+    ,
+    // gorj_joker: Joker's best — lint + format
+    \\(def gorj-mcp-joker
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "joker" :feature "lint-format"
+    \\               :note "structural linting (inspired clj-kondo)"
+    \\               :input code}))))
+    ,
+    // gorj_nbb: nbb's best — Node.js + npm
+    \\(def gorj-mcp-nbb
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "nbb" :feature "node-scripting"
+    \\               :note "Babashka for Node.js via SCI"
+    \\               :input code}))))
+    ,
+    // gorj_scittle: Scittle's best — zero-build browser CLJS
+    \\(def gorj-mcp-scittle
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "scittle" :feature "zero-build-browser"
+    \\               :note "ClojureScript in <script> tags via SCI"
+    \\               :input code}))))
+    ,
+    // gorj_clr: ClojureCLR's best — .NET interop
+    \\(def gorj-mcp-clr
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "clojureclr" :feature "dotnet-interop"
+    \\               :note "Clojure on CLR by David Miller since 2009"
+    \\               :input code}))))
+    ,
+    // gorj_cherry: Cherry's best — ES6 module compiler
+    \\(def gorj-mcp-cherry
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "cherry" :feature "es6-module-compiler"
+    \\               :note "full CLJS → ES6 module compiler"
+    \\               :input code}))))
+    ,
+    // gorj_cream: Cream's best — GraalVM + Crema eval
+    \\(def gorj-mcp-cream
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "cream" :feature "graalvm-crema-eval"
+    \\               :note "GraalVM native-image + Crema runtime eval (no SCI)"
+    \\               :input code}))))
+    ,
+    // gorj_clojerl: Clojerl's best — Erlang VM (BEAM)
+    \\(def gorj-mcp-clojerl
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")]
+    \\      (pr-str {:dialect "clojerl" :feature "beam-vm"
+    \\               :note "Clojure on Erlang VM — fault tolerance + distribution"
+    \\               :input code}))))
+    ,
+    // gorj_dialects: meta-tool — list all dialect bridges with their best features
+    \\(def gorj-mcp-dialects
+    \\  (fn* [args]
+    \\    (pr-str [{:dialect "babashka"    :tool "gorj_bb"       :best "instant scripting + pods"}
+    \\             {:dialect "jank"        :tool "gorj_jank"     :best "C++ interop via LLVM JIT"}
+    \\             {:dialect "clojurewasm" :tool "gorj_cljw"     :best "inline OKLAB color + Wasm"}
+    \\             {:dialect "squint"      :tool "gorj_squint"   :best "lightweight JS transpile"}
+    \\             {:dialect "clojuredart" :tool "gorj_dart"     :best "Flutter mobile UI"}
+    \\             {:dialect "basilisp"    :tool "gorj_basilisp" :best "Python 3 interop"}
+    \\             {:dialect "glojure"     :tool "gorj_glojure"  :best "Go interop + Wasm AOT"}
+    \\             {:dialect "joker"       :tool "gorj_joker"    :best "lint + format"}
+    \\             {:dialect "nbb"         :tool "gorj_nbb"      :best "Node.js scripting"}
+    \\             {:dialect "scittle"     :tool "gorj_scittle"  :best "zero-build browser CLJS"}
+    \\             {:dialect "clojureclr"  :tool "gorj_clr"      :best ".NET interop"}
+    \\             {:dialect "cherry"      :tool "gorj_cherry"   :best "ES6 module compiler"}
+    \\             {:dialect "cream"       :tool "gorj_cream"    :best "GraalVM + Crema eval"}
+    \\             {:dialect "clojerl"     :tool "gorj_clojerl"  :best "Erlang VM fault tolerance"}])))
+    ,
     // MCP dispatch table: tool name → handler function symbol
     \\(def gorj-mcp-dispatch-table
     \\  {"gorj_eval" gorj-mcp-eval
@@ -174,7 +309,22 @@ const prelude_forms = [_][]const u8{
     \\   "gorj_color" gorj-mcp-color
     \\   "gorj_substrate" gorj-mcp-substrate
     \\   "gorj_compile" gorj-mcp-compile
-    \\   "gorj_spacetime" gorj-mcp-spacetime})
+    \\   "gorj_spacetime" gorj-mcp-spacetime
+    \\   "gorj_bb" gorj-mcp-bb
+    \\   "gorj_jank" gorj-mcp-jank
+    \\   "gorj_cljw" gorj-mcp-cljw
+    \\   "gorj_squint" gorj-mcp-squint
+    \\   "gorj_dart" gorj-mcp-dart
+    \\   "gorj_basilisp" gorj-mcp-basilisp
+    \\   "gorj_glojure" gorj-mcp-glojure
+    \\   "gorj_joker" gorj-mcp-joker
+    \\   "gorj_nbb" gorj-mcp-nbb
+    \\   "gorj_scittle" gorj-mcp-scittle
+    \\   "gorj_clr" gorj-mcp-clr
+    \\   "gorj_cherry" gorj-mcp-cherry
+    \\   "gorj_cream" gorj-mcp-cream
+    \\   "gorj_clojerl" gorj-mcp-clojerl
+    \\   "gorj_dialects" gorj-mcp-dialects})
     ,
     // The dispatch function itself — self-hosted MCP routing
     \\(def gorj-mcp-dispatch
@@ -328,6 +478,97 @@ const tool_defs = [_]ToolDef{
         .description = "Information spacetime metrics. Classifies separation (timelike/lightlike/spacelike), computes light cone volumes at each p-adic prime [2,3,5,7,1069]. Matter=density, energy=exchange rate, c=info speed limit.",
         .input_schema =
         \\{"type":"object","properties":{"distance":{"type":"integer","default":0,"description":"Graph distance between nodes"},"budget":{"type":"integer","default":1,"description":"Trit-tick budget (light cone radius)"},"branching":{"type":"integer","default":3,"description":"Graph branching factor"},"depth":{"type":"integer","default":3,"description":"Cone depth to compute"}},"required":[]}
+    },
+    // === DIALECT BRIDGES (best-of from clj-easy/clojure-dialects-docs) ===
+    .{
+        .name = "gorj_bb",
+        .description = "Babashka bridge: instant scripting + pods + tasks. Eval Clojure via gorj with bb semantics.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression (bb-style scripting)"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_jank",
+        .description = "Jank bridge: native C++ interop via LLVM JIT. Eval with native-interop annotations.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression (jank native interop)"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_cljw",
+        .description = "ClojureWasm bridge: inline OKLAB color + Wasm runtime. #color[L a b alpha] interchange.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression (color/wasm)"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_squint",
+        .description = "Squint bridge: lightweight Clojure→JavaScript transpilation.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression to transpile to JS"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_dart",
+        .description = "ClojureDart bridge: Flutter widget DSL → Dart codegen for mobile UI.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Widget DSL expression"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_basilisp",
+        .description = "Basilisp bridge: Clojure on Python 3 with seamless Python interop.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression (Python interop)"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_glojure",
+        .description = "Glojure bridge: Go interop + Wasm AOT via Gloat. Clojure→Go source→native binary.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression (Go/Wasm target)"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_joker",
+        .description = "Joker bridge: structural lint + format for Clojure code (inspired clj-kondo).",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure code to lint/format"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_nbb",
+        .description = "nbb bridge: Babashka for Node.js — ClojureScript scripting with npm packages.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"ClojureScript expression (Node.js)"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_scittle",
+        .description = "Scittle bridge: zero-build browser ClojureScript via SCI in <script> tags.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"ClojureScript for browser eval"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_clr",
+        .description = "ClojureCLR bridge: Clojure on .NET CLR — full .NET interop since 2009.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression (.NET interop)"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_cherry",
+        .description = "Cherry bridge: full ClojureScript→ES6 module compiler.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"ClojureScript to compile to ES6"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_cream",
+        .description = "Cream bridge: GraalVM native-image + Crema runtime eval (no SCI needed).",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression (Crema eval)"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_clojerl",
+        .description = "Clojerl bridge: Clojure on Erlang VM (BEAM) — fault tolerance + distribution.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression (BEAM target)"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_dialects",
+        .description = "List all 14 Clojure dialect bridges with their best features. Meta-discovery tool.",
+        .input_schema =
+        \\{"type":"object","properties":{},"required":[]}
     },
 };
 
