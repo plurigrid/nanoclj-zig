@@ -716,6 +716,8 @@ test {
     _ = @import("persistent_map.zig");
     _ = @import("ies.zig");
     _ = @import("pattern.zig");
+    _ = @import("datalog.zig");
+    _ = @import("spi.zig");
     _ = @import("sector.zig");
     // sector_boot.zig: x86 real-mode only, skip on ARM/macOS
     _ = @import("regex.zig");
