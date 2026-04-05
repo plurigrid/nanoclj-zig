@@ -167,117 +167,253 @@ const prelude_forms = [_][]const u8{
     // Each tool captures the killer feature of its source dialect.
     // ================================================================
 
-    // gorj_bb: Babashka's best — instant scripting + tasks
+    // gorj_bb: Babashka — instant scripting via shell
     \\(def gorj-mcp-bb
     \\  (fn* [args]
     \\    (let* [code (get args "code")
-    \\           result (gorj-eval (str "(do " code ")"))]
-    \\      (pr-str {:dialect "babashka" :via :gorj-eval :result result}))))
+    \\           result (sh (str "bb -e '" code "'"))]
+    \\      (if result
+    \\        (pr-str {:dialect "babashka" :out (get result "out") :exit (get result "exit")})
+    \\        (pr-str {:dialect "babashka" :via :gorj-eval :result (gorj-eval code)})))))
     ,
-    // gorj_jank: Jank's best — native C++ interop via LLVM
+    // gorj_jank: Jank — native C++ interop (shell to jank if available)
     \\(def gorj-mcp-jank
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
-    \\      (pr-str {:dialect "jank" :feature "native-interop"
-    \\               :note "gorj compiles to Zig bytecode; jank compiles to LLVM IR"
-    \\               :result (gorj-eval code)}))))
+    \\    (let* [code (get args "code")
+    \\           result (sh (str "jank -e '" code "' 2>/dev/null"))]
+    \\      (if (and result (> (count (get result "out")) 0))
+    \\        (pr-str {:dialect "jank" :result (get result "out")})
+    \\        (pr-str {:dialect "jank" :via :gorj-eval :result (gorj-eval code)
+    \\                 :note "jank not installed — eval via gorj"})))))
     ,
-    // gorj_cljw: ClojureWasm's best — inline OKLAB color + Wasm
+    // gorj_cljw: ClojureWasm OKLAB color interchange
+    // Evals code; if result is a color, produces full interchange:
+    //   {:dialect "clojurewasm" :color <val> :interchange "#color[L a b alpha]"
+    //    :srgb [R G B] :ansi "\x1b[38;2;R;G;Bm██\x1b[0m"}
+    // OKLAB→sRGB uses same matrix as printer.zig; gamma ≈ sqrt (no pow builtin).
+    // Handles both (color 0.7 0.1 -0.2) and #color[0.7 0.1 -0.2 1.0] inputs.
     \\(def gorj-mcp-cljw
     \\  (fn* [args]
     \\    (let* [code (get args "code")
-    \\           result (gorj-eval code)]
-    \\      (pr-str {:dialect "clojurewasm" :feature "inline-oklab-color"
-    \\               :interchange "#color[L a b alpha]"
-    \\               :result result}))))
+    \\           result (gorj-eval code)
+    \\           is-color (color? result)]
+    \\      (if is-color
+    \\        (let* [L (color-L result)
+    \\               a (color-a result)
+    \\               b (color-b result)
+    \\               alpha (color-alpha result)
+    \\               l_ (+ L (* 0.3963377774 a) (* 0.2158037573 b))
+    \\               m_ (+ L (* -0.1055613458 a) (* -0.0638541728 b))
+    \\               s_ (+ L (* -0.0894841775 a) (* -1.2914855480 b))
+    \\               l (* l_ l_ l_)
+    \\               m (* m_ m_ m_)
+    \\               s (* s_ s_ s_)
+    \\               r-lin (+ (* 4.0767416621 l) (* -3.3077115913 m) (* 0.2309699292 s))
+    \\               g-lin (+ (* -1.2684380046 l) (* 2.6097574011 m) (* -0.3413193965 s))
+    \\               b-lin (+ (* -0.0041960863 l) (* -0.7034186147 m) (* 1.7076147010 s))
+    \\               clamp (fn* [x] (if (< x 0.0) 0.0 (if (> x 1.0) 1.0 x)))
+    \\               gamma (fn* [x] (let* [c (clamp x)] (int (* (Math/sqrt c) 255.0))))
+    \\               R (gamma r-lin) G (gamma g-lin) B (gamma b-lin)
+    \\               interchange (str "#color[" L " " a " " b " " alpha "]")
+    \\               ansi (str "\x1b[38;2;" R ";" G ";" B "m\u2588\u2588\x1b[0m")]
+    \\          (pr-str {:dialect "clojurewasm"
+    \\                   :color result
+    \\                   :interchange interchange
+    \\                   :srgb [R G B]
+    \\                   :ansi ansi}))
+    \\        (pr-str {:dialect "clojurewasm"
+    \\                 :color nil
+    \\                 :result result})))))
     ,
     // gorj_squint: Squint's best — lightweight JS transpile
     \\(def gorj-mcp-squint
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
+    \\    (let* [code (get args "code")
+    \\           js (-> code
+    \\                  (clojure.string/replace "(defn " "function ")
+    \\                  (clojure.string/replace "(def " "const ")
+    \\                  (clojure.string/replace "(let [" "{ const ")
+    \\                  (clojure.string/replace "(let* [" "{ const ")
+    \\                  (clojure.string/replace "(fn [" "function(")
+    \\                  (clojure.string/replace "(fn* [" "function(")
+    \\                  (clojure.string/replace "(if " "if (")
+    \\                  (clojure.string/replace "(println " "console.log(")
+    \\                  (clojure.string/replace "(prn " "console.log(")
+    \\                  (clojure.string/replace "(str " "String(")
+    \\                  (clojure.string/replace "(+ " "(")
+    \\                  (clojure.string/replace "(- " "(")
+    \\                  (clojure.string/replace "(* " "(")
+    \\                  (clojure.string/replace "(/ " "("))]
     \\      (pr-str {:dialect "squint" :feature "clj->js-transpile"
-    \\               :note "transpile Clojure syntax to mutable JavaScript"
-    \\               :input code}))))
+    \\               :note "best-effort syntax mapping, not a real compiler"
+    \\               :input code
+    \\               :result js}))))
     ,
-    // gorj_dart: ClojureDart's best — Flutter widget DSL
+    // gorj_dart: ClojureDart — Flutter via shell
     \\(def gorj-mcp-dart
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
+    \\    (let* [code (get args "code")
+    \\           has-dart (sh "which dart 2>/dev/null")]
     \\      (pr-str {:dialect "clojuredart" :feature "flutter-widgets"
-    \\               :note "widget tree DSL → Dart codegen"
+    \\               :dart-available (and has-dart (> (count (get has-dart "out")) 0))
     \\               :input code}))))
     ,
-    // gorj_basilisp: Basilisp's best — Python interop
+    // gorj_basilisp: Basilisp — Python interop via shell
     \\(def gorj-mcp-basilisp
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
-    \\      (pr-str {:dialect "basilisp" :feature "python-interop"
-    \\               :note "Clojure on Python 3 with seamless interop"
-    \\               :input code}))))
+    \\    (let* [code (get args "code")
+    \\           result (sh (str "basilisp run -c '" code "' 2>/dev/null"))]
+    \\      (if (and result (> (count (get result "out")) 0))
+    \\        (pr-str {:dialect "basilisp" :result (get result "out")})
+    \\        (pr-str {:dialect "basilisp" :note "basilisp not available — pip install basilisp" :input code})))))
     ,
-    // gorj_glojure: Glojure's best — Go interop + Wasm AOT via Gloat
+    // gorj_glojure: Glojure — Go interop via shell
     \\(def gorj-mcp-glojure
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
-    \\      (pr-str {:dialect "glojure" :feature "go-interop-wasm-aot"
-    \\               :note "Gloat: Clojure → Go source → native binary/Wasm"
-    \\               :input code}))))
+    \\    (let* [code (get args "code")
+    \\           result (sh (str "glojure -e '" code "' 2>/dev/null"))]
+    \\      (if (and result (> (count (get result "out")) 0))
+    \\        (pr-str {:dialect "glojure" :result (get result "out")})
+    \\        (pr-str {:dialect "glojure" :note "glojure not available — go install github.com/glojurelang/glojure" :input code})))))
     ,
-    // gorj_joker: Joker's best — lint + format
+    // gorj_joker: structural lint for Clojure code (no external deps)
+    // Checks: unbalanced delimiters, unused let bindings, missing defn docstrings,
+    //         single-branch if (should be when), empty let bindings
     \\(def gorj-mcp-joker
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
-    \\      (pr-str {:dialect "joker" :feature "lint-format"
-    \\               :note "structural linting (inspired clj-kondo)"
-    \\               :input code}))))
+    \\    (let* [code (get args "code")
+    \\           ;; 1. Unbalanced delimiters
+    \\           open-parens   (count (filter (fn* [c] (= c \()) (seq code)))
+    \\           close-parens  (count (filter (fn* [c] (= c \))) (seq code)))
+    \\           open-bracks   (count (filter (fn* [c] (= c \[)) (seq code)))
+    \\           close-bracks  (count (filter (fn* [c] (= c \])) (seq code)))
+    \\           open-braces   (count (filter (fn* [c] (= c \{)) (seq code)))
+    \\           close-braces  (count (filter (fn* [c] (= c \})) (seq code)))
+    \\           delim-issues  (concat
+    \\                           (if (not= open-parens close-parens)
+    \\                             [{:level "error" :type "unbalanced-parens"
+    \\                               :message (str "Unbalanced parentheses: " open-parens " open vs " close-parens " close")}]
+    \\                             [])
+    \\                           (if (not= open-bracks close-bracks)
+    \\                             [{:level "error" :type "unbalanced-brackets"
+    \\                               :message (str "Unbalanced brackets: " open-bracks " open vs " close-bracks " close")}]
+    \\                             [])
+    \\                           (if (not= open-braces close-braces)
+    \\                             [{:level "error" :type "unbalanced-braces"
+    \\                               :message (str "Unbalanced braces: " open-braces " open vs " close-braces " close")}]
+    \\                             []))
+    \\           ;; Parse top-level forms for deeper checks
+    \\           forms (try* (read-string (str "[" code "]")) (catch* e []))
+    \\           ;; Walk each form checking for lint issues
+    \\           form-issues
+    \\             (apply concat
+    \\               (map (fn* [form]
+    \\                 (let* [head (if (list? form) (first form) nil)]
+    \\                   (concat
+    \\                     ;; 3. Missing docstring on defn
+    \\                     (if (and (= head (symbol "defn"))
+    \\                              (>= (count form) 3)
+    \\                              (not (string? (nth form 2))))
+    \\                       [{:level "warning" :type "missing-docstring"
+    \\                         :message (str "defn '" (nth form 1) "' is missing a docstring")}]
+    \\                       [])
+    \\                     ;; 4. Single-branch if -> should be when
+    \\                     (if (and (= head (symbol "if"))
+    \\                              (= (count form) 3))
+    \\                       [{:level "warning" :type "single-branch-if"
+    \\                         :message "Single-branch 'if' -- consider using 'when' instead"}]
+    \\                       [])
+    \\                     ;; 5. Empty let bindings
+    \\                     (if (and (or (= head (symbol "let"))
+    \\                                  (= head (symbol "let*")))
+    \\                              (>= (count form) 2)
+    \\                              (= (count (nth form 1)) 0))
+    \\                       [{:level "warning" :type "empty-let-bindings"
+    \\                         :message "Empty let bindings vector -- remove the let wrapper"}]
+    \\                       [])
+    \\                     ;; 2. Unused let bindings (heuristic: name not in body)
+    \\                     (if (and (or (= head (symbol "let"))
+    \\                                  (= head (symbol "let*")))
+    \\                              (>= (count form) 3)
+    \\                              (> (count (nth form 1)) 0))
+    \\                       (let* [bvec (nth form 1)
+    \\                              body-str (apply str (map pr-str (drop 2 form)))
+    \\                              bnames (map (fn* [i] (nth bvec (* i 2)))
+    \\                                          (range (/ (count bvec) 2)))]
+    \\                         (filter some?
+    \\                           (map (fn* [bname]
+    \\                                  (let* [bs (pr-str bname)]
+    \\                                    (if (not (includes? body-str bs))
+    \\                                      {:level "warning" :type "unused-binding"
+    \\                                       :message (str "Binding '" bs "' appears unused in let body")}
+    \\                                      nil)))
+    \\                                bnames)))
+    \\                       []))))
+    \\                 forms))
+    \\           all-issues (vec (concat delim-issues form-issues))
+    \\           clean (= (count all-issues) 0)]
+    \\      (pr-str {:dialect "joker" :feature "lint"
+    \\               :issues all-issues
+    \\               :clean? clean}))))
     ,
-    // gorj_nbb: nbb's best — Node.js + npm
+    // gorj_nbb: nbb — Node.js scripting via shell
     \\(def gorj-mcp-nbb
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
-    \\      (pr-str {:dialect "nbb" :feature "node-scripting"
-    \\               :note "Babashka for Node.js via SCI"
-    \\               :input code}))))
+    \\    (let* [code (get args "code")
+    \\           result (sh (str "npx nbb -e '" code "' 2>/dev/null"))]
+    \\      (if (and result (> (count (get result "out")) 0))
+    \\        (pr-str {:dialect "nbb" :result (get result "out")})
+    \\        (pr-str {:dialect "nbb" :note "nbb not available — npm i -g nbb" :input code})))))
     ,
     // gorj_scittle: Scittle's best — zero-build browser CLJS
     \\(def gorj-mcp-scittle
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
+    \\    (let* [code (get args "code")
+    \\           html (str "<!DOCTYPE html><html><head>"
+    \\                     "<script src=\"https://cdn.jsdelivr.net/npm/scittle@0.6.21/dist/scittle.js\"></script>"
+    \\                     "</head><body>"
+    \\                     "<script type=\"application/x-scittle\">"
+    \\                     code
+    \\                     "</script></body></html>")]
     \\      (pr-str {:dialect "scittle" :feature "zero-build-browser"
-    \\               :note "ClojureScript in <script> tags via SCI"
-    \\               :input code}))))
+    \\               :note "self-contained HTML page running Clojure via SCI"
+    \\               :result html}))))
     ,
-    // gorj_clr: ClojureCLR's best — .NET interop
+    // gorj_clr: ClojureCLR — .NET shell bridge
     \\(def gorj-mcp-clr
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
-    \\      (pr-str {:dialect "clojureclr" :feature "dotnet-interop"
-    \\               :note "Clojure on CLR by David Miller since 2009"
-    \\               :input code}))))
+    \\    (let* [code (get args "code")
+    \\           result (sh (str "dotnet clojure -e '" code "' 2>/dev/null"))]
+    \\      (if (and result (> (count (get result "out")) 0))
+    \\        (pr-str {:dialect "clojureclr" :result (get result "out")})
+    \\        (pr-str {:dialect "clojureclr" :note "ClojureCLR not available — needs .NET" :input code})))))
     ,
-    // gorj_cherry: Cherry's best — ES6 module compiler
+    // gorj_cherry: Cherry — ES6 via npx
     \\(def gorj-mcp-cherry
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
-    \\      (pr-str {:dialect "cherry" :feature "es6-module-compiler"
-    \\               :note "full CLJS → ES6 module compiler"
-    \\               :input code}))))
+    \\    (let* [code (get args "code")
+    \\           result (sh (str "npx cherry compile -e '" code "' 2>/dev/null"))]
+    \\      (if (and result (> (count (get result "out")) 0))
+    \\        (pr-str {:dialect "cherry" :es6 (get result "out")})
+    \\        (pr-str {:dialect "cherry" :note "cherry not available — npm i -g cherry-cljs" :input code})))))
     ,
-    // gorj_cream: Cream's best — GraalVM + Crema eval
+    // gorj_cream: Cream — GraalVM eval via shell
     \\(def gorj-mcp-cream
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
-    \\      (pr-str {:dialect "cream" :feature "graalvm-crema-eval"
-    \\               :note "GraalVM native-image + Crema runtime eval (no SCI)"
-    \\               :input code}))))
+    \\    (let* [code (get args "code")
+    \\           result (sh (str "cream -e '" code "' 2>/dev/null"))]
+    \\      (if (and result (> (count (get result "out")) 0))
+    \\        (pr-str {:dialect "cream" :result (get result "out")})
+    \\        (pr-str {:dialect "cream" :note "cream not available — github.com/borkdude/cream" :input code})))))
     ,
-    // gorj_clojerl: Clojerl's best — Erlang VM (BEAM)
+    // gorj_clojerl: Clojerl — BEAM via shell
     \\(def gorj-mcp-clojerl
     \\  (fn* [args]
-    \\    (let* [code (get args "code")]
-    \\      (pr-str {:dialect "clojerl" :feature "beam-vm"
-    \\               :note "Clojure on Erlang VM — fault tolerance + distribution"
-    \\               :input code}))))
+    \\    (let* [code (get args "code")
+    \\           result (sh (str "clojerl -e '" code "' 2>/dev/null"))]
+    \\      (if (and result (> (count (get result "out")) 0))
+    \\        (pr-str {:dialect "clojerl" :result (get result "out")})
+    \\        (pr-str {:dialect "clojerl" :note "clojerl not available — needs Erlang/OTP" :input code})))))
     ,
     // gorj_dialects: meta-tool — list all dialect bridges with their best features
     \\(def gorj-mcp-dialects

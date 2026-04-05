@@ -381,6 +381,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "slurp", &slurpFn },
         .{ "spit", &spitFn },
         .{ "read-line", &readLineFn },
+        .{ "shell", &shellFn },
+        .{ "sh", &shellFn },
         // Math extras
         .{ "abs", &absFn },
         .{ "min", &minFn },
@@ -2831,6 +2833,41 @@ fn readLineFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
     }
     if (len == 0) return Value.makeNil();
     return Value.makeString(try gc.internString(buf[0..len]));
+}
+
+extern "c" fn popen(command: [*c]const u8, mode: [*c]const u8) ?*std.c.FILE;
+extern "c" fn pclose(stream: *std.c.FILE) c_int;
+
+/// (shell cmd) → {:out "stdout" :exit code} — execute shell command via popen
+/// (sh cmd) — alias
+fn shellFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const cmd = gc.getString(args[0].asStringId());
+    // Null-terminate for C
+    var cbuf: [8192]u8 = undefined;
+    if (cmd.len >= cbuf.len) return error.ValueError;
+    @memcpy(cbuf[0..cmd.len], cmd);
+    cbuf[cmd.len] = 0;
+    const pipe = popen(@ptrCast(&cbuf), "r") orelse return Value.makeNil();
+    // Read all stdout
+    var out = compat.emptyList(u8);
+    defer out.deinit(gc.allocator);
+    var rbuf: [4096]u8 = undefined;
+    while (true) {
+        const n = std.c.fread(&rbuf, 1, rbuf.len, pipe);
+        if (n == 0) break;
+        try out.appendSlice(gc.allocator, rbuf[0..n]);
+    }
+    const status = pclose(pipe);
+    const exit_code: i48 = @intCast(@as(i32, @intCast(status)) >> 8);
+    // Build result map {:out "..." :exit code}
+    const result_obj = try gc.allocObj(.map);
+    try result_obj.data.map.keys.append(gc.allocator, Value.makeString(try gc.internString("out")));
+    try result_obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(out.items)));
+    try result_obj.data.map.keys.append(gc.allocator, Value.makeString(try gc.internString("exit")));
+    try result_obj.data.map.vals.append(gc.allocator, Value.makeInt(exit_code));
+    return Value.makeObj(result_obj);
 }
 
 // ============================================================================
