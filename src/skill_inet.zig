@@ -119,20 +119,23 @@ fn resolveTree(id: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
         if (cf == null) continue;
         defer _ = std.c.fclose(cf.?);
 
-        // Get file size
-        _ = std.c.fseek(cf.?, 0, std.c.SEEK_END);
-        const size = std.c.ftell(cf.?);
-        if (size <= 0) continue;
-        _ = std.c.fseek(cf.?, 0, std.c.SEEK_SET);
-
-        const usize_size: usize = @intCast(size);
-        const buf = allocator.alloc(u8, usize_size) catch continue;
-        const read = std.c.fread(buf.ptr, 1, usize_size, cf.?);
-        if (read == 0) {
-            allocator.free(buf);
+        // Read in chunks (matches core.zig slurp pattern)
+        var contents = compat.emptyList(u8);
+        while (true) {
+            var rbuf: [4096]u8 = undefined;
+            const rn = std.c.fread(&rbuf, 1, rbuf.len, cf.?);
+            if (rn == 0) break;
+            contents.appendSlice(allocator, rbuf[0..rn]) catch {
+                contents.deinit(allocator);
+                break;
+            };
+        }
+        if (contents.items.len == 0) {
+            contents.deinit(allocator);
             continue;
         }
-        return buf[0..read];
+        // Caller owns the backing allocation via items slice
+        return contents.items;
     }
     return null;
 }
@@ -420,12 +423,16 @@ pub fn formatTier2(name: []const u8, gc: *GC) !Value {
         if (std.mem.eql(u8, kname, "name")) name_str = s;
     }
 
+    // Expand \transclude{id} and [[id]] per interaction (not cached)
+    const expanded_body = expandTransclusions(body_str, gc.allocator, MAX_TRANSCLUDE_DEPTH);
+    defer if (expanded_body.ptr != body_str.ptr) gc.allocator.free(expanded_body);
+
     var buf = compat.emptyList(u8);
     defer buf.deinit(gc.allocator);
     try buf.appendSlice(gc.allocator, "<activated_skill>\n  <name>");
     try buf.appendSlice(gc.allocator, name_str);
     try buf.appendSlice(gc.allocator, "</name>\n  <instructions>\n");
-    try buf.appendSlice(gc.allocator, body_str);
+    try buf.appendSlice(gc.allocator, expanded_body);
     try buf.appendSlice(gc.allocator, "\n  </instructions>\n</activated_skill>");
     return Value.makeString(try gc.internString(buf.items));
 }
@@ -691,6 +698,17 @@ fn listToVector(items: []Value, gc: *GC) !Value {
     return Value.makeObj(obj);
 }
 
+/// (skill-transclude "dbl-0001") → resolved .tree content with nested transclusions expanded
+pub fn skillTranscludeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len < 1 or !args[0].isString()) return error.InvalidArgs;
+    const id = gc.getString(args[0].asStringId());
+    const content = resolveTree(id, gc.allocator) orelse return Value.makeNil();
+    defer gc.allocator.free(content);
+    const expanded = expandTransclusions(content, gc.allocator, MAX_TRANSCLUDE_DEPTH);
+    defer if (expanded.ptr != content.ptr) gc.allocator.free(expanded);
+    return Value.makeString(try gc.internString(expanded));
+}
+
 // ============================================================================
 // SKILL TABLE (for core.zig registration)
 // ============================================================================
@@ -704,6 +722,7 @@ pub const skill_table = .{
     .{ "skill-net-stats", &skillNetStatsFn },
     .{ "skill-watch", &skillWatchFn },
     .{ "skill-watch-all", &skillWatchAllFn },
+    .{ "skill-transclude", &skillTranscludeFn },
 };
 
 // ============================================================================

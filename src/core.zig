@@ -603,6 +603,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "skill-net-stats", &skill_inet.skillNetStatsFn },
         .{ "skill-watch", &skill_inet.skillWatchFn },
         .{ "skill-watch-all", &skill_inet.skillWatchAllFn },
+        .{ "skill-transclude", &skill_inet.skillTranscludeFn },
     };
 
     inline for (builtins) |b| {
