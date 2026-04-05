@@ -42,6 +42,7 @@ const holy = @import("holy.zig");
 const zipf = @import("zipf.zig");
 const channel = @import("channel.zig");
 const srcloc = @import("srcloc.zig");
+const time_units = @import("time_units.zig");
 
 fn getSeedMs() i64 {
     var ts: std.c.timespec = undefined;
@@ -669,6 +670,20 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "chan-count", &channel.chanCountFn },
         .{ "offer!", &channel.chanOfferFn },
         .{ "poll!", &channel.chanPollFn },
+        // Time units — temporal ontology as conversion lattice
+        .{ "time-units", &time_units.timeUnitsFn },
+        .{ "time-unit", &time_units.timeUnitFn },
+        .{ "convert-time", &time_units.convertTimeFn },
+        .{ "nice-ratios", &time_units.niceRatiosFn },
+        .{ "trice-per-sec", &time_units.tricePerSecFn },
+        .{ "glimpses-per-sec", &time_units.glimpsesPerSecFn },
+        .{ "time-tower", &time_units.timeTowerFn },
+        .{ "hyperreal-time", &time_units.hyperrealTimeFn },
+        .{ "surreal-birthday", &time_units.surrealBirthdayFn },
+        // nREPL port allocation by color entropy
+        .{ "nrepl-port-for", &time_units.nreplPortForFn },
+        .{ "nrepl-color", &time_units.nreplColorFn },
+        .{ "nrepl-spread", &time_units.nreplSpreadFn },
     };
 
     inline for (builtins) |b| {
