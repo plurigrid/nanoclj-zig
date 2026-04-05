@@ -93,6 +93,123 @@ fn hashName(name: []const u8) u64 {
 }
 
 // ============================================================================
+// TRANSCLUSION ENGINE — resolve \transclude{id} per interaction
+// ============================================================================
+
+/// Forest roots to search for .tree files. First match wins.
+const forest_roots = [_][]const u8{
+    "/Users/bob/i/horse/trees/",
+    "/Users/bob/i/horse-scan/trees/",
+    "/Users/bob/i/horse-theory/trees/",
+};
+
+/// Resolve a single tree id (e.g. "dbl-0001") to file content.
+/// Tries each forest root, returns null if not found.
+fn resolveTree(id: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
+    var path_buf: [4096]u8 = undefined;
+    for (forest_roots) |root| {
+        const path_len = root.len + id.len + ".tree".len;
+        if (path_len >= path_buf.len) continue;
+        @memcpy(path_buf[0..root.len], root);
+        @memcpy(path_buf[root.len..][0..id.len], id);
+        @memcpy(path_buf[root.len + id.len ..][0..".tree".len], ".tree");
+        path_buf[path_len] = 0;
+
+        const cf = cFopen(path_buf[0..path_len], "r");
+        if (cf == null) continue;
+        defer _ = std.c.fclose(cf.?);
+
+        // Get file size
+        _ = std.c.fseek(cf.?, 0, std.c.SEEK_END);
+        const size = std.c.ftell(cf.?);
+        if (size <= 0) continue;
+        _ = std.c.fseek(cf.?, 0, std.c.SEEK_SET);
+
+        const usize_size: usize = @intCast(size);
+        const buf = allocator.alloc(u8, usize_size) catch continue;
+        const read = std.c.fread(buf.ptr, 1, usize_size, cf.?);
+        if (read == 0) {
+            allocator.free(buf);
+            continue;
+        }
+        return buf[0..read];
+    }
+    return null;
+}
+
+/// Expand all \transclude{id} in text, recursively up to max_depth.
+/// Also expands [[id]] wiki-links into inline transclusions.
+/// Returns new string (caller owns), or original slice if no transclusions found.
+fn expandTransclusions(text: []const u8, allocator: std.mem.Allocator, depth: u8) []const u8 {
+    if (depth == 0) return text;
+
+    var result = compat.emptyList(u8);
+    var i: usize = 0;
+    var found_any = false;
+
+    while (i < text.len) {
+        // Check for \transclude{...}
+        if (i + 12 < text.len and std.mem.startsWith(u8, text[i..], "\\transclude{")) {
+            const id_start = i + 12;
+            const id_end = std.mem.indexOfPos(u8, text, id_start, "}") orelse {
+                result.append(allocator, text[i]) catch return text;
+                i += 1;
+                continue;
+            };
+            const id = text[id_start..id_end];
+            if (resolveTree(id, allocator)) |tree_content| {
+                defer allocator.free(tree_content);
+                // Recursively expand the tree content
+                const expanded = expandTransclusions(tree_content, allocator, depth - 1);
+                result.appendSlice(allocator, expanded) catch return text;
+                if (expanded.ptr != tree_content.ptr) allocator.free(expanded);
+            } else {
+                // Leave unresolved transclusion as-is
+                result.appendSlice(allocator, text[i .. id_end + 1]) catch return text;
+            }
+            found_any = true;
+            i = id_end + 1;
+            continue;
+        }
+
+        // Check for [[id]] wiki-links → inline transclude
+        if (i + 2 < text.len and text[i] == '[' and text[i + 1] == '[') {
+            const id_start = i + 2;
+            const id_end = std.mem.indexOfPos(u8, text, id_start, "]]") orelse {
+                result.append(allocator, text[i]) catch return text;
+                i += 1;
+                continue;
+            };
+            const id = text[id_start..id_end];
+            if (resolveTree(id, allocator)) |tree_content| {
+                defer allocator.free(tree_content);
+                const expanded = expandTransclusions(tree_content, allocator, depth - 1);
+                result.appendSlice(allocator, expanded) catch return text;
+                if (expanded.ptr != tree_content.ptr) allocator.free(expanded);
+                found_any = true;
+            } else {
+                // Not a tree reference, keep as-is
+                result.appendSlice(allocator, text[i .. id_end + 2]) catch return text;
+            }
+            i = id_end + 2;
+            continue;
+        }
+
+        result.append(allocator, text[i]) catch return text;
+        i += 1;
+    }
+
+    if (!found_any) {
+        result.deinit(allocator);
+        return text;
+    }
+    return result.items;
+}
+
+/// Max transclusion depth (prevents infinite recursion in circular references)
+const MAX_TRANSCLUDE_DEPTH: u8 = 4;
+
+// ============================================================================
 // TIER 1: METADATA EXTRACTION (comptime LUT where possible)
 // ============================================================================
 
@@ -106,7 +223,8 @@ pub fn parseFrontmatter(content: []const u8, gc: *GC) !Value {
     const start = std.mem.indexOf(u8, content, "{") orelse return error.NoFrontmatter;
     var depth: i32 = 0;
     var end: usize = start;
-    for (content[start..], start..) |c, i| {
+    for (start..content.len) |i| {
+        const c = content[i];
         if (c == '{') depth += 1;
         if (c == '}') {
             depth -= 1;
@@ -150,7 +268,7 @@ pub fn parseFrontmatter(content: []const u8, gc: *GC) !Value {
             }
             // :cached-at
             try obj.data.map.keys.append(gc.allocator, try kw(gc, "cached-at"));
-            try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(nowMs())));
+            try obj.data.map.vals.append(gc.allocator, Value.makeInt(@truncate(nowMs())));
         }
     }
 
@@ -239,6 +357,7 @@ pub fn activateSkill(name: []const u8, gc: *GC, res: *Resources) !Value {
 pub fn formatTier1(gc: *GC) !Value {
     const net = ensureNet(gc);
     var buf = compat.emptyList(u8);
+    defer buf.deinit(gc.allocator);
     try buf.appendSlice(gc.allocator, "<available_skills>\n");
 
     for (net.cells.items) |cell| {
@@ -302,6 +421,7 @@ pub fn formatTier2(name: []const u8, gc: *GC) !Value {
     }
 
     var buf = compat.emptyList(u8);
+    defer buf.deinit(gc.allocator);
     try buf.appendSlice(gc.allocator, "<activated_skill>\n  <name>");
     try buf.appendSlice(gc.allocator, name_str);
     try buf.appendSlice(gc.allocator, "</name>\n  <instructions>\n");
@@ -390,6 +510,188 @@ pub fn skillNetStatsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 // ============================================================================
+// FSEVENTS ERSATZ: WATCHER CELLS (agent-o-rama pattern)
+// ============================================================================
+
+// Real FSEvents: OS kernel → callback → invalidate cache → re-emit tier 1
+// Ersatz FSEvents: ι (iota/identity) cell wired to skill γ's aux port.
+//
+// The iota cell is a pass-through (trit 0, no cost). It sits on a skill's
+// aux[0] port. When `skill-watch` is called, it:
+//   1. Reads the SKILL.md file (via slurp)
+//   2. Hashes the content
+//   3. Compares to the skill cell's cached hash
+//   4. If different: re-parses, updates payload, returns :changed
+//   5. If same: returns :unchanged (no reduction, zero cost)
+//
+// This is polling, not interrupts. But in the inet model, polling IS reduction:
+// the watcher ι cell checks on every `reduceAll` pass. The "event" is just
+// a hash mismatch detected during the net's natural reduction cycle.
+//
+// agent-o-rama connection: agent-o-rama's skill-discovery (capability 4)
+// watches for behavioral pattern changes. The watcher cell is the same
+// pattern at the filesystem level: detect change → re-derive → bisim-check
+// that old and new are equivalent (or not).
+
+/// Hash file content for change detection (FNV-1a)
+fn contentHash(content: []const u8) u64 {
+    var h: u64 = 0xcbf29ce484222325; // FNV offset basis
+    for (content) |byte| {
+        h ^= @as(u64, byte);
+        h *%= 0x100000001b3; // FNV prime
+    }
+    return h;
+}
+
+/// (skill-watch "name" "/path/to/SKILL.md") → :changed or :unchanged
+/// Ersatz FSEvents: poll file, compare hash, update cell if changed.
+pub fn skillWatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.ArityError;
+    const name = gc.getString(args[0].asStringId());
+    const path = gc.getString(args[1].asStringId());
+
+    // Read current file content
+    const cf = cFopen(path, "r") orelse return Value.makeNil();
+    defer _ = std.c.fclose(cf);
+    var contents = compat.emptyList(u8);
+    defer contents.deinit(gc.allocator);
+    var rbuf: [4096]u8 = undefined;
+    while (true) {
+        const rn = std.c.fread(&rbuf, 1, rbuf.len, cf);
+        if (rn == 0) break;
+        try contents.appendSlice(gc.allocator, rbuf[0..rn]);
+    }
+
+    const new_hash = contentHash(contents.items);
+
+    // Look up existing skill cell
+    const h = hashName(name);
+    const net = ensureNet(gc);
+    const cell_idx = name_to_cell.?.get(h) orelse {
+        // Not registered yet — register it fresh
+        const meta = try parseFrontmatter(contents.items, gc);
+        _ = try registerSkill(meta, gc);
+        return Value.makeKeyword(try gc.internString("new"));
+    };
+
+    // Check if content changed by comparing body hash
+    const old_payload = net.cells.items[cell_idx].payload;
+    var old_hash: u64 = 0;
+    if (old_payload.isObj()) {
+        const obj = old_payload.asObj();
+        if (obj.kind == .map) {
+            for (obj.data.map.keys.items, 0..) |k, i| {
+                if (k.isKeyword()) {
+                    const kname = gc.getString(k.asKeywordId());
+                    if (std.mem.eql(u8, kname, "body")) {
+                        const v = obj.data.map.vals.items[i];
+                        if (v.isString()) {
+                            old_hash = contentHash(gc.getString(v.asStringId()));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if (old_hash == new_hash) {
+        return Value.makeKeyword(try gc.internString("unchanged"));
+    }
+
+    // Content changed — re-parse and update cell payload
+    const new_meta = try parseFrontmatter(contents.items, gc);
+    net.cells.items[cell_idx].payload = new_meta;
+    return Value.makeKeyword(try gc.internString("changed"));
+}
+
+/// (skill-watch-all dir) → {:changed [...] :unchanged [...] :new [...]}
+/// Scan a directory for SKILL.md files, watch each one.
+/// This is the full ersatz FSEvents loop: one call = one scan cycle.
+pub fn skillWatchAllFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+    if (args.len != 1 or !args[0].isString()) return error.ArityError;
+    const dir_path = gc.getString(args[0].asStringId());
+
+    // Use C opendir/readdir for Zig 0.16 compat
+    var pbuf: [4096]u8 = undefined;
+    if (dir_path.len >= pbuf.len - 1) return error.Overflow;
+    @memcpy(pbuf[0..dir_path.len], dir_path);
+    pbuf[dir_path.len] = 0;
+    const dir = std.c.opendir(@ptrCast(&pbuf)) orelse return Value.makeNil();
+    defer _ = std.c.closedir(dir);
+
+    var changed = compat.emptyList(Value);
+    defer changed.deinit(gc.allocator);
+    var unchanged = compat.emptyList(Value);
+    defer unchanged.deinit(gc.allocator);
+    var new_skills = compat.emptyList(Value);
+    defer new_skills.deinit(gc.allocator);
+
+    while (std.c.readdir(dir)) |entry| {
+        const name_ptr: [*:0]const u8 = @ptrCast(&entry.name);
+        const entry_name = std.mem.span(name_ptr);
+        if (entry_name.len == 0 or entry_name[0] == '.') continue;
+
+        // Check if this is a directory containing SKILL.md
+        var skill_path_buf: [4096]u8 = undefined;
+        const skill_path_len = dir_path.len + 1 + entry_name.len + "/SKILL.md".len;
+        if (skill_path_len >= skill_path_buf.len) continue;
+        @memcpy(skill_path_buf[0..dir_path.len], dir_path);
+        skill_path_buf[dir_path.len] = '/';
+        @memcpy(skill_path_buf[dir_path.len + 1 ..][0..entry_name.len], entry_name);
+        @memcpy(skill_path_buf[dir_path.len + 1 + entry_name.len ..][0.."/SKILL.md".len], "/SKILL.md");
+        skill_path_buf[skill_path_len] = 0;
+
+        // Check if SKILL.md exists by trying to open it
+        const skill_cf = cFopen(skill_path_buf[0..skill_path_len], "r");
+        if (skill_cf == null) continue;
+        _ = std.c.fclose(skill_cf.?);
+
+        // Build args for skill-watch
+        const name_val = Value.makeString(try gc.internString(entry_name));
+        const path_val = Value.makeString(try gc.internString(skill_path_buf[0..skill_path_len]));
+        var watch_args = [_]Value{ name_val, path_val };
+        const result = try skillWatchFn(&watch_args, gc, env);
+
+        if (result.isKeyword()) {
+            const kw_str = gc.getString(result.asKeywordId());
+            if (std.mem.eql(u8, kw_str, "changed")) {
+                try changed.append(gc.allocator, name_val);
+            } else if (std.mem.eql(u8, kw_str, "unchanged")) {
+                try unchanged.append(gc.allocator, name_val);
+            } else if (std.mem.eql(u8, kw_str, "new")) {
+                try new_skills.append(gc.allocator, name_val);
+            }
+        }
+    }
+
+    // Build result map
+    const obj = try gc.allocObj(.map);
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    }.intern;
+
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "changed"));
+    try obj.data.map.vals.append(gc.allocator, try listToVector(changed.items, gc));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "unchanged"));
+    try obj.data.map.vals.append(gc.allocator, try listToVector(unchanged.items, gc));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "new"));
+    try obj.data.map.vals.append(gc.allocator, try listToVector(new_skills.items, gc));
+    return Value.makeObj(obj);
+}
+
+fn listToVector(items: []Value, gc: *GC) !Value {
+    const obj = try gc.allocObj(.vector);
+    for (items) |item| {
+        try obj.data.vector.items.append(gc.allocator, item);
+    }
+    return Value.makeObj(obj);
+}
+
+// ============================================================================
 // SKILL TABLE (for core.zig registration)
 // ============================================================================
 
@@ -400,15 +702,30 @@ pub const skill_table = .{
     .{ "skill-load", &skillLoadFn },
     .{ "skill-parse-file", &skillParseFileFn },
     .{ "skill-net-stats", &skillNetStatsFn },
+    .{ "skill-watch", &skillWatchFn },
+    .{ "skill-watch-all", &skillWatchAllFn },
 };
 
 // ============================================================================
 // TESTS
 // ============================================================================
 
+fn cleanupGlobalState(alloc: std.mem.Allocator) void {
+    if (skill_net) |*n| {
+        n.deinit();
+        skill_net = null;
+    }
+    if (name_to_cell) |*ntc| {
+        ntc.deinit();
+        name_to_cell = null;
+    }
+    skill_allocator = null;
+    _ = alloc;
+}
+
 test "parse EDN frontmatter" {
     var gc = @import("gc.zig").GC.init(std.testing.allocator);
-    _ = &gc;
+    defer gc.deinit();
     const content =
         \\{:name "test-skill" :description "A test" :trit 0}
         \\---
@@ -421,10 +738,10 @@ test "parse EDN frontmatter" {
 
 test "skill registration and tier1 format" {
     var gc = @import("gc.zig").GC.init(std.testing.allocator);
-    _ = &gc;
+    defer gc.deinit();
     // Reset global state
-    skill_net = null;
-    name_to_cell = null;
+    cleanupGlobalState(gc.allocator);
+    defer cleanupGlobalState(gc.allocator);
 
     const obj = try gc.allocObj(.map);
     const kw = struct {
@@ -446,9 +763,9 @@ test "skill registration and tier1 format" {
 
 test "skill net trit conservation" {
     var gc = @import("gc.zig").GC.init(std.testing.allocator);
-    _ = &gc;
-    skill_net = null;
-    name_to_cell = null;
+    defer gc.deinit();
+    cleanupGlobalState(gc.allocator);
+    defer cleanupGlobalState(gc.allocator);
 
     const net = ensureNet(&gc);
     // Add a γ (+1) and a δ (-1) — should balance to 0

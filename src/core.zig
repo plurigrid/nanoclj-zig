@@ -35,6 +35,7 @@ const tower = @import("tower.zig");
 const marsaglia_bumpus = @import("marsaglia_bumpus.zig");
 const scoped_propagators = @import("scoped_propagators.zig");
 const skill_inet = @import("skill_inet.zig");
+const brainfloj = @import("brainfloj.zig");
 
 fn getSeedMs() i64 {
     var ts: std.c.timespec = undefined;
@@ -155,6 +156,9 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "bci-read", &substrate.bciReadFn },
         .{ "bci-trit", &substrate.bciTritFn },
         .{ "bci-entropy", &substrate.bciEntropyFn },
+        // Brainfloj builtins
+        .{ "brainfloj-parse", &brainfloj.brainflojParseFn },
+        .{ "brainfloj-read", &brainfloj.brainflojReadFn },
         // nREPL
         .{ "nrepl-start", &substrate.nreplStartFn },
         // Substrate traversal
@@ -597,6 +601,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "skill-load", &skill_inet.skillLoadFn },
         .{ "skill-parse-file", &skill_inet.skillParseFileFn },
         .{ "skill-net-stats", &skill_inet.skillNetStatsFn },
+        .{ "skill-watch", &skill_inet.skillWatchFn },
+        .{ "skill-watch-all", &skill_inet.skillWatchAllFn },
     };
 
     inline for (builtins) |b| {
