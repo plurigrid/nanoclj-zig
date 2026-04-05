@@ -34,6 +34,14 @@
 //!   This creates natural depth "seasons" where some depths are
 //!   cheaper than others, matching the Kuramoto oscillator model
 //!   from did_seasons.zig.
+//!
+//! Progressive Disclosure Interpretation:
+//!   The trit domain doubles as a context-budget classifier for agent skill systems:
+//!     +1 (red domain):   Tier 1 — metadata only, always visible (~100 tokens)
+//!     0  (green domain): Tier 2 — full skill body, loaded on activation (~5K tokens)
+//!     -1 (blue domain):  Tier 3 — reference files, loaded on demand (unbounded)
+//!   Compatible with Agent Skills standard (agentskills.io, 33+ adopters).
+//!   See also: OKLAB colorspace.zig for perceptual color model.
 
 const std = @import("std");
 const value = @import("value.zig");
@@ -116,7 +124,9 @@ pub fn rgbToHue(r: u8, g: u8, b: u8) f64 {
     return hue;
 }
 
-/// Get the color assigned to a given recursion depth
+/// Get the substrate-level RGB color assigned to a given recursion depth.
+/// Returns the sRGB projection used for fuel computation (see depthFuelCost),
+/// not the full OKLAB perceptual colorspace — see colorspace.zig for that.
 pub fn depthColor(depth: u32) substrate.Color {
     return substrate.colorAt(GAY_SEED, @as(u64, depth));
 }

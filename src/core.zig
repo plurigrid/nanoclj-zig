@@ -34,6 +34,7 @@ const hyperdoctrine = @import("hyperdoctrine.zig");
 const tower = @import("tower.zig");
 const marsaglia_bumpus = @import("marsaglia_bumpus.zig");
 const scoped_propagators = @import("scoped_propagators.zig");
+const skill_inet = @import("skill_inet.zig");
 
 fn getSeedMs() i64 {
     var ts: std.c.timespec = undefined;
@@ -589,6 +590,13 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "denominator", &denominatorFn },
         .{ "rationalize", &rationalizeFn },
         .{ "rational?", &isRationalObjP },
+        // Skill inet (Agent Skills progressive disclosure via interaction nets)
+        .{ "skill-register", &skill_inet.skillRegisterFn },
+        .{ "skill-activate", &skill_inet.skillActivateFn },
+        .{ "skill-list", &skill_inet.skillListFn },
+        .{ "skill-load", &skill_inet.skillLoadFn },
+        .{ "skill-parse-file", &skill_inet.skillParseFileFn },
+        .{ "skill-net-stats", &skill_inet.skillNetStatsFn },
     };
 
     inline for (builtins) |b| {

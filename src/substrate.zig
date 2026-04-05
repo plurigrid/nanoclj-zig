@@ -131,9 +131,19 @@ fn mixGamma(z_in: u64) u64 {
 }
 
 // ─── Universal Index-Addressed Primitive ──────────────────────────────
+//
+// NOTE: Two-layer color architecture.
+//   Layer 1 (here, substrate.zig): fast hash-to-terminal-color via RGB projection.
+//     Color = {r: u8, g: u8, b: u8} — a quick, deterministic RGB extracted from at().
+//   Layer 2 (colorspace.zig): perceptual OKLAB manifold.
+//     Color = {L: f32, a: f32, b: f32, alpha: f32} — full colorspace system with
+//     distance, blend, complement, triadic, and manifold-based binding resolution.
+//   These are SEPARATE systems. Substrate color is a low-level projection for
+//   display/hashing; colorspace.zig is the semantic/perceptual layer.
+//
 // at(seed, index) → u64: the single source of all deterministic state.
 // Everything else is a projection:
-//   color_at  = rgb_from(at(seed, index))
+//   color_at  = rgb_from(at(seed, index))  // substrate-level projection; see colorspace.zig for OKLAB perceptual space
 //   trit_at   = at(seed, index) mod 3 - 1
 //   version_at = at(seed + hash(expr), index)
 //   rng_at    = SplitRng from at(seed, index)
@@ -217,6 +227,10 @@ pub fn colorAtIndexed(seed: u64, index: u64) Color {
     };
 }
 
+/// Substrate-level RGB color: a quick deterministic projection from at() for
+/// terminal display and hashing. This is NOT the full colorspace system —
+/// for perceptual OKLAB color with distance/blend/manifold semantics,
+/// see colorspace.zig's Color struct.
 pub const Color = struct {
     r: u8,
     g: u8,

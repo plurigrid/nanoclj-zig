@@ -14,6 +14,7 @@ const Reader = @import("reader.zig").Reader;
 const printer = @import("printer.zig");
 const eval_mod = @import("eval.zig");
 const core = @import("core.zig");
+const substrate = @import("substrate.zig");
 
 /// Zig 0.16 compat: raw stdin line reader (no deprecatedReader)
 fn readLineFromStdin(buf: []u8) ?[]u8 {
@@ -83,37 +84,6 @@ fn hexColor(rgb: [3]u8) [7]u8 {
         hex_chars[rgb[0] >> 4], hex_chars[rgb[0] & 0xf],
         hex_chars[rgb[1] >> 4], hex_chars[rgb[1] & 0xf],
         hex_chars[rgb[2] >> 4], hex_chars[rgb[2] & 0xf],
-    };
-}
-
-// Gay color at seed+index (golden angle spiral)
-fn gayColorAt(seed: u64, index: u64) [3]u8 {
-    const golden_angle: f64 = 137.50776405;
-    const hue_deg: f64 = @mod(@as(f64, @floatFromInt(seed +% index)) * golden_angle, 360.0);
-    const hue = hue_deg / 360.0;
-    // HSV->RGB with S=0.85, V=0.95
-    return hsvToRgb(hue, 0.85, 0.95);
-}
-
-fn hsvToRgb(h: f64, s: f64, v: f64) [3]u8 {
-    const i_sec: u32 = @intFromFloat(h * 6.0);
-    const f = h * 6.0 - @as(f64, @floatFromInt(i_sec));
-    const p = v * (1.0 - s);
-    const q = v * (1.0 - f * s);
-    const t = v * (1.0 - (1.0 - f) * s);
-    const rgb: [3]f64 = switch (i_sec % 6) {
-        0 => .{ v, t, p },
-        1 => .{ q, v, p },
-        2 => .{ p, v, t },
-        3 => .{ p, q, v },
-        4 => .{ t, p, v },
-        5 => .{ v, p, q },
-        else => .{ v, v, v },
-    };
-    return .{
-        @intFromFloat(rgb[0] * 255.0),
-        @intFromFloat(rgb[1] * 255.0),
-        @intFromFloat(rgb[2] * 255.0),
     };
 }
 
@@ -325,13 +295,14 @@ fn handleColorAt(allocator: std.mem.Allocator, args: json.ObjectMap) !json.Value
         else => return toolError(allocator, "'index' must be integer"),
     };
 
-    const rgb = gayColorAt(seed, index);
+    const c = substrate.colorAt(seed, index);
+    const rgb = [3]u8{ c.r, c.g, c.b };
     const hex = hexColor(rgb);
     const trit = tritFromHash(splitMix64(seed +% index));
 
     const text = try std.fmt.allocPrint(allocator,
         \\{{"hex":"{s}","r":{d},"g":{d},"b":{d},"trit":{d}}}
-    , .{ hex[0..], rgb[0], rgb[1], rgb[2], trit });
+    , .{ hex[0..], c.r, c.g, c.b, trit });
 
     return toolResult(allocator, text);
 }
