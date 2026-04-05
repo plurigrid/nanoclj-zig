@@ -856,58 +856,119 @@ fn hashMapFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
+// ============================================================================
+// HELPERS — lazy-seq dispatch, type names, apply-or-builtin
+// ============================================================================
+
+const LazyKind = enum { repeat, iterate, repeatedly, range, generic };
+
+const LazyInfo = struct {
+    kind: LazyKind,
+    payload: []Value, // marker-specific fields (excludes the marker keyword itself)
+};
+
+fn classifyLazy(obj: *const @import("value.zig").Obj, gc: *GC) LazyInfo {
+    const thunk = obj.data.lazy_seq.thunk;
+    if (!thunk.isObj()) return .{ .kind = .generic, .payload = &.{} };
+    const tvec = thunk.asObj();
+    if (tvec.kind != .vector) return .{ .kind = .generic, .payload = &.{} };
+    const payload = tvec.data.vector.items.items;
+    if (payload.len < 2 or !payload[0].isKeyword()) return .{ .kind = .generic, .payload = &.{} };
+    const marker = gc.getString(payload[0].asKeywordId());
+    const rest_payload = payload[1..];
+    if (std.mem.eql(u8, marker, "__repeat__")) return .{ .kind = .repeat, .payload = rest_payload };
+    if (std.mem.eql(u8, marker, "__iterate__")) return .{ .kind = .iterate, .payload = rest_payload };
+    if (std.mem.eql(u8, marker, "__repeatedly__")) return .{ .kind = .repeatedly, .payload = rest_payload };
+    if (std.mem.eql(u8, marker, "__range__")) return .{ .kind = .range, .payload = rest_payload };
+    return .{ .kind = .generic, .payload = &.{} };
+}
+
+fn seqItems(arg: Value, _: *GC) ![]Value {
+    if (arg.isNil()) return &[_]Value{};
+    if (!arg.isObj()) return error.TypeError;
+    return switch (arg.asObj().kind) {
+        .list => arg.asObj().data.list.items.items,
+        .vector => arg.asObj().data.vector.items.items,
+        else => error.TypeError,
+    };
+}
+
+pub fn valueTypeName(v: Value) []const u8 {
+    if (v.isNil()) return "nil";
+    if (v.isBool()) return "boolean";
+    if (v.isInt()) return "integer";
+    if (v.isFloat()) return "float";
+    if (v.isString()) return "string";
+    if (v.isKeyword()) return "keyword";
+    if (v.isSymbol()) return "symbol";
+    if (!v.isObj()) return "unknown";
+    return switch (v.asObj().kind) {
+        .list => "list",
+        .vector => "vector",
+        .map => "map",
+        .set => "set",
+        .function, .bc_closure, .builtin_ref, .partial_fn => "function",
+        .macro_fn => "macro",
+        .atom => "atom",
+        .lazy_seq => "lazy-seq",
+        .multimethod => "multimethod",
+        .protocol => "protocol",
+        .dense_f64 => "dense-f64",
+        .trace => "trace",
+        .rational => "rational",
+        .color => "color",
+        .channel => "channel",
+    };
+}
+
+fn applyFnOrBuiltin(func: Value, call_args: []Value, gc: *GC, env: *Env) !Value {
+    if (isBuiltinSentinel(func, gc)) |name| {
+        if (lookupBuiltin(name)) |builtin| return builtin(call_args, gc, env);
+    }
+    return eval_mod.apply(func, call_args, env, gc);
+}
+
 fn first(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
-    // Handle lazy-seq: force the first element only
     if (obj.kind == .lazy_seq) {
-        const thunk = obj.data.lazy_seq.thunk;
-        if (thunk.isObj() and thunk.asObj().kind == .vector) {
-            const payload = thunk.asObj().data.vector.items.items;
-            if (payload.len >= 2 and payload[0].isKeyword()) {
-                const marker = gc.getString(payload[0].asKeywordId());
-                if (std.mem.eql(u8, marker, "__repeat__")) {
-                    // (repeat val) or (repeat n val): first element is val
-                    const val = if (payload.len >= 3) payload[2] else payload[1];
-                    // Check finite repeat with 0 count
-                    if (payload.len >= 3 and payload[1].isInt() and payload[1].asInt() <= 0) return Value.makeNil();
-                    return val;
+        const info = classifyLazy(obj, gc);
+        switch (info.kind) {
+            .repeat => {
+                const val = if (info.payload.len >= 2) info.payload[1] else info.payload[0];
+                if (info.payload.len >= 2 and info.payload[0].isInt() and info.payload[0].asInt() <= 0) return Value.makeNil();
+                return val;
+            },
+            .iterate => return info.payload[1],
+            .repeatedly => return eval_mod.apply(info.payload[0], &.{}, env, gc) catch Value.makeNil(),
+            .range => return info.payload[0],
+            .generic => {
+                const thunk = obj.data.lazy_seq.thunk;
+                if (!thunk.isNil()) {
+                    const realized = eval_mod.apply(thunk, &.{}, env, gc) catch return Value.makeNil();
+                    if (realized.isObj()) {
+                        const ritems = getItems(realized) orelse return Value.makeNil();
+                        return if (ritems.len > 0) ritems[0] else Value.makeNil();
+                    }
+                    if (!realized.isNil()) return realized;
                 }
-                if (std.mem.eql(u8, marker, "__iterate__")) {
-                    // (iterate f init): first element is init
-                    return payload[2];
-                }
-                if (std.mem.eql(u8, marker, "__repeatedly__")) {
-                    // (repeatedly f): call f once
-                    const f = payload[1];
-                    return eval_mod.apply(f, &.{}, env, gc) catch Value.makeNil();
-                }
-                if (std.mem.eql(u8, marker, "__range__")) {
-                    // (range): first element is start
-                    return payload[1];
-                }
-            }
+                return Value.makeNil();
+            },
         }
-        // Generic lazy-seq: call thunk and get first of result
-        if (!thunk.isNil()) {
-            const realized = eval_mod.apply(thunk, &.{}, env, gc) catch return Value.makeNil();
-            if (realized.isObj()) {
-                const ritems = getItems(realized) orelse return Value.makeNil();
-                return if (ritems.len > 0) ritems[0] else Value.makeNil();
-            }
-            // If thunk returned a non-collection value, return it directly
-            if (!realized.isNil()) return realized;
-        }
-        return Value.makeNil();
     }
-    const items = switch (obj.kind) {
-        .list => obj.data.list.items.items,
-        .vector => obj.data.vector.items.items,
-        else => return error.TypeError,
-    };
+    const items = try seqItems(args[0], gc);
     return if (items.len > 0) items[0] else Value.makeNil();
+}
+
+fn makeLazyPayload(gc: *GC, marker: Value, fields: []const Value) !Value {
+    const rest_obj = try gc.allocObj(.lazy_seq);
+    const rest_payload = try gc.allocObj(.vector);
+    try rest_payload.data.vector.items.append(gc.allocator, marker);
+    for (fields) |f| try rest_payload.data.vector.items.append(gc.allocator, f);
+    rest_obj.data.lazy_seq.thunk = Value.makeObj(rest_payload);
+    return Value.makeObj(rest_obj);
 }
 
 fn rest(args: []Value, gc: *GC, env: *Env) anyerror!Value {
@@ -916,78 +977,51 @@ fn rest(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args[0].isNil()) return Value.makeObj(new);
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
-    // Handle lazy-seq: return a new lazy_seq representing the rest
     if (obj.kind == .lazy_seq) {
         const thunk = obj.data.lazy_seq.thunk;
-        if (thunk.isObj() and thunk.asObj().kind == .vector) {
-            const payload = thunk.asObj().data.vector.items.items;
-            if (payload.len >= 2 and payload[0].isKeyword()) {
-                const marker = gc.getString(payload[0].asKeywordId());
-                if (std.mem.eql(u8, marker, "__iterate__")) {
-                    // (iterate f init) → rest is (iterate f (f init))
-                    const f = payload[1];
-                    var call_args = [_]Value{payload[2]};
-                    const next_val = eval_mod.apply(f, &call_args, env, gc) catch return Value.makeObj(new);
-                    const rest_obj = try gc.allocObj(.lazy_seq);
-                    const rest_payload = try gc.allocObj(.vector);
-                    try rest_payload.data.vector.items.append(gc.allocator, payload[0]); // marker
-                    try rest_payload.data.vector.items.append(gc.allocator, f); // same fn
-                    try rest_payload.data.vector.items.append(gc.allocator, next_val); // new init
-                    rest_obj.data.lazy_seq.thunk = Value.makeObj(rest_payload);
-                    return Value.makeObj(rest_obj);
+        const info = classifyLazy(obj, gc);
+        switch (info.kind) {
+            .iterate => {
+                const f = info.payload[0];
+                var call_args = [_]Value{info.payload[1]};
+                const next_val = eval_mod.apply(f, &call_args, env, gc) catch return Value.makeObj(new);
+                const marker = thunk.asObj().data.vector.items.items[0];
+                return makeLazyPayload(gc, marker, &.{ f, next_val });
+            },
+            .range => {
+                const marker = thunk.asObj().data.vector.items.items[0];
+                return makeLazyPayload(gc, marker, &.{
+                    Value.makeInt(info.payload[0].asInt() +% info.payload[1].asInt()),
+                    info.payload[1],
+                });
+            },
+            .repeat => {
+                if (info.payload.len >= 2 and info.payload[0].isInt()) {
+                    if (info.payload[0].asInt() <= 1) return Value.makeObj(new);
+                    const marker = thunk.asObj().data.vector.items.items[0];
+                    return makeLazyPayload(gc, marker, &.{
+                        Value.makeInt(info.payload[0].asInt() - 1),
+                        info.payload[1],
+                    });
                 }
-                if (std.mem.eql(u8, marker, "__range__")) {
-                    // (range) with start, step → rest is (range) with start+step, step
-                    const range_start = payload[1].asInt();
-                    const range_step = payload[2].asInt();
-                    const rest_obj = try gc.allocObj(.lazy_seq);
-                    const rest_payload = try gc.allocObj(.vector);
-                    try rest_payload.data.vector.items.append(gc.allocator, payload[0]); // marker
-                    try rest_payload.data.vector.items.append(gc.allocator, Value.makeInt(range_start +% range_step));
-                    try rest_payload.data.vector.items.append(gc.allocator, payload[2]); // same step
-                    rest_obj.data.lazy_seq.thunk = Value.makeObj(rest_payload);
-                    return Value.makeObj(rest_obj);
-                }
-                if (std.mem.eql(u8, marker, "__repeat__")) {
-                    // (repeat val) → rest is same infinite repeat
-                    // (repeat n val) → rest is (repeat (n-1) val)
-                    if (payload.len >= 3 and payload[1].isInt()) {
-                        const cnt = payload[1].asInt();
-                        if (cnt <= 1) return Value.makeObj(new); // empty rest
-                        const rest_obj = try gc.allocObj(.lazy_seq);
-                        const rest_payload = try gc.allocObj(.vector);
-                        try rest_payload.data.vector.items.append(gc.allocator, payload[0]);
-                        try rest_payload.data.vector.items.append(gc.allocator, Value.makeInt(cnt - 1));
-                        try rest_payload.data.vector.items.append(gc.allocator, payload[2]);
-                        rest_obj.data.lazy_seq.thunk = Value.makeObj(rest_payload);
-                        return Value.makeObj(rest_obj);
+                return args[0]; // infinite repeat
+            },
+            .repeatedly => return args[0],
+            .generic => {
+                if (!thunk.isNil()) {
+                    const realized = eval_mod.apply(thunk, &.{}, env, gc) catch return Value.makeObj(new);
+                    if (realized.isObj()) {
+                        const ritems = getItems(realized) orelse return Value.makeObj(new);
+                        if (ritems.len > 1) {
+                            for (ritems[1..]) |item| try new.data.list.items.append(gc.allocator, item);
+                        }
                     }
-                    // Infinite repeat — return same lazy_seq
-                    return args[0];
                 }
-                if (std.mem.eql(u8, marker, "__repeatedly__")) {
-                    // (repeatedly f) → rest is same infinite repeatedly
-                    return args[0];
-                }
-            }
+                return Value.makeObj(new);
+            },
         }
-        // Generic lazy-seq: realize and return rest as list
-        if (!thunk.isNil()) {
-            const realized = eval_mod.apply(thunk, &.{}, env, gc) catch return Value.makeObj(new);
-            if (realized.isObj()) {
-                const ritems = getItems(realized) orelse return Value.makeObj(new);
-                if (ritems.len > 1) {
-                    for (ritems[1..]) |item| try new.data.list.items.append(gc.allocator, item);
-                }
-            }
-        }
-        return Value.makeObj(new);
     }
-    const items = switch (obj.kind) {
-        .list => obj.data.list.items.items,
-        .vector => obj.data.vector.items.items,
-        else => return error.TypeError,
-    };
+    const items = try seqItems(args[0], gc);
     if (items.len > 1) {
         for (items[1..]) |item| try new.data.list.items.append(gc.allocator, item);
     }
@@ -1505,72 +1539,55 @@ fn takeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args[1].isNil()) return Value.makeObj(try gc.allocObj(.list));
     if (!args[1].isObj()) return error.TypeError;
     const obj = args[1].asObj();
-    // Handle lazy-seq: realize n elements by inspecting the thunk marker
     if (obj.kind == .lazy_seq) {
         const result = try gc.allocObj(.list);
-        const thunk = obj.data.lazy_seq.thunk;
-        if (thunk.isObj() and thunk.asObj().kind == .vector) {
-            const payload = thunk.asObj().data.vector.items.items;
-            if (payload.len >= 2 and payload[0].isKeyword()) {
-                const marker = gc.getString(payload[0].asKeywordId());
-                if (std.mem.eql(u8, marker, "__repeat__")) {
-                    // (repeat val) or (repeat n val)
-                    const val = if (payload.len >= 3) payload[2] else payload[1];
-                    const limit = if (payload.len >= 3 and payload[1].isInt())
-                        @min(n, @as(usize, @intCast(@max(@as(i48, 0), payload[1].asInt()))))
-                    else n;
-                    for (0..limit) |_| try result.data.list.items.append(gc.allocator, val);
-                    return Value.makeObj(result);
+        const info = classifyLazy(obj, gc);
+        switch (info.kind) {
+            .repeat => {
+                const val = if (info.payload.len >= 2) info.payload[1] else info.payload[0];
+                const limit = if (info.payload.len >= 2 and info.payload[0].isInt())
+                    @min(n, @as(usize, @intCast(@max(@as(i48, 0), info.payload[0].asInt()))))
+                else
+                    n;
+                for (0..limit) |_| try result.data.list.items.append(gc.allocator, val);
+            },
+            .iterate => {
+                var current = info.payload[1];
+                for (0..n) |_| {
+                    try result.data.list.items.append(gc.allocator, current);
+                    var call_args = [_]Value{current};
+                    current = eval_mod.apply(info.payload[0], &call_args, env, gc) catch break;
                 }
-                if (std.mem.eql(u8, marker, "__iterate__")) {
-                    // (iterate f init)
-                    const f = payload[1];
-                    var current = payload[2];
-                    for (0..n) |_| {
-                        try result.data.list.items.append(gc.allocator, current);
-                        var call_args = [_]Value{current};
-                        current = eval_mod.apply(f, &call_args, env, gc) catch break;
+            },
+            .repeatedly => {
+                for (0..n) |_| {
+                    const val = eval_mod.apply(info.payload[0], &.{}, env, gc) catch break;
+                    try result.data.list.items.append(gc.allocator, val);
+                }
+            },
+            .range => {
+                var current = info.payload[0].asInt();
+                const step = info.payload[1].asInt();
+                for (0..n) |_| {
+                    try result.data.list.items.append(gc.allocator, Value.makeInt(current));
+                    current +%= step;
+                }
+            },
+            .generic => {
+                const thunk = obj.data.lazy_seq.thunk;
+                if (!thunk.isNil()) {
+                    const realized = eval_mod.apply(thunk, &.{}, env, gc) catch return Value.makeObj(result);
+                    if (realized.isObj()) {
+                        const ritems = getItems(realized) orelse return Value.makeObj(result);
+                        const limit = @min(n, ritems.len);
+                        for (ritems[0..limit]) |item| try result.data.list.items.append(gc.allocator, item);
                     }
-                    return Value.makeObj(result);
                 }
-                if (std.mem.eql(u8, marker, "__repeatedly__")) {
-                    // (repeatedly f) — call f n times
-                    const f = payload[1];
-                    for (0..n) |_| {
-                        const val = eval_mod.apply(f, &.{}, env, gc) catch break;
-                        try result.data.list.items.append(gc.allocator, val);
-                    }
-                    return Value.makeObj(result);
-                }
-                if (std.mem.eql(u8, marker, "__range__")) {
-                    // (range) — infinite lazy range: start, start+step, ...
-                    const range_start = payload[1].asInt();
-                    const range_step = payload[2].asInt();
-                    var current = range_start;
-                    for (0..n) |_| {
-                        try result.data.list.items.append(gc.allocator, Value.makeInt(current));
-                        current +%= range_step;
-                    }
-                    return Value.makeObj(result);
-                }
-            }
-        }
-        // Generic lazy-seq: try calling thunk as zero-arg fn
-        if (!thunk.isNil()) {
-            const realized = eval_mod.apply(thunk, &.{}, env, gc) catch return Value.makeObj(result);
-            if (realized.isObj()) {
-                const ritems = getItems(realized) orelse return Value.makeObj(result);
-                const limit = @min(n, ritems.len);
-                for (ritems[0..limit]) |item| try result.data.list.items.append(gc.allocator, item);
-            }
+            },
         }
         return Value.makeObj(result);
     }
-    const items = switch (obj.kind) {
-        .list => obj.data.list.items.items,
-        .vector => obj.data.vector.items.items,
-        else => return error.TypeError,
-    };
+    const items = try seqItems(args[1], gc);
     const new = try gc.allocObj(.list);
     const limit = @min(n, items.len);
     for (items[0..limit]) |item| try new.data.list.items.append(gc.allocator, item);
@@ -1605,39 +1622,14 @@ fn reduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     if (args.len == 3) {
         acc = args[1];
         if (args[2].isNil()) return acc;
-        if (!args[2].isObj()) return error.TypeError;
-        const obj = args[2].asObj();
-        items = switch (obj.kind) {
-            .list => obj.data.list.items.items,
-            .vector => obj.data.vector.items.items,
-            else => return error.TypeError,
-        };
+        items = try seqItems(args[2], gc);
     } else {
         if (args[1].isNil()) {
-            // (reduce f '()) — call f with no args
-            if (isBuiltinSentinel(func, gc)) |name| {
-                if (lookupBuiltin(name)) |builtin| {
-                    const empty: []Value = &.{};
-                    return builtin(empty, gc, env);
-                }
-            }
-            return eval_mod.apply(func, &.{}, env, gc);
+            return applyFnOrBuiltin(func, &.{}, gc, env);
         }
-        if (!args[1].isObj()) return error.TypeError;
-        const obj = args[1].asObj();
-        items = switch (obj.kind) {
-            .list => obj.data.list.items.items,
-            .vector => obj.data.vector.items.items,
-            else => return error.TypeError,
-        };
+        items = try seqItems(args[1], gc);
         if (items.len == 0) {
-            if (isBuiltinSentinel(func, gc)) |name| {
-                if (lookupBuiltin(name)) |builtin| {
-                    const empty: []Value = &.{};
-                    return builtin(empty, gc, env);
-                }
-            }
-            return eval_mod.apply(func, &.{}, env, gc);
+            return applyFnOrBuiltin(func, &.{}, gc, env);
         }
         acc = items[0];
         items = items[1..];
@@ -1645,13 +1637,7 @@ fn reduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 
     for (items) |item| {
         var pair = [2]Value{ acc, item };
-        if (isBuiltinSentinel(func, gc)) |name| {
-            if (lookupBuiltin(name)) |builtin| {
-                acc = try builtin(&pair, gc, env);
-                continue;
-            }
-        }
-        acc = try eval_mod.apply(func, &pair, env, gc);
+        acc = try applyFnOrBuiltin(func, &pair, gc, env);
     }
     return acc;
 }
@@ -2691,36 +2677,7 @@ fn symbolFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 fn typeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (args.len != 1) return error.ArityError;
-    const v = args[0];
-    const t: []const u8 = if (v.isNil()) "nil"
-    else if (v.isBool()) "boolean"
-    else if (v.isInt()) "integer"
-    else if (v.isFloat()) "float"
-    else if (v.isString()) "string"
-    else if (v.isKeyword()) "keyword"
-    else if (v.isSymbol()) "symbol"
-    else if (v.isObj()) switch (v.asObj().kind) {
-        .list => "list",
-        .vector => "vector",
-        .map => "map",
-        .set => "set",
-        .function => "function",
-        .macro_fn => "macro",
-        .atom => "atom",
-        .bc_closure => "function",
-        .builtin_ref => "function",
-        .lazy_seq => "lazy-seq",
-        .partial_fn => "function",
-        .multimethod => "multimethod",
-        .protocol => "protocol",
-        .dense_f64 => "dense-f64",
-        .trace => "trace",
-        .rational => "rational",
-        .color => "color",
-        .channel => "channel",
-    }
-    else "unknown";
-    return Value.makeString(try gc.internString(t));
+    return Value.makeString(try gc.internString(valueTypeName(args[0])));
 }
 
 fn identityFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
@@ -2996,17 +2953,7 @@ fn countStrFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // HELPERS
 // ============================================================================
 
-fn seqItems(val: Value, gc: *GC) ![]Value {
-    _ = gc;
-    if (val.isNil()) return &[_]Value{};
-    if (!val.isObj()) return error.TypeError;
-    const obj = val.asObj();
-    return switch (obj.kind) {
-        .list => obj.data.list.items.items,
-        .vector => obj.data.vector.items.items,
-        else => error.TypeError,
-    };
-}
+// seqItems defined in helpers section above
 
 // ============================================================================
 // PATTERN MATCHING BUILTINS
