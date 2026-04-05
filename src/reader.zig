@@ -23,9 +23,41 @@ pub const Reader = struct {
     pos: usize = 0,
     gc: *GC,
     depth: u32 = 0, // CVE-3 fix: track nesting depth
+    line: u32 = 1,
+    col: u16 = 1,
+    file_id: u48 = 0, // interned string ID for source file name
 
     pub fn init(src: []const u8, gc: *GC) Reader {
         return .{ .src = src, .gc = gc };
+    }
+
+    pub fn initWithFile(src: []const u8, gc: *GC, file_name: []const u8) Reader {
+        const fid = gc.internString(file_name) catch 0;
+        return .{ .src = src, .gc = gc, .file_id = fid };
+    }
+
+    /// Capture current source location
+    fn currentLoc(self: *const Reader) @import("srcloc.zig").SourceLoc {
+        return .{ .line = self.line, .col = self.col, .file_id = self.file_id };
+    }
+
+    /// Attach source location metadata to a heap object
+    fn attachLoc(self: *Reader, obj: *@import("value.zig").Obj) void {
+        const loc = self.currentLoc();
+        obj.meta = loc.toMeta(self.gc) catch null;
+    }
+
+    /// Advance pos by 1, tracking column
+    fn advance(self: *Reader) void {
+        if (self.pos < self.src.len) {
+            if (self.src[self.pos] == '\n') {
+                self.line += 1;
+                self.col = 1;
+            } else {
+                self.col += 1;
+            }
+            self.pos += 1;
+        }
     }
 
     pub fn readForm(self: *Reader) ReadError!Value {
@@ -71,8 +103,9 @@ pub const Reader = struct {
         self.depth += 1;
         if (self.depth > MAX_READ_DEPTH) return error.UnexpectedChar; // depth exceeded
         defer self.depth -= 1;
-        self.pos += 1; // skip (
         const obj = self.gc.allocObj(.list) catch return error.OutOfMemory;
+        self.attachLoc(obj);
+        self.advance(); // skip (
         while (true) {
             self.skipWhitespace();
             if (self.pos >= self.src.len) return error.UnexpectedEOF;
@@ -166,6 +199,32 @@ pub const Reader = struct {
                         self.pos += 1;
                     }
                     const tag_name = self.src[start..self.pos];
+                    // #color[L a b alpha] → first-class color value
+                    if (std.mem.eql(u8, tag_name, "color")) {
+                        const vec = self.readForm() catch return error.UnexpectedChar;
+                        if (vec.isObj() and vec.asObj().kind == .vector) {
+                            const items = vec.asObj().data.vector.items.items;
+                            if (items.len >= 3) {
+                                const colorspace = @import("colorspace.zig");
+                                const toF = struct {
+                                    fn f(v: Value) f32 {
+                                        if (v.isFloat()) return @floatCast(v.asFloat());
+                                        if (v.isInt()) return @floatFromInt(v.asInt());
+                                        return 0;
+                                    }
+                                }.f;
+                                const color_obj = self.gc.allocObj(.color) catch return error.OutOfMemory;
+                                color_obj.data = .{ .color = colorspace.Color{
+                                    .L = toF(items[0]),
+                                    .a = toF(items[1]),
+                                    .b = toF(items[2]),
+                                    .alpha = if (items.len > 3) toF(items[3]) else 1.0,
+                                } };
+                                break :blk Value.makeObj(color_obj);
+                            }
+                        }
+                        break :blk error.UnexpectedChar;
+                    }
                     const form = self.readForm() catch return error.UnexpectedChar;
                     // Build {:tag "tag" :value form}
                     const m = self.gc.allocObj(.map) catch return error.OutOfMemory;
@@ -417,6 +476,12 @@ pub const Reader = struct {
         while (self.pos < self.src.len) {
             const c = self.src[self.pos];
             if (c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == ',') {
+                if (c == '\n') {
+                    self.line += 1;
+                    self.col = 1;
+                } else {
+                    self.col += 1;
+                }
                 self.pos += 1;
             } else break;
         }
