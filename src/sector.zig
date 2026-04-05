@@ -4,6 +4,7 @@ const Value = value.Value;
 const ObjKind = value.ObjKind;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const Reader = @import("reader.zig").Reader;
 const printer = @import("printer.zig");
 const eval_mod = @import("eval.zig");
@@ -84,7 +85,7 @@ pub const TIER_SPECS = [_]TierStats{
 // These 13 primitives are the irreducible kernel of SectorClojure.
 // From these, the metacircular evaluator can derive everything else.
 
-fn t0_cons(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t0_cons(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const new = try gc.allocObj(.list);
     try new.data.list.items.append(gc.allocator, args[0]);
@@ -100,7 +101,7 @@ fn t0_cons(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn t0_car(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t0_car(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return error.TypeError;
@@ -113,7 +114,7 @@ fn t0_car(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (items.len > 0) items[0] else Value.makeNil();
 }
 
-fn t0_cdr(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t0_cdr(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const new = try gc.allocObj(.list);
     if (args[0].isNil()) return Value.makeObj(new);
@@ -130,7 +131,7 @@ fn t0_cdr(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn t0_atom(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t0_atom(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(!args[0].isObj() or switch (args[0].asObj().kind) {
         .list, .vector, .map, .set => false,
@@ -138,18 +139,18 @@ fn t0_atom(args: []Value, _: *GC, _: *Env) anyerror!Value {
     });
 }
 
-fn t0_eq(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t0_eq(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return Value.makeBool(semantics.structuralEq(args[0], args[1], gc));
 }
 
-fn t0_list(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t0_list(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.list);
     for (args) |a| try obj.data.list.items.append(gc.allocator, a);
     return Value.makeObj(obj);
 }
 
-fn t0_count(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t0_count(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeInt(0);
     if (args[0].isString()) {
@@ -167,17 +168,17 @@ fn t0_count(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeInt(n);
 }
 
-fn t0_nil_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t0_nil_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isNil());
 }
 
-fn t0_not(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t0_not(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(!args[0].isTruthy());
 }
 
-fn t0_println(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t0_println(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const compat = @import("compat.zig");
     const stdout = compat.stdoutFile();
     for (args, 0..) |a, i| {
@@ -190,7 +191,7 @@ fn t0_println(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeNil();
 }
 
-fn t0_pr_str(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t0_pr_str(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const compat = @import("compat.zig");
     var buf = compat.emptyList(u8);
     for (args, 0..) |a, i| {
@@ -202,7 +203,7 @@ fn t0_pr_str(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(id);
 }
 
-fn t0_read_string(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t0_read_string(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
     var r = Reader.init(s, gc);
@@ -213,15 +214,15 @@ fn t0_read_string(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // Tier 1: SRFI-1 — List library extensions
 // ────────────────────────────────────────────────────────────────────
 
-fn t1_first(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_first(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     return t0_car(args, undefined, undefined);
 }
 
-fn t1_rest(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t1_rest(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     return t0_cdr(args, gc, undefined);
 }
 
-fn t1_nth(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_nth(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj() or !args[1].isInt()) return error.TypeError;
     const obj = args[0].asObj();
@@ -235,7 +236,7 @@ fn t1_nth(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return items[idx];
 }
 
-fn t1_empty_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_empty_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeBool(true);
     if (!args[0].isObj()) return error.TypeError;
@@ -250,7 +251,7 @@ fn t1_empty_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return Value.makeBool(n == 0);
 }
 
-fn t1_reverse(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t1_reverse(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeObj(try gc.allocObj(.list));
     if (!args[0].isObj()) return error.TypeError;
@@ -269,7 +270,7 @@ fn t1_reverse(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn t1_concat(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t1_concat(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const new = try gc.allocObj(.list);
     for (args) |arg| {
         if (arg.isNil()) continue;
@@ -285,7 +286,7 @@ fn t1_concat(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn t1_conj(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t1_conj(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const src = args[0].asObj();
@@ -314,7 +315,7 @@ fn t1_conj(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // Tier 1 continued: Arithmetic (SRFI-1 expects numeric lists)
 // ────────────────────────────────────────────────────────────────────
 
-fn t1_add(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_add(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     var sum_i: i48 = 0;
     var sum_f: f64 = 0;
     var is_float = false;
@@ -330,7 +331,7 @@ fn t1_add(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (is_float) Value.makeFloat(sum_f) else Value.makeInt(sum_i);
 }
 
-fn t1_sub(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_sub(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return error.ArityError;
     if (args.len == 1) {
         if (args[0].isInt()) return Value.makeInt(-args[0].asInt());
@@ -354,7 +355,7 @@ fn t1_sub(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (is_float) Value.makeFloat(rf) else Value.makeInt(ri);
 }
 
-fn t1_mul(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_mul(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     var pi: i48 = 1;
     var pf: f64 = 1;
     var is_float = false;
@@ -370,7 +371,7 @@ fn t1_mul(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (is_float) Value.makeFloat(pf) else Value.makeInt(pi);
 }
 
-fn t1_div(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_div(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (args[0].isInt() and args[1].isInt()) {
         const b = args[1].asInt();
@@ -383,7 +384,7 @@ fn t1_div(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return Value.makeFloat(af / bf);
 }
 
-fn t1_mod(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_mod(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (args[0].isInt() and args[1].isInt()) {
         return Value.makeInt(@rem(args[0].asInt(), args[1].asInt()));
@@ -393,51 +394,51 @@ fn t1_mod(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return Value.makeFloat(@rem(af, bf));
 }
 
-fn t1_lt(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_lt(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const af: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
     const bf: f64 = if (args[1].isInt()) @floatFromInt(args[1].asInt()) else args[1].asFloat();
     return Value.makeBool(af < bf);
 }
 
-fn t1_gt(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_gt(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const af: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
     const bf: f64 = if (args[1].isInt()) @floatFromInt(args[1].asInt()) else args[1].asFloat();
     return Value.makeBool(af > bf);
 }
 
-fn t1_lte(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_lte(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const af: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
     const bf: f64 = if (args[1].isInt()) @floatFromInt(args[1].asInt()) else args[1].asFloat();
     return Value.makeBool(af <= bf);
 }
 
-fn t1_gte(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_gte(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const af: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
     const bf: f64 = if (args[1].isInt()) @floatFromInt(args[1].asInt()) else args[1].asFloat();
     return Value.makeBool(af >= bf);
 }
 
-fn t1_inc(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_inc(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     return Value.makeInt(args[0].asInt() +% 1);
 }
 
-fn t1_dec(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_dec(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     return Value.makeInt(args[0].asInt() -% 1);
 }
 
-fn t1_zero_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_zero_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isInt()) return Value.makeBool(false);
     return Value.makeBool(args[0].asInt() == 0);
 }
 
-fn t1_str(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t1_str(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const compat = @import("compat.zig");
     var buf = compat.emptyList(u8);
     for (args) |a| {
@@ -448,42 +449,42 @@ fn t1_str(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(id);
 }
 
-fn t1_number_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_number_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isInt() or args[0].isFloat());
 }
 
-fn t1_string_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_string_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isString());
 }
 
-fn t1_keyword_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_keyword_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isKeyword());
 }
 
-fn t1_symbol_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_symbol_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isSymbol());
 }
 
-fn t1_list_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_list_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .list);
 }
 
-fn t1_vector_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_vector_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .vector);
 }
 
-fn t1_map_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_map_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .map);
 }
 
-fn t1_fn_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t1_fn_p(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .function);
 }
@@ -492,13 +493,13 @@ fn t1_fn_p(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // Tier 3: SRFI-43/69/113 — Core data structures
 // ────────────────────────────────────────────────────────────────────
 
-fn t3_vector(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t3_vector(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.vector);
     for (args) |a| try obj.data.vector.items.append(gc.allocator, a);
     return Value.makeObj(obj);
 }
 
-fn t3_hash_map(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t3_hash_map(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len % 2 != 0) return error.ArityError;
     const obj = try gc.allocObj(.map);
     var i: usize = 0;
@@ -509,7 +510,7 @@ fn t3_hash_map(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn t3_get(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t3_get(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return error.TypeError;
@@ -521,7 +522,7 @@ fn t3_get(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return Value.makeNil();
 }
 
-fn t3_assoc(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t3_assoc(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3 or (args.len - 1) % 2 != 0) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const src = args[0].asObj();
@@ -553,7 +554,7 @@ fn t3_assoc(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // Tier 4: SRFI-41/158/196 — Laziness + Range
 // ────────────────────────────────────────────────────────────────────
 
-fn t4_range(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t4_range(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0 or args.len > 3) return error.ArityError;
     var start: i48 = 0;
     var end: i48 = undefined;
@@ -589,7 +590,7 @@ fn t4_range(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // Registration: install builtins for a given tier into an environment
 // ────────────────────────────────────────────────────────────────────
 
-pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
+pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value;
 
 pub const BuiltinEntry = struct {
     name: []const u8,
@@ -903,117 +904,117 @@ pub fn ensureReduced(v: Value, gc: *GC) !Value {
 
 // ── Stateless transducer factories ──
 
-fn t5_tmap(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tmap(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__tmap__", args[0..1]);
 }
 
-fn t5_tfilter(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tfilter(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__tfilter__", args[0..1]);
 }
 
-fn t5_tremove(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tremove(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__tremove__", args[0..1]);
 }
 
-fn t5_tfilter_map(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tfilter_map(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__tfilter_map__", args[0..1]);
 }
 
-fn t5_treplace(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_treplace(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__treplace__", args[0..1]);
 }
 
 // ── Stateful transducer factories ──
 
-fn t5_tdrop(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tdrop(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     return makeTransducer(gc, "__tdrop__", args[0..1]);
 }
 
-fn t5_ttake(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_ttake(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     return makeTransducer(gc, "__ttake__", args[0..1]);
 }
 
-fn t5_tdrop_while(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tdrop_while(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__tdrop_while__", args[0..1]);
 }
 
-fn t5_ttake_while(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_ttake_while(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__ttake_while__", args[0..1]);
 }
 
-fn t5_tconcatenate(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tconcatenate(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return makeTransducer(gc, "__tconcatenate__", &.{});
     if (args.len == 1) return makeReducer(gc, "__tconcatenate_rf__", args[0], &.{});
     return error.ArityError;
 }
 
-fn t5_tappend_map(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tappend_map(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__tappend_map__", args[0..1]);
 }
 
-fn t5_tflatten(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tflatten(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return makeTransducer(gc, "__tflatten__", &.{});
     if (args.len == 1) return makeReducer(gc, "__tflatten_rf__", args[0], &.{});
     return error.ArityError;
 }
 
-fn t5_tdelete_neighbor_dups(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tdelete_neighbor_dups(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return makeTransducer(gc, "__tdedup__", &.{});
     return error.ArityError;
 }
 
-fn t5_tdelete_dups(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tdelete_dups(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return makeTransducer(gc, "__tdistinct__", &.{});
     return error.ArityError;
 }
 
-fn t5_tsegment(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tsegment(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     return makeTransducer(gc, "__tsegment__", args[0..1]);
 }
 
-fn t5_tpartition(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tpartition(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__tpartition__", args[0..1]);
 }
 
-fn t5_tadd_between(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tadd_between(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__tadd_between__", args[0..1]);
 }
 
-fn t5_tenumerate(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tenumerate(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return makeTransducer(gc, "__tenumerate__", &.{});
     return error.ArityError;
 }
 
-fn t5_tlog(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_tlog(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return makeTransducer(gc, "__tlog__", &.{});
     return error.ArityError;
 }
 
 // ── Reducers ──
 
-fn t5_rcons(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_rcons(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     return switch (args.len) {
         0 => Value.makeObj(try gc.allocObj(.list)),
-        1 => t1_reverse(args, gc, undefined),
-        2 => t1_conj(@constCast(&[_]Value{ args[0], args[1] }), gc, undefined),
+        1 => t1_reverse(args, gc, undefined, undefined),
+        2 => t1_conj(@constCast(&[_]Value{ args[0], args[1] }), gc, undefined, undefined),
         else => error.ArityError,
     };
 }
 
-fn t5_reverse_rcons(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_reverse_rcons(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     return switch (args.len) {
         0 => Value.makeObj(try gc.allocObj(.list)),
         1 => args[0],
@@ -1032,7 +1033,7 @@ fn t5_reverse_rcons(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     };
 }
 
-fn t5_rcount(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn t5_rcount(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     return switch (args.len) {
         0 => Value.makeInt(0),
         1 => args[0],
@@ -1041,36 +1042,36 @@ fn t5_rcount(args: []Value, _: *GC, _: *Env) anyerror!Value {
     };
 }
 
-fn t5_rany(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_rany(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__rany__", args[0..1]);
 }
 
-fn t5_revery(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_revery(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__revery__", args[0..1]);
 }
 
-fn t5_ensure_reduced(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_ensure_reduced(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return ensureReduced(args[0], gc);
 }
 
-fn t5_preserving_reduced(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn t5_preserving_reduced(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return makeTransducer(gc, "__preserving_reduced__", args[0..1]);
 }
 
-fn t5_list_transduce(args: []Value, gc: *GC, env: *Env) anyerror!Value {
-    return t5_transduce(args, gc, env);
+fn t5_list_transduce(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+    return t5_transduce(args, gc, env, undefined);
 }
 
-fn t5_transduce(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn t5_transduce(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.ArityError;
     if (args.len == 3) {
         const init = try eval_mod.apply(args[1], @constCast(&[_]Value{}), env, gc);
         var new_args = [_]Value{ args[0], args[1], init, args[2] };
-        return t5_transduce(&new_args, gc, env);
+        return t5_transduce(&new_args, gc, env, undefined);
     }
     var xf_args = [_]Value{args[1]};
     const rf = try eval_mod.apply(args[0], &xf_args, env, gc);

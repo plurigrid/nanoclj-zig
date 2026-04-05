@@ -50,6 +50,8 @@ pub const Resources = struct {
     limits: Limits,
     /// GF(3) balance accumulator for conservation checks
     trit_balance: i8 = 0,
+    /// Monotonic buddy event counter (propagator cell, only grows)
+    buddy_events: u32 = 0,
 
     pub fn init(limits: Limits) Resources {
         return .{
@@ -60,6 +62,13 @@ pub const Resources = struct {
 
     pub fn initDefault() Resources {
         return init(.{});
+    }
+
+    /// Unmetered resources for legacy eval paths that don't track fuel.
+    /// Fuel starts at max — ticks still decrement but will never exhaust
+    /// in any realistic computation (10B ticks ≈ hours of eval).
+    pub fn unmetered() Resources {
+        return init(.{ .max_fuel = std.math.maxInt(u64) });
     }
 
     /// Consume fuel based on color-game depth cost.

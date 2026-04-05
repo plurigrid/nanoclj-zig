@@ -5,6 +5,11 @@ const Obj = value.Obj;
 const ObjKind = value.ObjKind;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
+
+/// Unmetered resources for the legacy eval path.
+/// Builtins still tick, but fuel is effectively infinite.
+var unmetered_res: Resources = Resources.unmetered();
 
 pub const EvalError = error{
     SymbolNotFound,
@@ -113,7 +118,7 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
                 const v = try eval(arg, env, gc);
                 args.append(gc.allocator, v) catch return error.OutOfMemory;
             }
-            return builtin(args.items, gc, env) catch return error.EvalFailed;
+            return builtin(args.items, gc, env, &unmetered_res) catch return error.EvalFailed;
         }
     }
 
@@ -1253,7 +1258,7 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
         const core = @import("core.zig");
         if (core.isBuiltinSentinel(func, gc)) |bname| {
             if (core.lookupBuiltin(bname)) |builtin| {
-                return builtin(@constCast(args), gc, caller_env) catch return error.EvalFailed;
+                return builtin(@constCast(args), gc, caller_env, &unmetered_res) catch return error.EvalFailed;
             }
         }
         return error.NotAFunction;
@@ -1387,7 +1392,7 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
         const core = @import("core.zig");
         if (core.isBuiltinSentinel(pf.func, gc)) |bname| {
             if (core.lookupBuiltin(bname)) |builtin| {
-                return builtin(combined[0..total_len], gc, caller_env) catch return error.EvalFailed;
+                return builtin(combined[0..total_len], gc, caller_env, &unmetered_res) catch return error.EvalFailed;
             }
         }
         return error.NotAFunction;

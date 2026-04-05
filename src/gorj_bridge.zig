@@ -31,6 +31,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const Reader = @import("reader.zig").Reader;
 const printer = @import("printer.zig");
 const eval_mod = @import("eval.zig");
@@ -139,7 +140,7 @@ fn evalPipe(expr: []const u8, env: *Env, gc: *GC) PipeResult {
 /// (gorj-pipe expr) → [result version-id trit]
 /// Minimal output: 3-element vector. No map. No Syrup. No hex.
 /// This is the collapsed hot path.
-pub fn gorjPipeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn gorjPipeFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const expr = gc.getString(args[0].asStringId());
@@ -155,7 +156,7 @@ pub fn gorjPipeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 
 /// (gorj-eval expr) → {:result val :trit N :version-id N :gf3-balanced? bool}
 /// Backward-compatible map output, but uses fused pipeline internally.
-pub fn gorjEvalFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn gorjEvalFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const expr = gc.getString(args[0].asStringId());
@@ -183,7 +184,7 @@ pub fn gorjEvalFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 }
 
 /// (gorj-encode val) → raw Syrup bytes as interned string (no hex conversion)
-pub fn gorjEncodeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn gorjEncodeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     const bytes = try syrup_bridge.encode_to_bytes(args[0], gc, gc.allocator);
     defer gc.allocator.free(bytes);
@@ -192,7 +193,7 @@ pub fn gorjEncodeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (gorj-decode syrup-string) → nanoclj value
 /// Accepts raw Syrup bytes (string), no hex. Direct decode via syrup_bridge.
-pub fn gorjDecodeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn gorjDecodeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const raw = gc.getString(args[0].asStringId());
@@ -200,7 +201,7 @@ pub fn gorjDecodeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (gorj-version) → current invocation index (deterministic position in session)
-pub fn gorjVersionFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn gorjVersionFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     _ = gc;
     if (invocation_index == 0) return Value.makeNil();
@@ -210,7 +211,7 @@ pub fn gorjVersionFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (gorj-tools) → vector of gorj's 29 MCP tool names
-pub fn gorjToolsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn gorjToolsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const tool_names = [_][]const u8{
         "repl_eval",           "reload_namespace",    "eval_at",

@@ -5,6 +5,7 @@ const Value = value.Value;
 const ObjKind = value.ObjKind;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const reader_mod = @import("reader.zig");
 const printer = @import("printer.zig");
 const eval_mod = @import("eval.zig");
@@ -43,6 +44,8 @@ const zipf = @import("zipf.zig");
 const channel = @import("channel.zig");
 const srcloc = @import("srcloc.zig");
 const time_units = @import("time_units.zig");
+const nrepl = @import("nrepl.zig");
+const behavior_lattice = @import("behavior_lattice.zig");
 
 fn getSeedMs() i64 {
     var ts: std.c.timespec = undefined;
@@ -50,7 +53,7 @@ fn getSeedMs() i64 {
     return @as(i64, ts.sec) *% 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000);
 }
 
-pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env) anyerror!Value;
+pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value;
 
 // We store builtins as a separate lookup rather than in NaN-boxed values.
 // The env holds a symbol that maps to a sentinel; we intercept in apply.
@@ -174,8 +177,15 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "congrunet-summary", &congrunet.congrunetSummaryFn },
         .{ "congrunet-trace", &congrunet.congrunetTraceFn },
         .{ "congrunet-presheaf", &congrunet.congrunetPresheafFn },
-        // nREPL
-        .{ "nrepl-start", &substrate.nreplStartFn },
+        // nREPL superstructure (bencode over TCP, color identity, trit phase)
+        .{ "nrepl-start", &nrepl.nreplStartFn },
+        .{ "nrepl-stop", &nrepl.nreplStopFn },
+        .{ "nrepl-status", &nrepl.nreplStatusFn },
+        .{ "behavior-lattice", &behavior_lattice.behaviorLatticeFn },
+        .{ "behavioral-equivalence", &behavior_lattice.behavioralEquivalenceFn },
+        .{ "behavioral-dominance", &behavior_lattice.behavioralDominanceFn },
+        .{ "behavior-compare", &behavior_lattice.behaviorCompareFn },
+        .{ "behavior-profile", &behavior_lattice.behaviorProfileFn },
         // Substrate traversal
         .{ "substrate", &substrate.substrateFn },
         .{ "traverse", &substrate.traverseFn },
@@ -294,6 +304,16 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "bilresa-commands", &computable_sets.bilresaCommandsFn },
         .{ "bilresa-trit-sum", &computable_sets.bilresaTritSumFn },
         .{ "matter-scene", &computable_sets.matterSceneFn },
+        // Chromatic observer: colorblind detection game
+        .{ "cone-probe", &computable_sets.coneProbeFn },
+        .{ "observer-triad", &computable_sets.observerTriadFn },
+        .{ "all-triads", &computable_sets.allTriadsFn },
+        .{ "detection-theorem", &computable_sets.detectionTheoremFn },
+        .{ "cone-cardinal", &computable_sets.coneCardinalFn },
+        .{ "cone-ordinal", &computable_sets.coneOrdinalFn },
+        // Buddy state: monotonic propagator cell for companion rarity
+        .{ "buddy-state", &computable_sets.buddyStateFn },
+        .{ "buddy-witness", &computable_sets.buddyWitnessFn },
         // Diophantine equations
         .{ "pythagorean-triples", &computable_sets.pythagoreanTriplesFn },
         .{ "pell-solve", &computable_sets.pellSolveFn },
@@ -707,6 +727,10 @@ pub fn lookupBuiltin(name: []const u8) ?BuiltinFn {
     return builtin_table.get(name);
 }
 
+pub fn builtinIterator() std.StringHashMap(BuiltinFn).KeyIterator {
+    return builtin_table.keyIterator();
+}
+
 pub fn isBuiltinSentinel(val: Value, gc: *GC) ?[]const u8 {
     if (!val.isKeyword()) return null;
     const name = gc.getString(val.asKeywordId());
@@ -715,7 +739,7 @@ pub fn isBuiltinSentinel(val: Value, gc: *GC) ?[]const u8 {
 }
 
 // Arithmetic
-fn add(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn add(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     var sum_i: i48 = 0;
     var sum_f: f64 = 0;
     var is_float = false;
@@ -731,7 +755,7 @@ fn add(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (is_float) Value.makeFloat(sum_f) else Value.makeInt(sum_i);
 }
 
-fn sub(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn sub(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return error.ArityError;
     if (args.len == 1) {
         if (args[0].isInt()) return Value.makeInt(-args[0].asInt());
@@ -755,7 +779,7 @@ fn sub(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (is_float) Value.makeFloat(result_f) else Value.makeInt(result_i);
 }
 
-fn mul(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn mul(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     var prod_i: i48 = 1;
     var prod_f: f64 = 1;
     var is_float = false;
@@ -771,7 +795,7 @@ fn mul(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (is_float) Value.makeFloat(prod_f) else Value.makeInt(prod_i);
 }
 
-fn div_fn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn div_fn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     // Integer division when both args are ints and evenly divisible
     if (args[0].isInt() and args[1].isInt()) {
@@ -785,7 +809,7 @@ fn div_fn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return Value.makeFloat(a_f / b_f);
 }
 
-fn modFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn modFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (args[0].isInt() and args[1].isInt()) {
         return Value.makeInt(@rem(args[0].asInt(), args[1].asInt()));
@@ -797,24 +821,24 @@ fn modFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 // Comparison
-fn eql(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn eql(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return Value.makeBool(semantics.structuralEq(args[0], args[1], gc));
 }
 
-fn lt(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn lt(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return numCmp(args[0], args[1], .lt);
 }
-fn gt(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn gt(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return numCmp(args[0], args[1], .gt);
 }
-fn lte(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn lte(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return numCmp(args[0], args[1], .lte);
 }
-fn gte(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn gte(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return numCmp(args[0], args[1], .gte);
 }
@@ -833,19 +857,19 @@ fn numCmp(a: Value, b: Value, op: CmpOp) anyerror!Value {
 }
 
 // Collections
-fn listFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn listFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.list);
     for (args) |a| try obj.data.list.items.append(gc.allocator, a);
     return Value.makeObj(obj);
 }
 
-fn vectorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn vectorFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.vector);
     for (args) |a| try obj.data.vector.items.append(gc.allocator, a);
     return Value.makeObj(obj);
 }
 
-fn hashMapFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn hashMapFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len % 2 != 0) return error.ArityError;
     const obj = try gc.allocObj(.map);
     var i: usize = 0;
@@ -921,14 +945,14 @@ pub fn valueTypeName(v: Value) []const u8 {
     };
 }
 
-fn applyFnOrBuiltin(func: Value, call_args: []Value, gc: *GC, env: *Env) !Value {
+fn applyFnOrBuiltin(func: Value, call_args: []Value, gc: *GC, env: *Env, res: *Resources) !Value {
     if (isBuiltinSentinel(func, gc)) |name| {
-        if (lookupBuiltin(name)) |builtin| return builtin(call_args, gc, env);
+        if (lookupBuiltin(name)) |builtin| return builtin(call_args, gc, env, res);
     }
     return eval_mod.apply(func, call_args, env, gc);
 }
 
-fn first(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn first(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return error.TypeError;
@@ -971,7 +995,7 @@ fn makeLazyPayload(gc: *GC, marker: Value, fields: []const Value) !Value {
     return Value.makeObj(rest_obj);
 }
 
-fn rest(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn rest(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const new = try gc.allocObj(.list);
     if (args[0].isNil()) return Value.makeObj(new);
@@ -1028,7 +1052,7 @@ fn rest(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn cons(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn cons(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const new = try gc.allocObj(.list);
     try new.data.list.items.append(gc.allocator, args[0]);
@@ -1044,7 +1068,7 @@ fn cons(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn count(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn count(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeInt(0);
     // String count: return byte length
@@ -1064,7 +1088,7 @@ fn count(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeInt(n);
 }
 
-fn nth(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn nth(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj() or !args[1].isInt()) return error.TypeError;
     const obj = args[0].asObj();
@@ -1080,7 +1104,7 @@ fn nth(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return items[idx];
 }
 
-fn getFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn getFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return error.TypeError;
@@ -1092,7 +1116,7 @@ fn getFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return Value.makeNil();
 }
 
-fn assoc(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn assoc(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3 or (args.len - 1) % 2 != 0) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const src = args[0].asObj();
@@ -1122,7 +1146,7 @@ fn assoc(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn conj(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn conj(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const src = args[0].asObj();
@@ -1149,45 +1173,45 @@ fn conj(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 // Predicates
-fn isNilP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isNilP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isNil());
 }
-fn isNumberP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isNumberP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isInt() or (!args[0].isNil() and !args[0].isBool() and !args[0].isSymbol() and !args[0].isKeyword() and !args[0].isString() and !args[0].isObj()));
 }
-fn isStringP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isStringP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isString());
 }
-fn isKeywordP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isKeywordP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isKeyword());
 }
-fn isSymbolP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isSymbolP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isSymbol());
 }
-fn isListP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isListP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .list);
 }
-fn isVectorP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isVectorP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .vector);
 }
-fn isMapP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isMapP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .map);
 }
-fn isFnP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isFnP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .function);
 }
 
 // IO
-fn printlnFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn printlnFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const stdout = compat.stdoutFile();
     for (args, 0..) |a, i| {
         if (i > 0) compat.fileWriteAll(stdout, " ");
@@ -1199,7 +1223,7 @@ fn printlnFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeNil();
 }
 
-fn prStrFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn prStrFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     var buf = compat.emptyList(u8);
     for (args, 0..) |a, i| {
         if (i > 0) try buf.append(gc.allocator, ' ');
@@ -1210,7 +1234,7 @@ fn prStrFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(id);
 }
 
-fn readStringFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn readStringFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
     var r = reader_mod.Reader.init(s, gc);
@@ -1218,7 +1242,7 @@ fn readStringFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (load-file path) → result of last form
-fn loadFileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn loadFileFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const path = gc.getString(args[0].asStringId());
 
@@ -1256,7 +1280,7 @@ fn loadFileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return last_result;
 }
 
-fn strFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn strFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     var buf = compat.emptyList(u8);
     for (args) |a| {
         try printer.prStrInto(&buf, a, gc, false);
@@ -1266,7 +1290,7 @@ fn strFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(id);
 }
 
-fn subsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn subsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2 or args.len > 3) return error.ArityError;
     if (!args[0].isString() or !args[1].isInt()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
@@ -1285,7 +1309,7 @@ fn subsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 // ── String operations ──
 
-fn splitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn splitFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
@@ -1310,7 +1334,7 @@ fn splitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn joinFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn joinFn(args: []Value, gc: *GC, _: *Env, res: *Resources) anyerror!Value {
     if (args.len < 1 or args.len > 2) return error.ArityError;
     const sep = if (args.len == 2 and args[0].isString()) gc.getString(args[0].asStringId()) else "";
     const coll_arg = if (args.len == 2) args[1] else args[0];
@@ -1324,6 +1348,7 @@ fn joinFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     var buf = compat.emptyList(u8);
     defer buf.deinit(gc.allocator);
     for (items, 0..) |item, i| {
+        try res.tick();
         if (i > 0) try buf.appendSlice(gc.allocator, sep);
         if (item.isString()) {
             try buf.appendSlice(gc.allocator, gc.getString(item.asStringId()));
@@ -1335,7 +1360,7 @@ fn joinFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(try gc.internString(buf.items));
 }
 
-fn replaceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn replaceFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[0].isString() or !args[1].isString() or !args[2].isString()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
@@ -1358,7 +1383,7 @@ fn replaceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(try gc.internString(buf.items));
 }
 
-fn indexOfFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn indexOfFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2 or args.len > 3) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
@@ -1373,19 +1398,19 @@ fn indexOfFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeInt(-1);
 }
 
-fn startsWithFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn startsWithFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
     return Value.makeBool(std.mem.startsWith(u8, gc.getString(args[0].asStringId()), gc.getString(args[1].asStringId())));
 }
 
-fn endsWithFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn endsWithFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
     return Value.makeBool(std.mem.endsWith(u8, gc.getString(args[0].asStringId()), gc.getString(args[1].asStringId())));
 }
 
-fn trimFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn trimFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
@@ -1393,7 +1418,7 @@ fn trimFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(try gc.internString(trimmed));
 }
 
-fn upperCaseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn upperCaseFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
@@ -1403,7 +1428,7 @@ fn upperCaseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(try gc.internString(buf));
 }
 
-fn lowerCaseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn lowerCaseFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
@@ -1413,7 +1438,7 @@ fn lowerCaseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(try gc.internString(buf));
 }
 
-fn charAtFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn charAtFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isInt()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
@@ -1422,13 +1447,13 @@ fn charAtFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(try gc.internString(&[_]u8{s[@intCast(idx)]}));
 }
 
-fn stringLengthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn stringLengthFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     return Value.makeInt(@intCast(gc.getString(args[0].asStringId()).len));
 }
 
-fn notFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn notFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(!args[0].isTruthy());
 }
@@ -1445,7 +1470,7 @@ fn splitMix64(seed: u64) u64 {
 // ── Universal index-addressed builtins ──
 
 /// (at seed index) → deterministic u64 value. The single primitive.
-fn atFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn atFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
@@ -1455,7 +1480,7 @@ fn atFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (trit-at seed index) → -1, 0, or 1. GF(3) projection of at().
-fn tritAtFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn tritAtFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
@@ -1464,7 +1489,7 @@ fn tritAtFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (trit-sum seed n) → sum of trits [0, n). GF(3) conservation check.
-fn tritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn tritSumFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
@@ -1473,7 +1498,7 @@ fn tritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (find-balancer a b) → c such that a+b+c ≡ 0 mod 3. boxxy/GF3.dfy proven.
-fn findBalancerFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn findBalancerFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const a: i8 = @intCast(@max(@as(i48, -1), @min(args[0].asInt(), 1)));
@@ -1482,32 +1507,32 @@ fn findBalancerFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (trit-of hash-value) → content-based trit. Independent of position.
-fn tritOfContentFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn tritOfContentFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     const h: u64 = @bitCast(@as(i64, args[0].asInt()));
     return Value.makeInt(@as(i48, substrate.tritOfContent(h)));
 }
 
-fn incFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn incFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     return Value.makeInt(args[0].asInt() +% 1);
 }
 
-fn decFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn decFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     return Value.makeInt(args[0].asInt() -% 1);
 }
 
-fn isZeroP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isZeroP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isInt()) return Value.makeBool(false);
     return Value.makeBool(args[0].asInt() == 0);
 }
 
-fn applyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn applyFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     const func = args[0];
     const last = args[args.len - 1];
@@ -1526,13 +1551,13 @@ fn applyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     // Check if builtin
     if (isBuiltinSentinel(func, gc)) |name| {
         if (lookupBuiltin(name)) |builtin| {
-            return builtin(real_args.items, gc, env);
+            return builtin(real_args.items, gc, env, res);
         }
     }
     return eval_mod.apply(func, real_args.items, env, gc);
 }
 
-fn takeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn takeFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     const n: usize = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1594,7 +1619,7 @@ fn takeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn dropFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn dropFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     const n: usize = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1612,7 +1637,7 @@ fn dropFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn reduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn reduceFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     // (reduce f init coll) or (reduce f coll)
     if (args.len < 2 or args.len > 3) return error.ArityError;
     const func = args[0];
@@ -1625,24 +1650,25 @@ fn reduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
         items = try seqItems(args[2], gc);
     } else {
         if (args[1].isNil()) {
-            return applyFnOrBuiltin(func, &.{}, gc, env);
+            return applyFnOrBuiltin(func, &.{}, gc, env, res);
         }
         items = try seqItems(args[1], gc);
         if (items.len == 0) {
-            return applyFnOrBuiltin(func, &.{}, gc, env);
+            return applyFnOrBuiltin(func, &.{}, gc, env, res);
         }
         acc = items[0];
         items = items[1..];
     }
 
     for (items) |item| {
+        try res.tick(); // fuel consumed per iteration — closes the invariant gap
         var pair = [2]Value{ acc, item };
-        acc = try applyFnOrBuiltin(func, &pair, gc, env);
+        acc = try applyFnOrBuiltin(func, &pair, gc, env, res);
     }
     return acc;
 }
 
-fn rangeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn rangeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     // (range) — infinite lazy sequence 0, 1, 2, ...
     // (range end), (range start end), (range start end step)
     if (args.len > 3) return error.ArityError;
@@ -1703,16 +1729,17 @@ fn getItems(val: Value) ?[]Value {
     };
 }
 
-fn mapFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn mapFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const func = args[0];
     const items = getItems(args[1]) orelse return error.TypeError;
     const new = try gc.allocObj(.list);
     const core = @import("core.zig");
     for (items) |item| {
+        try res.tick();
         var a = [1]Value{item};
         const v = if (core.isBuiltinSentinel(func, gc)) |name|
-            (if (core.lookupBuiltin(name)) |builtin| try builtin(&a, gc, env) else try eval_mod.apply(func, &a, env, gc))
+            (if (core.lookupBuiltin(name)) |builtin| try builtin(&a, gc, env, res) else try eval_mod.apply(func, &a, env, gc))
         else
             try eval_mod.apply(func, &a, env, gc);
         try new.data.list.items.append(gc.allocator, v);
@@ -1720,16 +1747,17 @@ fn mapFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn filterFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn filterFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const func = args[0];
     const items = getItems(args[1]) orelse return error.TypeError;
     const new = try gc.allocObj(.list);
     const core = @import("core.zig");
     for (items) |item| {
+        try res.tick();
         var a = [1]Value{item};
         const v = if (core.isBuiltinSentinel(func, gc)) |name|
-            (if (core.lookupBuiltin(name)) |builtin| try builtin(&a, gc, env) else try eval_mod.apply(func, &a, env, gc))
+            (if (core.lookupBuiltin(name)) |builtin| try builtin(&a, gc, env, res) else try eval_mod.apply(func, &a, env, gc))
         else
             try eval_mod.apply(func, &a, env, gc);
         if (v.isTruthy()) {
@@ -1739,7 +1767,7 @@ fn filterFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn concatFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn concatFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const new = try gc.allocObj(.list);
     for (args) |arg| {
         const items = getItems(arg) orelse continue;
@@ -1748,7 +1776,7 @@ fn concatFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn reverseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn reverseFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return error.TypeError;
     const new = try gc.allocObj(.list);
@@ -1760,14 +1788,14 @@ fn reverseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(new);
 }
 
-fn isEmptyP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isEmptyP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeBool(true);
     const items = getItems(args[0]) orelse return error.TypeError;
     return Value.makeBool(items.len == 0);
 }
 
-fn intoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn intoFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const target = args[0].asObj();
@@ -1801,17 +1829,17 @@ fn intoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     }
 }
 
-fn isSetP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isSetP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .set);
 }
 
-fn isSeqP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isSeqP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .list);
 }
 
-fn isSequentialP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isSequentialP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return Value.makeBool(false);
     const k = args[0].asObj().kind;
@@ -1825,7 +1853,7 @@ const jepsen = @import("jepsen.zig");
 const pat_mod = @import("pattern.zig");
 
 /// (trit-phase n) → -1, 0, or 1 — GF(3) phase of tick count n
-fn tritPhaseFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn tritPhaseFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     const n: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1833,7 +1861,7 @@ fn tritPhaseFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (frames->trit-ticks frames fps) → integer trit-ticks
-fn framesToTritTicksFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn framesToTritTicksFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const frames: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1842,7 +1870,7 @@ fn framesToTritTicksFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (samples->trit-ticks samples rate) → integer trit-ticks
-fn samplesToTritTicksFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn samplesToTritTicksFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const samples: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1851,19 +1879,19 @@ fn samplesToTritTicksFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (trit-ticks-per-sec) → 2116800000
-fn tritTicksPerSecFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn tritTicksPerSecFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     return Value.makeInt(@intCast(transitivity.TRIT_TICKS_PER_SEC));
 }
 
 /// (flicks-per-sec) → 705600000
-fn flicksPerSecFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn flicksPerSecFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     return Value.makeInt(@intCast(transitivity.FLICK));
 }
 
 /// (glimpses-per-tick) → 1069
-fn glimpsesPerTickFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn glimpsesPerTickFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     return Value.makeInt(1069);
 }
@@ -1872,7 +1900,7 @@ fn glimpsesPerTickFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 /// Measures phase alignment between objective time (ticks) and
 /// subjective microstructure (glimpses).
 /// 0 = flow (aligned), 1 = anticipation (leading), -1 = drag (lagging)
-fn cognitiveJerkFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn cognitiveJerkFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const ticks: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1883,7 +1911,7 @@ fn cognitiveJerkFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (p-adic p n) → v_p(n), the p-adic valuation (highest power of p dividing n)
-fn padicFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn padicFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const p: u64 = @intCast(@max(@as(i48, 2), args[0].asInt()));
@@ -1892,7 +1920,7 @@ fn padicFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (p-adic-depth n) → (v2 v3 v5 v7 v1069) — multi-prime ultrametric fingerprint
-fn padicDepthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn padicDepthFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     const n: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1909,7 +1937,7 @@ fn padicDepthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (separation distance budget) → -1 (spacelike), 0 (lightlike), 1 (timelike)
-fn separationFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn separationFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const dist: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1918,7 +1946,7 @@ fn separationFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (cone-volume branching depth) → number of nodes reachable
-fn coneVolumeFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn coneVolumeFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const b: u64 = @intCast(@max(@as(i48, 1), args[0].asInt()));
@@ -1928,7 +1956,7 @@ fn coneVolumeFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (info-density nodes volume) → density × 1000 (fixed-point)
-fn infoDensityFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn infoDensityFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const nodes: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1937,7 +1965,7 @@ fn infoDensityFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (causal-depth branching target-volume) → ticks needed
-fn causalDepthFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn causalDepthFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const b: u64 = @intCast(@max(@as(i48, 1), args[0].asInt()));
@@ -1946,7 +1974,7 @@ fn causalDepthFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (padic-cones depth) → [vol₂ vol₃ vol₅ vol₇ vol₁₀₆₉]
-fn padicConesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn padicConesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     const d: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -1965,7 +1993,7 @@ fn padicConesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (jepsen/nemesis! kind) → previous-kind
 /// Kinds: :none :trit-corrupt :trit-duplicate :version-rewind :eval-drop :causal-invert
-fn jepsenNemesisFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn jepsenNemesisFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const kind: jepsen.NemesisKind = if (args[0].isKeyword()) blk: {
         const name = gc.getString(args[0].asKeywordId());
@@ -1986,7 +2014,7 @@ fn jepsenNemesisFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (jepsen/gen n seed) → vector of [op-kind detail] pairs
-fn jepsenGenFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn jepsenGenFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const n: usize = @intCast(@max(@as(i48, 1), args[0].asInt()));
@@ -2013,7 +2041,7 @@ fn jepsenGenFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (jepsen/record! op-kind result trit-before trit-after version-id) → causal-ts
-fn jepsenRecordFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn jepsenRecordFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = gc;
     if (args.len < 4) return error.ArityError;
     const op: jepsen.OpKind = if (args[0].isInt())
@@ -2034,7 +2062,7 @@ fn jepsenRecordFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (jepsen/check) → {:valid? bool :violations N :ops-checked N :nemesis-events N :max-trit-drift N}
-fn jepsenCheckFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn jepsenCheckFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const result = jepsen.check();
 
@@ -2053,14 +2081,14 @@ fn jepsenCheckFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (jepsen/reset!) → nil
-fn jepsenResetFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn jepsenResetFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     jepsen.resetHistory();
     return Value.makeNil();
 }
 
 /// (jepsen/history) → vector of maps (recent history entries)
-fn jepsenHistoryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn jepsenHistoryFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const hist = jepsen.getHistory();
     const obj = try gc.allocObj(.vector);
@@ -2093,7 +2121,7 @@ fn jepsenHistoryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (jepsen/check-unique-ids) → {:valid? bool :attempted N :duplicated N :min-id N :max-id N}
-fn jepsenCheckUniqueIdsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn jepsenCheckUniqueIdsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const r = jepsen.checkUniqueIds();
     const obj = try gc.allocObj(.map);
@@ -2111,7 +2139,7 @@ fn jepsenCheckUniqueIdsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (jepsen/check-counter) → {:valid? bool :reads N :errors N :lower N :upper N}
-fn jepsenCheckCounterFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn jepsenCheckCounterFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const r = jepsen.checkCounter();
     const obj = try gc.allocObj(.map);
@@ -2129,7 +2157,7 @@ fn jepsenCheckCounterFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (jepsen/check-cas-register) → {:valid? bool :reads N :writes N :cas-ops N :stale-reads N :lost-writes N :value N}
-fn jepsenCheckCasRegisterFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn jepsenCheckCasRegisterFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const r = jepsen.checkCasRegister();
     const obj = try gc.allocObj(.map);
@@ -2179,14 +2207,14 @@ fn rngToVec(rng: substrate.SplitRng, gc: *GC) !Value {
 }
 
 /// (split-rng seed) → [seed gamma] — create a splittable RNG from seed
-fn splitRngFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn splitRngFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.TypeError;
     const seed: u64 = @intCast(@max(@as(i48, 0), args[0].asInt()));
     return rngToVec(substrate.SplitRng.init(seed), gc);
 }
 
 /// (rng-next rng) → [value new-rng] — next value + advanced state
-fn rngNextFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn rngNextFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     var rng = rngFromVec(args, gc) orelse return error.TypeError;
     const val = rng.next();
     const obj = try gc.allocObj(.vector);
@@ -2196,7 +2224,7 @@ fn rngNextFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (rng-split rng) → [left-rng right-rng] — fork into two independent streams
-fn rngSplitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn rngSplitFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     var rng = rngFromVec(args, gc) orelse return error.TypeError;
     const right = rng.split();
     const obj = try gc.allocObj(.vector);
@@ -2206,7 +2234,7 @@ fn rngSplitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (rng-trit rng) → [trit new-rng] — next GF(3) trit + advanced state
-fn rngTritFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn rngTritFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     var rng = rngFromVec(args, gc) orelse return error.TypeError;
     const gf3 = rng.nextGF3();
     const obj = try gc.allocObj(.vector);
@@ -2219,7 +2247,7 @@ fn rngTritFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // CORE DATA OPS
 // ============================================================================
 
-fn dissocFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn dissocFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const src = args[0].asObj();
@@ -2240,7 +2268,7 @@ fn dissocFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn updateFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn updateFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const src = args[0].asObj();
@@ -2277,7 +2305,7 @@ fn updateFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn mergeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn mergeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return Value.makeNil();
     const obj = try gc.allocObj(.map);
     for (args) |a| {
@@ -2304,7 +2332,7 @@ fn mergeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn selectKeysFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn selectKeysFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj() or !args[1].isObj()) return error.TypeError;
     const src = args[0].asObj();
@@ -2328,7 +2356,7 @@ fn selectKeysFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn keysFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn keysFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return error.TypeError;
@@ -2341,7 +2369,7 @@ fn keysFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn valsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn valsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return error.TypeError;
@@ -2354,7 +2382,7 @@ fn valsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn containsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn containsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (args[0].isNil()) return Value.makeBool(false);
     if (!args[0].isObj()) return error.TypeError;
@@ -2385,23 +2413,24 @@ fn containsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // SEQUENCE EXTRAS
 // ============================================================================
 
-fn secondFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn secondFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = try seqItems(args[0], gc);
     return if (items.len > 1) items[1] else Value.makeNil();
 }
 
-fn lastFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn lastFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = try seqItems(args[0], gc);
     return if (items.len > 0) items[items.len - 1] else Value.makeNil();
 }
 
-fn someFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn someFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const f = args[0];
     const items = try seqItems(args[1], gc);
     for (items) |item| {
+        try res.tick();
         var a = [_]Value{item};
         const r = try eval_mod.apply(f, &a, env, gc);
         if (r.isTruthy()) return r;
@@ -2409,11 +2438,12 @@ fn someFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeNil();
 }
 
-fn everyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn everyFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const f = args[0];
     const items = try seqItems(args[1], gc);
     for (items) |item| {
+        try res.tick();
         var a = [_]Value{item};
         const r = try eval_mod.apply(f, &a, env, gc);
         if (!r.isTruthy()) return Value.makeBool(false);
@@ -2421,13 +2451,13 @@ fn everyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeBool(true);
 }
 
-fn notAnyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn notAnyFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
-    const r = try someFn(args, gc, env);
+    const r = try someFn(args, gc, env, undefined);
     return Value.makeBool(r.isNil());
 }
 
-fn sortFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn sortFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = try seqItems(args[0], gc);
     const obj = try gc.allocObj(.vector);
@@ -2436,7 +2466,7 @@ fn sortFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn sortByFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn sortByFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const keyfn = args[0];
     const items = try seqItems(args[1], gc);
@@ -2447,6 +2477,7 @@ fn sortByFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     const keys_arr = try alloc.alloc(Value, items.len);
     defer alloc.free(keys_arr);
     for (items, 0..) |item, i| {
+        try res.tick();
         var a = [_]Value{item};
         keys_arr[i] = try eval_mod.apply(keyfn, &a, env, gc);
     }
@@ -2485,11 +2516,12 @@ fn valueLessThanSimple(a: Value, b: Value, gc: *GC) bool {
     return false;
 }
 
-fn distinctFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn distinctFn(args: []Value, gc: *GC, _: *Env, res: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = try seqItems(args[0], gc);
     const obj = try gc.allocObj(.vector);
     for (items) |item| {
+        try res.tick();
         var dup = false;
         for (obj.data.vector.items.items) |existing| {
             if (semantics.structuralEq(item, existing, gc)) { dup = true; break; }
@@ -2499,7 +2531,7 @@ fn distinctFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn flattenFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn flattenFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const obj = try gc.allocObj(.vector);
     try flattenInto(args[0], obj, gc);
@@ -2523,12 +2555,13 @@ fn flattenInto(val: Value, obj: *value.Obj, gc: *GC) !void {
     for (items) |item| try flattenInto(item, obj, gc);
 }
 
-fn mapcatFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn mapcatFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const f = args[0];
     const items = try seqItems(args[1], gc);
     const obj = try gc.allocObj(.vector);
     for (items) |item| {
+        try res.tick();
         var a = [_]Value{item};
         const r = try eval_mod.apply(f, &a, env, gc);
         if (r.isObj()) {
@@ -2546,7 +2579,7 @@ fn mapcatFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn interleaveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn interleaveFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     var seqs: [8][]Value = undefined;
     var min_len: usize = std.math.maxInt(usize);
@@ -2564,19 +2597,20 @@ fn interleaveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn interposeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn interposeFn(args: []Value, gc: *GC, _: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const sep = args[0];
     const items = try seqItems(args[1], gc);
     const obj = try gc.allocObj(.vector);
     for (items, 0..) |item, i| {
+        try res.tick();
         if (i > 0) try obj.data.vector.items.append(gc.allocator, sep);
         try obj.data.vector.items.append(gc.allocator, item);
     }
     return Value.makeObj(obj);
 }
 
-fn partitionFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn partitionFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     const n: usize = std.math.cast(usize, @max(@as(i48, 1), args[0].asInt())) orelse 1;
@@ -2591,11 +2625,12 @@ fn partitionFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn frequenciesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn frequenciesFn(args: []Value, gc: *GC, _: *Env, res: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = try seqItems(args[0], gc);
     const obj = try gc.allocObj(.map);
     for (items) |item| {
+        try res.tick();
         var found = false;
         for (obj.data.map.keys.items, 0..) |k, i| {
             if (semantics.structuralEq(k, item, gc)) {
@@ -2613,12 +2648,13 @@ fn frequenciesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn groupByFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn groupByFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const f = args[0];
     const items = try seqItems(args[1], gc);
     const obj = try gc.allocObj(.map);
     for (items) |item| {
+        try res.tick();
         var a = [_]Value{item};
         const key = try eval_mod.apply(f, &a, env, gc);
         var found = false;
@@ -2644,7 +2680,7 @@ fn groupByFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 // TYPE OPS
 // ============================================================================
 
-fn nameFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn nameFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isString()) return args[0];
     if (args[0].isKeyword()) return Value.makeString(args[0].asKeywordId());
@@ -2653,7 +2689,7 @@ fn nameFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return error.TypeError;
 }
 
-fn keywordFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn keywordFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isKeyword()) return args[0];
     if (args[0].isString()) return Value.makeKeyword(args[0].asStringId());
@@ -2662,7 +2698,7 @@ fn keywordFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return error.TypeError;
 }
 
-fn symbolFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn symbolFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isSymbol()) return args[0];
     if (args[0].isString()) {
@@ -2675,12 +2711,12 @@ fn symbolFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return error.TypeError;
 }
 
-fn typeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn typeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeString(try gc.internString(valueTypeName(args[0])));
 }
 
-fn identityFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn identityFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return args[0];
 }
@@ -2689,7 +2725,7 @@ fn identityFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // ATOM / REFERENCE TYPES
 // ============================================================================
 
-fn atomFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn atomFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const obj = try gc.allocObj(.atom);
     obj.data.atom.val = args[0];
@@ -2698,7 +2734,7 @@ fn atomFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// Polymorphic perception: deref any IDeref-able reference type.
 /// atom → current value, lazy_seq/delay → cached or force, volatile → value
-fn derefFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn derefFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
@@ -2711,7 +2747,7 @@ fn derefFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     };
 }
 
-fn swapFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn swapFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
@@ -2727,7 +2763,7 @@ fn swapFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return new_val;
 }
 
-fn resetFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn resetFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
@@ -2736,7 +2772,7 @@ fn resetFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return args[1];
 }
 
-fn compareAndSetFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn compareAndSetFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
@@ -2760,7 +2796,7 @@ fn cFopen(path: []const u8, mode: [*c]const u8) ?*std.c.FILE {
     return std.c.fopen(@ptrCast(&pbuf), mode);
 }
 
-fn slurpFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn slurpFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const path = gc.getString(args[0].asStringId());
@@ -2777,7 +2813,7 @@ fn slurpFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(try gc.internString(contents.items));
 }
 
-fn spitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn spitFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const path = gc.getString(args[0].asStringId());
@@ -2793,7 +2829,7 @@ fn spitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeNil();
 }
 
-fn readLineFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn readLineFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const stdin = compat.stdinFile();
     var buf: [4096]u8 = undefined;
     var len: usize = 0;
@@ -2812,7 +2848,7 @@ extern "c" fn pclose(stream: *std.c.FILE) c_int;
 
 /// (shell cmd) → {:out "stdout" :exit code} — execute shell command via popen
 /// (sh cmd) — alias
-fn shellFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn shellFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const cmd = gc.getString(args[0].asStringId());
@@ -2846,14 +2882,14 @@ fn shellFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // MATH EXTRAS
 // ============================================================================
 
-fn absFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn absFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isInt()) return Value.makeInt(if (args[0].asInt() < 0) -args[0].asInt() else args[0].asInt());
     if (args[0].isFloat()) return Value.makeFloat(@abs(args[0].asFloat()));
     return error.TypeError;
 }
 
-fn minFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn minFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return error.ArityError;
     var best = args[0];
     for (args[1..]) |a| {
@@ -2862,7 +2898,7 @@ fn minFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return best;
 }
 
-fn maxFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn maxFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return error.ArityError;
     var best = args[0];
     for (args[1..]) |a| {
@@ -2880,14 +2916,14 @@ fn numLt(a: Value, b: Value) bool {
 
 var rand_state: u64 = 42;
 
-fn randFn(_: []Value, _: *GC, _: *Env) anyerror!Value {
+fn randFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     const r = substrate.splitmix_next(rand_state);
     rand_state = r.next;
     const f: f64 = @as(f64, @floatFromInt(r.val >> 11)) / @as(f64, @floatFromInt(@as(u64, 1) << 53));
     return Value.makeFloat(f);
 }
 
-fn randIntFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn randIntFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.TypeError;
     const n = args[0].asInt();
     if (n <= 0) return error.ArityError;
@@ -2900,28 +2936,28 @@ fn randIntFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // BITWISE
 // ============================================================================
 
-fn bitAndFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitAndFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     return Value.makeInt(args[0].asInt() & args[1].asInt());
 }
 
-fn bitOrFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitOrFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     return Value.makeInt(args[0].asInt() | args[1].asInt());
 }
 
-fn bitXorFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitXorFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     return Value.makeInt(args[0].asInt() ^ args[1].asInt());
 }
 
-fn bitShiftLeftFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitShiftLeftFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const shift: u6 = std.math.cast(u6, @max(@as(i48, 0), args[1].asInt())) orelse return error.ArityError;
     return Value.makeInt(args[0].asInt() << shift);
 }
 
-fn bitShiftRightFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitShiftRightFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const shift: u6 = std.math.cast(u6, @max(@as(i48, 0), args[1].asInt())) orelse return error.ArityError;
     return Value.makeInt(args[0].asInt() >> shift);
@@ -2931,7 +2967,7 @@ fn bitShiftRightFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // STRING EXTRAS (SIMD-backed)
 // ============================================================================
 
-fn reFindFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn reFindFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
     const pat_str = gc.getString(args[0].asStringId());
@@ -2941,7 +2977,7 @@ fn reFindFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(try gc.internString(result));
 }
 
-fn countStrFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn countStrFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
     const s = gc.getString(args[0].asStringId());
@@ -2971,7 +3007,7 @@ fn matchResultToValue(r: pat_mod.MatchResult, gc: *GC) !Value {
 }
 
 /// (re-match engine pattern input) → {:matched? bool :consumed N :trit T}
-fn reMatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn reMatchFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.ArityError;
     if (!args[0].isKeyword() or !args[1].isString() or !args[2].isString()) return error.TypeError;
     const engine_name = gc.getString(args[0].asKeywordId());
@@ -2985,7 +3021,7 @@ fn reMatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (peg-match engine pattern input) → {:matched? bool :consumed N :trit T}
-fn pegMatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn pegMatchFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.ArityError;
     if (!args[0].isKeyword() or !args[1].isString() or !args[2].isString()) return error.TypeError;
     const engine_name = gc.getString(args[0].asKeywordId());
@@ -2999,7 +3035,7 @@ fn pegMatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (match-all pattern input) → vector of 6 results, one per engine
-fn matchAllFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn matchAllFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
     const pat = gc.getString(args[0].asStringId());
@@ -3025,7 +3061,7 @@ fn matchAllFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // HOF COMBINATORS (using partial_fn ObjKind)
 // ============================================================================
 
-fn partialFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn partialFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     const obj = try gc.allocObj(.partial_fn);
     obj.data.partial_fn.func = args[0];
@@ -3035,7 +3071,7 @@ fn partialFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn compFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn compFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return error.ArityError;
     if (args.len == 1) return args[0];
     const obj = try gc.allocObj(.partial_fn);
@@ -3046,7 +3082,7 @@ fn compFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn juxtFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn juxtFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return error.ArityError;
     const obj = try gc.allocObj(.partial_fn);
     obj.data.partial_fn.func = Value.makeNil();
@@ -3056,7 +3092,7 @@ fn juxtFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn complementFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn complementFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const obj = try gc.allocObj(.partial_fn);
     obj.data.partial_fn.func = Value.makeNil();
@@ -3066,7 +3102,7 @@ fn complementFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn constantlyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn constantlyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const obj = try gc.allocObj(.partial_fn);
     obj.data.partial_fn.func = Value.makeNil();
@@ -3080,7 +3116,7 @@ fn constantlyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // LAZY SEQUENCES
 // ============================================================================
 
-fn iterateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn iterateFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const obj = try gc.allocObj(.lazy_seq);
     const payload = try gc.allocObj(.vector);
@@ -3092,7 +3128,7 @@ fn iterateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn repeatFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn repeatFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 and args.len != 2) return error.ArityError;
     const obj = try gc.allocObj(.lazy_seq);
     const payload = try gc.allocObj(.vector);
@@ -3104,7 +3140,7 @@ fn repeatFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn repeatedlyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn repeatedlyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const obj = try gc.allocObj(.lazy_seq);
     const payload = try gc.allocObj(.vector);
@@ -3115,14 +3151,14 @@ fn repeatedlyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn lazySeqFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn lazySeqFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const obj = try gc.allocObj(.lazy_seq);
     obj.data.lazy_seq.thunk = args[0];
     return Value.makeObj(obj);
 }
 
-fn realizedFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn realizedFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return Value.makeBool(true);
     if (args[0].asObj().kind != .lazy_seq) return Value.makeBool(true);
@@ -3133,12 +3169,13 @@ fn realizedFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // ADDITIONAL SEQUENCE OPS
 // ============================================================================
 
-fn takeWhileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn takeWhileFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const f = args[0];
     const items = try seqItems(args[1], gc);
     const obj = try gc.allocObj(.vector);
     for (items) |item| {
+        try res.tick();
         var a = [_]Value{item};
         const r = try eval_mod.apply(f, &a, env, gc);
         if (!r.isTruthy()) break;
@@ -3147,13 +3184,14 @@ fn takeWhileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn dropWhileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn dropWhileFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const f = args[0];
     const items = try seqItems(args[1], gc);
     const obj = try gc.allocObj(.vector);
     var dropping = true;
     for (items) |item| {
+        try res.tick();
         if (dropping) {
             var a = [_]Value{item};
             const r = try eval_mod.apply(f, &a, env, gc);
@@ -3164,7 +3202,7 @@ fn dropWhileFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn zipmapFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn zipmapFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const keys = try seqItems(args[0], gc);
     const vals = try seqItems(args[1], gc);
@@ -3181,36 +3219,36 @@ fn zipmapFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // ADDITIONAL PREDICATES
 // ============================================================================
 
-fn isIntegerP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isIntegerP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isInt());
 }
 
-fn isFloatP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isFloatP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isFloat());
 }
 
-fn isPosP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isPosP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isInt()) return Value.makeBool(args[0].asInt() > 0);
     if (args[0].isFloat()) return Value.makeBool(args[0].asFloat() > 0);
     return error.TypeError;
 }
 
-fn isNegP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isNegP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isInt()) return Value.makeBool(args[0].asInt() < 0);
     if (args[0].isFloat()) return Value.makeBool(args[0].asFloat() < 0);
     return error.TypeError;
 }
 
-fn isEvenP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isEvenP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.TypeError;
     return Value.makeBool(@rem(args[0].asInt(), 2) == 0);
 }
 
-fn isOddP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isOddP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.TypeError;
     return Value.makeBool(@rem(args[0].asInt(), 2) != 0);
 }
@@ -3220,7 +3258,7 @@ fn isOddP(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (is expr) — assert expr is truthy; reports pass/fail
-fn isFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn isFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const val = args[0];
     const stderr = compat.stderrFile();
@@ -3250,7 +3288,7 @@ fn isFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (is= expected actual) — assert structural equality
-fn isEqualFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn isEqualFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const stderr = compat.stderrFile();
     if (semantics.structuralEq(args[0], args[1], gc)) {
@@ -3278,7 +3316,7 @@ fn isEqualFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (run-tests) — print summary and return {:pass N :fail N}
-fn runTestsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn runTestsFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const counts = eval_mod.getTestCounts();
     const stderr = compat.stderrFile();
     var buf: [64]u8 = undefined;
@@ -3297,21 +3335,21 @@ fn runTestsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 // NAMESPACE BUILTINS
 // ============================================================================
 
-fn currentNsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn currentNsFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (eval_mod.ns_registry) |reg| {
         return Value.makeSymbol(try gc.internString(reg.currentName()));
     }
     return Value.makeSymbol(try gc.internString("user"));
 }
 
-fn nsNameFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn nsNameFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (eval_mod.ns_registry) |reg| {
         return Value.makeString(try gc.internString(reg.currentName()));
     }
     return Value.makeString(try gc.internString("user"));
 }
 
-fn allNsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn allNsFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.vector);
     if (eval_mod.ns_registry) |reg| {
         var it = reg.namespaces.keyIterator();
@@ -3324,7 +3362,7 @@ fn allNsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (require [ns :as alias]) — load namespace and alias it
 /// Simplified: just creates the alias mapping
-fn requireFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn requireFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     var reg = eval_mod.ns_registry orelse return Value.makeNil();
     for (args) |arg| {
@@ -3377,7 +3415,7 @@ fn colorToVector(color: colorspace_mod.Color, gc: *GC) !Value {
 }
 
 /// (*cs*) — return current colorspace name as symbol
-fn currentCsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn currentCsFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (eval_mod.cs_registry) |reg| {
         return Value.makeSymbol(try gc.internString(reg.currentName()));
     }
@@ -3385,7 +3423,7 @@ fn currentCsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (cs-color) or (cs-color name) — return [L a b alpha] of current or named colorspace
-fn csColorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn csColorFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const reg = eval_mod.cs_registry orelse return Value.makeNil();
     if (args.len == 0) {
         return colorToVector(reg.currentColor(), gc);
@@ -3400,13 +3438,13 @@ fn csColorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (cs-complement) — return [L a b alpha] of perceptual complement of current focus
-fn csComplementFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn csComplementFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const reg = eval_mod.cs_registry orelse return Value.makeNil();
     return colorToVector(reg.currentColor().complement(), gc);
 }
 
 /// (cs-distance name1 name2) — perceptual distance between two colorspaces
-fn csDistanceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn csDistanceFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     const reg = eval_mod.cs_registry orelse return Value.makeNil();
     const n1 = if (args[0].isSymbol()) gc.getString(args[0].asSymbolId()) else if (args[0].isKeyword()) gc.getString(args[0].asKeywordId()) else return error.TypeError;
@@ -3417,7 +3455,7 @@ fn csDistanceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (cs-hue) or (cs-hue name) — hue angle in degrees [0, 360)
-fn csHueFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn csHueFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const reg = eval_mod.cs_registry orelse return Value.makeNil();
     if (args.len == 0) return Value.makeFloat(reg.currentColor().hue());
     if (args[0].isSymbol() or args[0].isKeyword()) {
@@ -3428,7 +3466,7 @@ fn csHueFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (cs-chroma) or (cs-chroma name) — chroma (saturation) magnitude
-fn csChromaFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn csChromaFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const reg = eval_mod.cs_registry orelse return Value.makeNil();
     if (args.len == 0) return Value.makeFloat(reg.currentColor().chroma());
     if (args[0].isSymbol() or args[0].isKeyword()) {
@@ -3439,7 +3477,7 @@ fn csChromaFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (cs-resolve sym) — resolve symbol through color manifold (nearest colorspace with binding)
-fn csResolveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn csResolveFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const reg = eval_mod.cs_registry orelse return Value.makeNil();
     const name = if (args[0].isSymbol()) gc.getString(args[0].asSymbolId()) else if (args[0].isString()) gc.getString(args[0].asStringId()) else return error.TypeError;
@@ -3447,7 +3485,7 @@ fn csResolveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (cs-radius) or (cs-radius new-radius) — get or set resolution radius
-fn csRadiusFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn csRadiusFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (eval_mod.cs_registry) |*reg| {
         if (args.len == 0) return Value.makeFloat(reg.radius);
         if (args.len == 1) {
@@ -3477,7 +3515,7 @@ fn toF32(v: Value) ?f32 {
 }
 
 /// (color L a b) or (color L a b alpha) — construct a first-class OKLAB color
-fn colorCtorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn colorCtorFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.ArityError;
     const L = toF32(args[0]) orelse return error.TypeError;
     const a = toF32(args[1]) orelse return error.TypeError;
@@ -3487,13 +3525,13 @@ fn colorCtorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (color? x) — true if x is a first-class color value
-fn colorPredFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn colorPredFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(asColor(args[0]) != null);
 }
 
 /// (color-blend c1 c2 t) — perceptual blend in OKLAB
-fn colorBlendFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn colorBlendFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const c1 = asColor(args[0]) orelse return error.TypeError;
     const c2 = asColor(args[1]) orelse return error.TypeError;
@@ -3502,14 +3540,14 @@ fn colorBlendFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (color-complement c) — 180° rotation in a-b plane + lightness inversion
-fn colorComplementFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn colorComplementFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const c = asColor(args[0]) orelse return error.TypeError;
     return makeColorValue(c.complement(), gc);
 }
 
 /// (color-analogous c angle-deg) — rotate in a-b chroma plane
-fn colorAnalogousFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn colorAnalogousFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const c = asColor(args[0]) orelse return error.TypeError;
     const angle = toF32(args[1]) orelse return error.TypeError;
@@ -3517,7 +3555,7 @@ fn colorAnalogousFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (color-triadic c) — [c c+120° c+240°]
-fn colorTriadicFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn colorTriadicFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const c = asColor(args[0]) orelse return error.TypeError;
     const tri = c.triadic();
@@ -3529,7 +3567,7 @@ fn colorTriadicFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (color-distance c1 c2) — Euclidean distance in OKLAB (≈ perceptual JND)
-fn colorDistanceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn colorDistanceFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const c1 = asColor(args[0]) orelse return error.TypeError;
     const c2 = asColor(args[1]) orelse return error.TypeError;
@@ -3537,36 +3575,36 @@ fn colorDistanceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (color-hue c) — hue angle in degrees [0,360)
-fn colorHueFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn colorHueFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const c = asColor(args[0]) orelse return error.TypeError;
     return Value.makeFloat(c.hue());
 }
 
 /// (color-chroma c) — chroma magnitude
-fn colorChromaFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn colorChromaFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const c = asColor(args[0]) orelse return error.TypeError;
     return Value.makeFloat(c.chroma());
 }
 
 /// (color-L c), (color-a c), (color-b c), (color-alpha c) — accessors
-fn colorLFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn colorLFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const c = asColor(args[0]) orelse return error.TypeError;
     return Value.makeFloat(c.L);
 }
-fn colorAFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn colorAFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const c = asColor(args[0]) orelse return error.TypeError;
     return Value.makeFloat(c.a);
 }
-fn colorBFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn colorBFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const c = asColor(args[0]) orelse return error.TypeError;
     return Value.makeFloat(c.b);
 }
-fn colorAlphaFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn colorAlphaFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const c = asColor(args[0]) orelse return error.TypeError;
     return Value.makeFloat(c.alpha);
@@ -3577,14 +3615,14 @@ fn colorAlphaFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (re-pattern str) — identity: pattern is the string itself
-fn rePatternFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn rePatternFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     return args[0];
 }
 
 /// (re-matches pattern string) — match entire string, return match or nil
-fn reMatchesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn reMatchesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
     const pat_str = gc.getString(args[0].asStringId());
@@ -3594,7 +3632,7 @@ fn reMatchesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (re-seq pattern text) — return list of all non-overlapping matches
-fn reSeqFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn reSeqFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.TypeError;
     const pat_str = gc.getString(args[0].asStringId());
@@ -3615,7 +3653,7 @@ fn reSeqFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (get-in m [k1 k2 ...]) — nested lookup
-fn getInFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn getInFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     var current = args[0];
     const keys = try seqItems(args[1], gc);
@@ -3645,7 +3683,7 @@ fn getInFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (assoc-in m [k1 k2 ...] v) — nested assoc
-fn assocInFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn assocInFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const keys = try seqItems(args[1], gc);
     if (keys.len == 0) return args[0];
@@ -3659,7 +3697,7 @@ fn assocInFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     const rest_keys_obj = try gc.allocObj(.vector);
     try rest_keys_obj.data.vector.items.appendSlice(gc.allocator, keys[1..]);
     var inner_args = [3]Value{ inner, Value.makeObj(rest_keys_obj), args[2] };
-    const nested = try assocInFn(&inner_args, gc, env);
+    const nested = try assocInFn(&inner_args, gc, env, undefined);
     return assocSingle(args[0], keys[0], nested, gc);
 }
 
@@ -3700,28 +3738,29 @@ fn assocSingle(m: Value, k: Value, v: Value, gc: *GC) !Value {
 }
 
 /// (update-in m [k1 k2 ...] f) — apply f to nested value
-fn updateInFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn updateInFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.ArityError;
     const keys = try seqItems(args[1], gc);
     if (keys.len == 0) return args[0];
     // Get the current nested value
     var get_in_args = [_]Value{ args[0], args[1] };
-    const current = try getInFn(&get_in_args, gc, env);
+    const current = try getInFn(&get_in_args, gc, env, undefined);
     // Apply f to it
     var fn_args = [_]Value{current};
     const new_val = try eval_mod.apply(args[2], &fn_args, env, gc);
     // assoc-in the result
     var assoc_args = [_]Value{ args[0], args[1], new_val };
-    return assocInFn(&assoc_args, gc, env);
+    return assocInFn(&assoc_args, gc, env, undefined);
 }
 
 /// (reduce-kv f init map) — reduce over map entries as (f acc k v)
-fn reduceKvFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn reduceKvFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[2].isObj() or args[2].asObj().kind != .map) return error.TypeError;
     const m = args[2].asObj();
     var acc = args[1];
     for (m.data.map.keys.items, 0..) |k, i| {
+        try res.tick();
         var fn_args = [_]Value{ acc, k, m.data.map.vals.items[i] };
         acc = try eval_mod.apply(args[0], &fn_args, env, gc);
     }
@@ -3733,7 +3772,7 @@ fn reduceKvFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 // ============================================================================
 
 /// (transient coll) — return a mutable version of the collection
-fn transientFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn transientFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const src = args[0].asObj();
@@ -3762,7 +3801,7 @@ fn transientFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (persistent! tcoll) — return an immutable version
-fn persistentBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn persistentBangFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
@@ -3772,7 +3811,7 @@ fn persistentBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (conj! tcoll val) — mutate: add val to transient collection
-fn conjBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn conjBangFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
@@ -3787,7 +3826,7 @@ fn conjBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (assoc! tmap key val) — mutate: set key→val in transient map
-fn assocBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn assocBangFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
@@ -3805,7 +3844,7 @@ fn assocBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (dissoc! tmap key) — mutate: remove key from transient map
-fn dissocBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn dissocBangFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
@@ -3821,7 +3860,7 @@ fn dissocBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (transient? x) — true if x is a transient collection
-fn isTransientFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isTransientFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return Value.makeBool(false);
     return Value.makeBool(args[0].asObj().is_transient);
@@ -3832,7 +3871,7 @@ fn isTransientFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (meta obj) — return metadata map or nil
-fn metaFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn metaFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return Value.makeNil();
     if (args[0].asObj().meta) |m| return Value.makeObj(m);
@@ -3840,7 +3879,7 @@ fn metaFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (with-meta obj meta-map) — return a copy of obj with metadata attached
-fn withMetaFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn withMetaFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const src = args[0].asObj();
@@ -3860,7 +3899,7 @@ fn withMetaFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (vary-meta obj f & args) — apply f to metadata: (with-meta obj (apply f (meta obj) args))
-fn varyMetaFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn varyMetaFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const current_meta = if (args[0].asObj().meta) |m| Value.makeObj(m) else Value.makeNil();
@@ -3874,14 +3913,14 @@ fn varyMetaFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     const new_meta = try eval_mod.apply(args[1], fn_args_buf[0 .. 1 + extra], env, gc);
     // with-meta
     var wm_args = [_]Value{ args[0], new_meta };
-    return withMetaFn(&wm_args, gc, env);
+    return withMetaFn(&wm_args, gc, env, undefined);
 }
 
 // ============================================================================
 // BATCH: 30 trivial builtins for jank coverage push 39% → 55%
 // ============================================================================
 
-fn seqFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn seqFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return error.TypeError;
@@ -3894,7 +3933,7 @@ fn seqFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     };
 }
 
-fn vecFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn vecFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeObj(try gc.allocObj(.vector));
     if (!args[0].isObj()) return error.TypeError;
@@ -3904,7 +3943,7 @@ fn vecFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn nextFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn nextFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return Value.makeNil();
     if (items.len <= 1) return Value.makeNil();
@@ -3913,7 +3952,7 @@ fn nextFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn butlastFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn butlastFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return Value.makeNil();
     if (items.len <= 1) return Value.makeNil();
@@ -3922,7 +3961,7 @@ fn butlastFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn ffirstFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn ffirstFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const outer = getItems(args[0]) orelse return Value.makeNil();
     if (outer.len == 0) return Value.makeNil();
@@ -3930,14 +3969,14 @@ fn ffirstFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (inner.len > 0) inner[0] else Value.makeNil();
 }
 
-fn fnextFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn fnextFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return Value.makeNil();
     if (items.len < 2) return Value.makeNil();
     return items[1];
 }
 
-fn peekFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn peekFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return Value.makeNil();
     if (items.len == 0) return Value.makeNil();
@@ -3946,7 +3985,7 @@ fn peekFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return items[0];
 }
 
-fn popFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn popFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return error.TypeError;
     if (items.len == 0) return error.TypeError;
@@ -3960,12 +3999,13 @@ fn popFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn disjFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn disjFn(args: []Value, gc: *GC, _: *Env, res: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .set) return error.TypeError;
     const items = args[0].asObj().data.set.items.items;
     const obj = try gc.allocObj(.set);
     for (items) |item| {
+        try res.tick();
         var keep = true;
         for (args[1..]) |to_remove| {
             if (semantics.structuralEq(item, to_remove, gc)) { keep = false; break; }
@@ -3975,7 +4015,7 @@ fn disjFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn emptyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn emptyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return Value.makeNil();
     return switch (args[0].asObj().kind) {
@@ -3987,7 +4027,7 @@ fn emptyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     };
 }
 
-fn notEmptyFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn notEmptyFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeNil();
     if (!args[0].isObj()) return args[0];
@@ -3995,7 +4035,7 @@ fn notEmptyFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return if (items.len == 0) Value.makeNil() else args[0];
 }
 
-fn remFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn remFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (args[0].isInt() and args[1].isInt()) {
         if (args[1].asInt() == 0) return error.DivisionByZero;
@@ -4004,7 +4044,7 @@ fn remFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return error.TypeError;
 }
 
-fn quotFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn quotFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (args[0].isInt() and args[1].isInt()) {
         if (args[1].asInt() == 0) return error.DivisionByZero;
@@ -4013,46 +4053,46 @@ fn quotFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return error.TypeError;
 }
 
-fn hashFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn hashFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeInt(@as(i48, @truncate(@as(i64, @bitCast(substrate.mix64(args[0].bits))))));
 }
 
-fn charFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn charFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isInt()) return Value.makeInt(args[0].asInt() & 0xFF);
     return error.TypeError;
 }
 
-fn intFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn intFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isInt()) return args[0];
     if (args[0].isFloat()) return Value.makeInt(@intFromFloat(args[0].asFloat()));
     return error.TypeError;
 }
 
-fn longFn(args: []Value, _: *GC, _: *Env) anyerror!Value { return intFn(args, undefined, undefined); }
-fn doubleFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn longFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return intFn(args, undefined, undefined, undefined); }
+fn doubleFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isFloat()) return args[0];
     if (args[0].isInt()) return Value.makeFloat(@floatFromInt(args[0].asInt()));
     return error.TypeError;
 }
-fn byteFn(args: []Value, _: *GC, _: *Env) anyerror!Value { return charFn(args, undefined, undefined); }
-fn numFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn byteFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return charFn(args, undefined, undefined, undefined); }
+fn numFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return args[0]; // identity for numeric types
 }
 
-fn isTrueP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isTrueP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isBool() and args[0].asBool());
 }
-fn isFalseP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isFalseP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isBool() and !args[0].asBool());
 }
-fn isCollP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isCollP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return Value.makeBool(false);
     return Value.makeBool(switch (args[0].asObj().kind) {
@@ -4060,23 +4100,23 @@ fn isCollP(args: []Value, _: *GC, _: *Env) anyerror!Value {
         else => false,
     });
 }
-fn isBoolP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isBoolP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isBool());
 }
-fn isCharP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isCharP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(false); // nanoclj-zig has no char type
 }
-fn isIntP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isIntP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isInt());
 }
-fn identicalP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn identicalP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return Value.makeBool(args[0].bits == args[1].bits);
 }
-fn compareFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn compareFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (args[0].isInt() and args[1].isInt()) {
         const a = args[0].asInt();
@@ -4085,7 +4125,7 @@ fn compareFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     }
     return Value.makeInt(0);
 }
-fn formatFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn formatFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     // Simplified: just return (str args...) for now
     if (args.len == 0) return error.ArityError;
     var buf = compat.emptyList(u8);
@@ -4101,123 +4141,123 @@ fn formatFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // BATCH 2: 57 builtins for 69% jank coverage
 // ============================================================================
 
-fn notEqFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn notEqFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return Value.makeBool(!semantics.structuralEq(args[0], args[1], gc));
 }
-fn anyP(args: []Value, _: *GC, _: *Env) anyerror!Value { _ = args; return Value.makeBool(true); }
-fn someP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn anyP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { _ = args; return Value.makeBool(true); }
+fn someP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(!args[0].isNil());
 }
-fn nanP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn nanP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isFloat() and std.math.isNan(args[0].asFloat()));
 }
-fn isDoubleP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isDoubleP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isFloat());
 }
-fn seqableP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn seqableP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil() or args[0].isString()) return Value.makeBool(true);
     if (!args[0].isObj()) return Value.makeBool(false);
     return Value.makeBool(switch (args[0].asObj().kind) { .list, .vector, .map, .set => true, else => false });
 }
-fn countedP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn countedP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return Value.makeBool(false);
     return Value.makeBool(switch (args[0].asObj().kind) { .list, .vector, .map, .set => true, else => false });
 }
-fn associativeP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn associativeP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return Value.makeBool(false);
     return Value.makeBool(switch (args[0].asObj().kind) { .map, .vector => true, else => false });
 }
-fn identP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn identP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isKeyword() or args[0].isSymbol());
 }
-fn ifnP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn ifnP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isKeyword()) return Value.makeBool(true);
     if (!args[0].isObj()) return Value.makeBool(false);
     return Value.makeBool(switch (args[0].asObj().kind) { .function, .bc_closure, .builtin_ref, .partial_fn => true, else => false });
 }
-fn qualIdentP(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn qualIdentP(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isKeyword()) return Value.makeBool(std.mem.indexOf(u8, gc.getString(args[0].asKeywordId()), "/") != null);
     if (args[0].isSymbol()) return Value.makeBool(std.mem.indexOf(u8, gc.getString(args[0].asSymbolId()), "/") != null);
     return Value.makeBool(false);
 }
-fn qualKeywordP(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn qualKeywordP(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isKeyword()) return Value.makeBool(false);
     return Value.makeBool(std.mem.indexOf(u8, gc.getString(args[0].asKeywordId()), "/") != null);
 }
-fn qualSymbolP(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn qualSymbolP(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isSymbol()) return Value.makeBool(false);
     return Value.makeBool(std.mem.indexOf(u8, gc.getString(args[0].asSymbolId()), "/") != null);
 }
-fn simpleIdentP(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn simpleIdentP(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isKeyword()) return Value.makeBool(std.mem.indexOf(u8, gc.getString(args[0].asKeywordId()), "/") == null);
     if (args[0].isSymbol()) return Value.makeBool(std.mem.indexOf(u8, gc.getString(args[0].asSymbolId()), "/") == null);
     return Value.makeBool(false);
 }
-fn simpleKeywordP(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn simpleKeywordP(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isKeyword()) return Value.makeBool(false);
     return Value.makeBool(std.mem.indexOf(u8, gc.getString(args[0].asKeywordId()), "/") == null);
 }
-fn simpleSymbolP(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn simpleSymbolP(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isSymbol()) return Value.makeBool(false);
     return Value.makeBool(std.mem.indexOf(u8, gc.getString(args[0].asSymbolId()), "/") == null);
 }
-fn negIntP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn negIntP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isInt() and args[0].asInt() < 0);
 }
-fn posIntP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn posIntP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isInt() and args[0].asInt() > 0);
 }
-fn natIntP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn natIntP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isInt() and args[0].asInt() >= 0);
 }
-fn specialSymbolP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
-fn varP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
-fn ratioP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn specialSymbolP(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeBool(false); }
+fn varP(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeBool(false); }
+fn ratioP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .rational);
 }
-fn rationalP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn rationalP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isInt() or (args[0].isObj() and args[0].asObj().kind == .rational));
 }
-fn decimalP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
-fn uuidP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
-fn reversibleP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn decimalP(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeBool(false); }
+fn uuidP(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeBool(false); }
+fn reversibleP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isObj()) return Value.makeBool(false);
     return Value.makeBool(args[0].asObj().kind == .vector);
 }
-fn sortedP(_: []Value, _: *GC, _: *Env) anyerror!Value { return Value.makeBool(false); }
-fn nfirstFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
-    var a = [_]Value{args[0]}; const n = try nextFn(&a, gc, env);
+fn sortedP(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeBool(false); }
+fn nfirstFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+    var a = [_]Value{args[0]}; const n = try nextFn(&a, gc, env, undefined);
     if (n.isNil()) return Value.makeNil();
-    var b = [_]Value{n}; return first(&b, gc, env);
+    var b = [_]Value{n}; return first(&b, gc, env, undefined);
 }
-fn nnextFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
-    var a = [_]Value{args[0]}; const n = try nextFn(&a, gc, env);
+fn nnextFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+    var a = [_]Value{args[0]}; const n = try nextFn(&a, gc, env, undefined);
     if (n.isNil()) return Value.makeNil();
-    var b = [_]Value{n}; return nextFn(&b, gc, env);
+    var b = [_]Value{n}; return nextFn(&b, gc, env, undefined);
 }
-fn nthnextFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn nthnextFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[1].isInt()) return error.ArityError;
     var cur = args[0]; var n = args[1].asInt();
-    while (n > 0) : (n -= 1) { var a = [_]Value{cur}; cur = try nextFn(&a, gc, env); if (cur.isNil()) return Value.makeNil(); }
+    while (n > 0) : (n -= 1) { var a = [_]Value{cur}; cur = try nextFn(&a, gc, env, undefined); if (cur.isNil()) return Value.makeNil(); }
     return cur;
 }
-fn nthrestFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn nthrestFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[1].isInt()) return error.ArityError;
     const items = getItems(args[0]) orelse return Value.makeObj(try gc.allocObj(.list));
     const n: usize = @intCast(@max(@as(i48, 0), args[1].asInt()));
@@ -4225,7 +4265,7 @@ fn nthrestFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (n < items.len) try obj.data.list.items.appendSlice(gc.allocator, items[n..]);
     return Value.makeObj(obj);
 }
-fn findFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn findFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isObj() or args[0].asObj().kind != .map) return Value.makeNil();
     for (args[0].asObj().data.map.keys.items, args[0].asObj().data.map.vals.items) |k, v| {
         if (semantics.structuralEq(k, args[1], gc)) {
@@ -4237,17 +4277,17 @@ fn findFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     }
     return Value.makeNil();
 }
-fn keyFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn keyFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return Value.makeNil();
     return if (items.len > 0) items[0] else Value.makeNil();
 }
-fn valFn2(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn valFn2(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return Value.makeNil();
     return if (items.len > 1) items[1] else Value.makeNil();
 }
-fn subvecFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn subvecFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2 or !args[1].isInt()) return error.ArityError;
     const items = getItems(args[0]) orelse return error.TypeError;
     const start: usize = @intCast(@max(@as(i48, 0), args[1].asInt()));
@@ -4256,7 +4296,7 @@ fn subvecFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     try obj.data.vector.items.appendSlice(gc.allocator, items[@min(start, items.len)..@min(end, items.len)]);
     return Value.makeObj(obj);
 }
-fn takeLastFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn takeLastFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt()) return error.ArityError;
     const n: usize = @intCast(@max(@as(i48, 0), args[0].asInt()));
     const items = getItems(args[1]) orelse return Value.makeObj(try gc.allocObj(.list));
@@ -4265,7 +4305,7 @@ fn takeLastFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     try obj.data.list.items.appendSlice(gc.allocator, items[start..]);
     return Value.makeObj(obj);
 }
-fn takeNthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn takeNthFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt()) return error.ArityError;
     const n: usize = @intCast(@max(@as(i48, 1), args[0].asInt()));
     const items = getItems(args[1]) orelse return Value.makeObj(try gc.allocObj(.vector));
@@ -4274,7 +4314,7 @@ fn takeNthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     while (i < items.len) : (i += n) try obj.data.vector.items.append(gc.allocator, items[i]);
     return Value.makeObj(obj);
 }
-fn dropLastFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn dropLastFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const n: usize = if (args.len > 1 and args[0].isInt()) @intCast(@max(@as(i48, 0), args[0].asInt())) else 1;
     const coll = if (args.len > 1) args[1] else args[0];
     const items = getItems(coll) orelse return Value.makeObj(try gc.allocObj(.list));
@@ -4283,7 +4323,7 @@ fn dropLastFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     try obj.data.list.items.appendSlice(gc.allocator, items[0..end]);
     return Value.makeObj(obj);
 }
-fn cycleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn cycleFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return Value.makeObj(try gc.allocObj(.list));
     if (items.len == 0) return Value.makeObj(try gc.allocObj(.list));
@@ -4292,7 +4332,7 @@ fn cycleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     while (i < 100) : (i += 1) try obj.data.list.items.append(gc.allocator, items[i % items.len]);
     return Value.makeObj(obj);
 }
-fn shuffleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn shuffleFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return error.TypeError;
     const obj = try gc.allocObj(.vector);
@@ -4304,14 +4344,14 @@ fn shuffleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         const j = r.val % (i + 1); const tmp = sl[i]; sl[i] = sl[j]; sl[j] = tmp; }
     return Value.makeObj(obj);
 }
-fn randNthFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn randNthFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const items = getItems(args[0]) orelse return Value.makeNil();
     if (items.len == 0) return Value.makeNil();
     const r = substrate.splitmix_next(rand_state); rand_state = r.next;
     return items[r.val % items.len];
 }
-fn minKeyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn minKeyFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     var best = args[1];
     for (args[2..]) |v| {
@@ -4322,7 +4362,7 @@ fn minKeyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     }
     return best;
 }
-fn maxKeyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn maxKeyFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     var best = args[1];
     for (args[2..]) |v| {
@@ -4333,7 +4373,7 @@ fn maxKeyFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     }
     return best;
 }
-fn someFnFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn someFnFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return error.ArityError;
     const obj = try gc.allocObj(.partial_fn);
     obj.data.partial_fn.func = Value.makeNil();
@@ -4341,7 +4381,7 @@ fn someFnFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     for (args) |a| try obj.data.partial_fn.bound_args.append(gc.allocator, a);
     return Value.makeObj(obj);
 }
-fn fnilFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn fnilFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     const obj = try gc.allocObj(.partial_fn);
     obj.data.partial_fn.func = Value.makeNil();
@@ -4349,59 +4389,59 @@ fn fnilFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     for (args) |a| try obj.data.partial_fn.bound_args.append(gc.allocator, a);
     return Value.makeObj(obj);
 }
-fn hashSetFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn hashSetFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.set);
     for (args) |a| try obj.data.set.items.append(gc.allocator, a);
     return Value.makeObj(obj);
 }
-fn namespaceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn namespaceFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const s = if (args[0].isKeyword()) gc.getString(args[0].asKeywordId()) else if (args[0].isSymbol()) gc.getString(args[0].asSymbolId()) else return Value.makeNil();
     if (std.mem.indexOf(u8, s, "/")) |idx| return Value.makeString(try gc.internString(s[0..idx]));
     return Value.makeNil();
 }
-fn parseLongFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn parseLongFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return Value.makeNil();
     return Value.makeInt(std.fmt.parseInt(i48, gc.getString(args[0].asStringId()), 10) catch return Value.makeNil());
 }
-fn parseDoubleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn parseDoubleFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return Value.makeNil();
     return Value.makeFloat(std.fmt.parseFloat(f64, gc.getString(args[0].asStringId())) catch return Value.makeNil());
 }
-fn parseBooleanFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn parseBooleanFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return Value.makeNil();
     const s = gc.getString(args[0].asStringId());
     return if (std.mem.eql(u8, s, "true")) Value.makeBool(true) else if (std.mem.eql(u8, s, "false")) Value.makeBool(false) else Value.makeNil();
 }
-fn bitNotFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitNotFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.TypeError;
     return Value.makeInt(~args[0].asInt());
 }
-fn bitTestFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitTestFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const bit: u6 = @intCast(@max(@as(i48, 0), @min(args[1].asInt(), 47)));
     return Value.makeBool((args[0].asInt() & (@as(i48, 1) << bit)) != 0);
 }
-fn bitSetFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitSetFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const bit: u6 = @intCast(@max(@as(i48, 0), @min(args[1].asInt(), 47)));
     return Value.makeInt(args[0].asInt() | (@as(i48, 1) << bit));
 }
-fn bitClearFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitClearFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const bit: u6 = @intCast(@max(@as(i48, 0), @min(args[1].asInt(), 47)));
     return Value.makeInt(args[0].asInt() & ~(@as(i48, 1) << bit));
 }
-fn bitFlipFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitFlipFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const bit: u6 = @intCast(@max(@as(i48, 0), @min(args[1].asInt(), 47)));
     return Value.makeInt(args[0].asInt() ^ (@as(i48, 1) << bit));
 }
-fn bitAndNotFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn bitAndNotFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     return Value.makeInt(args[0].asInt() & ~args[1].asInt());
 }
-fn unsignedBitShiftRightFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn unsignedBitShiftRightFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const n: u48 = @bitCast(args[0].asInt());
     const shift: u6 = @intCast(@max(@as(i48, 0), @min(args[1].asInt(), 47)));
@@ -4412,11 +4452,12 @@ fn unsignedBitShiftRightFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // SEQUENCE OPS: mapv, filterv, remove, keep, map-indexed, keep-indexed
 // ============================================================================
 
-fn mapvFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn mapvFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const items = getItems(args[1]) orelse return error.TypeError;
     const obj = try gc.allocObj(.vector);
     for (items) |item| {
+        try res.tick();
         var a = [_]Value{item};
         const r = try eval_mod.apply(args[0], &a, env, gc);
         try obj.data.vector.items.append(gc.allocator, r);
@@ -4424,11 +4465,12 @@ fn mapvFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn filtervFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn filtervFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const items = getItems(args[1]) orelse return error.TypeError;
     const obj = try gc.allocObj(.vector);
     for (items) |item| {
+        try res.tick();
         var a = [_]Value{item};
         const r = try eval_mod.apply(args[0], &a, env, gc);
         if (r.isTruthy()) try obj.data.vector.items.append(gc.allocator, item);
@@ -4436,11 +4478,12 @@ fn filtervFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn removeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn removeFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const items = getItems(args[1]) orelse return error.TypeError;
     const obj = try gc.allocObj(.list);
     for (items) |item| {
+        try res.tick();
         var a = [_]Value{item};
         const r = try eval_mod.apply(args[0], &a, env, gc);
         if (!r.isTruthy()) try obj.data.list.items.append(gc.allocator, item);
@@ -4448,11 +4491,12 @@ fn removeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn keepFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn keepFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const items = getItems(args[1]) orelse return error.TypeError;
     const obj = try gc.allocObj(.list);
     for (items) |item| {
+        try res.tick();
         var a = [_]Value{item};
         const r = try eval_mod.apply(args[0], &a, env, gc);
         if (!r.isNil()) try obj.data.list.items.append(gc.allocator, r);
@@ -4460,11 +4504,12 @@ fn keepFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn keepIndexedFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn keepIndexedFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const items = getItems(args[1]) orelse return error.TypeError;
     const obj = try gc.allocObj(.list);
     for (items, 0..) |item, i| {
+        try res.tick();
         var a = [_]Value{ Value.makeInt(@intCast(i)), item };
         const r = try eval_mod.apply(args[0], &a, env, gc);
         if (!r.isNil()) try obj.data.list.items.append(gc.allocator, r);
@@ -4472,11 +4517,12 @@ fn keepIndexedFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn mapIndexedFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn mapIndexedFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const items = getItems(args[1]) orelse return error.TypeError;
     const obj = try gc.allocObj(.list);
     for (items, 0..) |item, i| {
+        try res.tick();
         var a = [_]Value{ Value.makeInt(@intCast(i)), item };
         const r = try eval_mod.apply(args[0], &a, env, gc);
         try obj.data.list.items.append(gc.allocator, r);
@@ -4488,7 +4534,7 @@ fn mapIndexedFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 // I/O: print, pr, prn
 // ============================================================================
 
-fn printFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn printFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const stdout = compat.stdoutFile();
     for (args, 0..) |arg, i| {
         if (i > 0) compat.fileWriteAll(stdout, " ");
@@ -4504,7 +4550,7 @@ fn printFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeNil();
 }
 
-fn prFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn prFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const stdout = compat.stdoutFile();
     for (args, 0..) |arg, i| {
         if (i > 0) compat.fileWriteAll(stdout, " ");
@@ -4516,14 +4562,14 @@ fn prFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeNil();
 }
 
-fn prnFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
-    _ = try prFn(args, gc, env);
+fn prnFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+    _ = try prFn(args, gc, env, undefined);
     const stdout = compat.stdoutFile();
     compat.fileWriteAll(stdout, "\n");
     return Value.makeNil();
 }
 
-fn newlineFn(_: []Value, _: *GC, _: *Env) anyerror!Value {
+fn newlineFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     const stdout = compat.stdoutFile();
     compat.fileWriteAll(stdout, "\n");
     return Value.makeNil();
@@ -4534,7 +4580,7 @@ fn newlineFn(_: []Value, _: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (volatile! val) — create a volatile mutable ref (uses atom internally)
-fn volatileBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn volatileBangFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const obj = try gc.allocObj(.atom);
     obj.data.atom.val = args[0];
@@ -4542,7 +4588,7 @@ fn volatileBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (vswap! vol f & args) — apply f to volatile's value, store result
-fn vswapBangFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn vswapBangFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .atom) return error.TypeError;
     const vol = args[0].asObj();
@@ -4556,7 +4602,7 @@ fn vswapBangFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 }
 
 /// (vreset! vol val) — reset volatile to new value
-fn vresetBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn vresetBangFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .atom) return error.TypeError;
     args[0].asObj().data.atom.val = args[1];
@@ -4568,7 +4614,7 @@ fn vresetBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (reductions f init coll) — lazy list of intermediate reduce values
-fn reductionsFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn reductionsFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     const f = args[0];
     var acc: Value = undefined;
@@ -4592,6 +4638,7 @@ fn reductionsFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     const obj = try gc.allocObj(.list);
     try obj.data.list.items.append(gc.allocator, acc);
     for (items) |item| {
+        try res.tick();
         var fn_args = [_]Value{ acc, item };
         acc = try eval_mod.apply(f, &fn_args, env, gc);
         // Check for reduced
@@ -4608,7 +4655,7 @@ fn reductionsFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 }
 
 /// (reduced x) — wrap x to signal early termination
-fn reducedFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn reducedFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const obj = try gc.allocObj(.vector);
     obj.is_transient = true; // marker for "reduced"
@@ -4616,14 +4663,14 @@ fn reducedFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-fn isReducedP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isReducedP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj()) return Value.makeBool(false);
     const obj = args[0].asObj();
     return Value.makeBool(obj.kind == .vector and obj.is_transient and obj.data.vector.items.items.len == 1);
 }
 
-fn unreducedFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn unreducedFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isObj()) {
         const obj = args[0].asObj();
@@ -4634,7 +4681,7 @@ fn unreducedFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (transduce xform f init coll) — transduce with transducer
-fn transduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+fn transduceFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len < 3) return error.ArityError;
     if (args.len == 3) {
         // (transduce xform f coll) — no init, use (f) as init
@@ -4642,7 +4689,7 @@ fn transduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
         var empty_args = [_]Value{};
         const init = try eval_mod.apply(f, &empty_args, env, gc);
         var new_args = [_]Value{ args[0], args[1], init, args[2] };
-        return transduceFn(&new_args, gc, env);
+        return transduceFn(&new_args, gc, env, undefined);
     }
     // (transduce xform f init coll)
     // xform is a transducer: (xform f) → reducing-fn
@@ -4651,6 +4698,7 @@ fn transduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     var acc = args[2];
     const items = getItems(args[3]) orelse return error.TypeError;
     for (items) |item| {
+        try res.tick();
         var fn_args = [_]Value{ acc, item };
         acc = try eval_mod.apply(rf, &fn_args, env, gc);
         if (acc.isObj() and acc.asObj().kind == .vector and acc.asObj().is_transient) {
@@ -4667,7 +4715,7 @@ fn transduceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 /// (delay expr) — wraps a value, realized on first deref
 /// Since our builtins get pre-evaluated args, delay is a special case.
 /// We use lazy_seq with the value already cached.
-fn delayFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn delayFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const obj = try gc.allocObj(.lazy_seq);
     obj.data.lazy_seq.thunk = Value.makeNil();
@@ -4676,7 +4724,7 @@ fn delayFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (force x) — realize a delay
-fn forceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn forceFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isObj() and args[0].asObj().kind == .lazy_seq) {
         if (args[0].asObj().data.lazy_seq.cached) |c| return c;
@@ -4685,13 +4733,13 @@ fn forceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (add-watch ref key fn) — stub, returns ref
-fn addWatchFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn addWatchFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     return args[0];
 }
 
 /// (remove-watch ref key) — stub, returns ref
-fn removeWatchFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn removeWatchFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return args[0];
 }
@@ -4701,7 +4749,7 @@ fn removeWatchFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (fv 1.0 2.0 3.0) or (fv n) — create dense f64 vector
-fn fvFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn fvFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.dense_f64);
     if (args.len == 1 and args[0].isInt()) {
         // (fv n) — zero-filled vector of length n
@@ -4721,7 +4769,7 @@ fn fvFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (fv-get v i) — get element at index
-fn fvGetFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn fvGetFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .dense_f64 or !args[1].isInt()) return error.TypeError;
     const v = &args[0].asObj().data.dense_f64;
@@ -4731,7 +4779,7 @@ fn fvGetFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (fv-set! v i x) — set element at index (mutating)
-fn fvSetBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn fvSetBangFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .dense_f64 or !args[1].isInt()) return error.TypeError;
     var v = &args[0].asObj().data.dense_f64;
@@ -4743,7 +4791,7 @@ fn fvSetBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (fv-dot a b) — dot product
-fn fvDotFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn fvDotFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .dense_f64) return error.TypeError;
     if (!args[1].isObj() or args[1].asObj().kind != .dense_f64) return error.TypeError;
@@ -4751,14 +4799,14 @@ fn fvDotFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (fv-norm v) — L2 norm
-fn fvNormFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn fvNormFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .dense_f64) return error.TypeError;
     return Value.makeFloat(args[0].asObj().data.dense_f64.norm());
 }
 
 /// (fv-axpy! alpha x y) — y += alpha * x (mutating y)
-fn fvAxpyBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn fvAxpyBangFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const alpha = if (args[0].isFloat()) args[0].asFloat() else if (args[0].isInt()) @as(f64, @floatFromInt(args[0].asInt())) else return error.TypeError;
     if (!args[1].isObj() or args[1].asObj().kind != .dense_f64) return error.TypeError;
@@ -4768,7 +4816,7 @@ fn fvAxpyBangFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (fv-count v) — length
-fn fvCountFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn fvCountFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .dense_f64) return error.TypeError;
     return Value.makeInt(@intCast(args[0].asObj().data.dense_f64.len));
@@ -4779,7 +4827,7 @@ fn fvCountFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (make-trace) — create an empty execution trace
-fn makeTraceFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn makeTraceFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.trace);
     obj.data.trace = .{
         .site_names = compat.emptyList(u32),
@@ -4790,7 +4838,7 @@ fn makeTraceFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (trace-observe! trace name value log-prob) — record a sample site
-fn traceObserveBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn traceObserveBangFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 4) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .trace) return error.TypeError;
     const name_id: u32 = if (args[1].isString()) @as(u32, @truncate(args[1].asStringId())) else if (args[1].isSymbol()) @as(u32, @truncate(args[1].asSymbolId())) else return error.TypeError;
@@ -4800,14 +4848,14 @@ fn traceObserveBangFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (trace-log-weight trace) — cumulative log-weight
-fn traceLogWeightFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn traceLogWeightFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .trace) return error.TypeError;
     return Value.makeFloat(args[0].asObj().data.trace.log_weight);
 }
 
 /// (trace-sites trace) — return [{:name n :value v :log-prob lp} ...]
-fn traceSitesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn traceSitesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .trace) return error.TypeError;
     const t = &args[0].asObj().data.trace;
@@ -4830,7 +4878,7 @@ fn traceSitesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (rational n d) — create a normalized rational number
-fn rationalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn rationalFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const num: i64 = args[0].asInt();
@@ -4842,7 +4890,7 @@ fn rationalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (numerator r) — get numerator of a rational
-fn numeratorFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn numeratorFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isInt()) return args[0]; // integer numerator is itself
     if (!args[0].isObj() or args[0].asObj().kind != .rational) return error.TypeError;
@@ -4850,7 +4898,7 @@ fn numeratorFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (denominator r) — get denominator of a rational
-fn denominatorFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn denominatorFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isInt()) return Value.makeInt(1); // integer denominator is 1
     if (!args[0].isObj() or args[0].asObj().kind != .rational) return error.TypeError;
@@ -4859,7 +4907,7 @@ fn denominatorFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 /// (rationalize x) — convert a float to its nearest rational approximation
 /// Uses continued fraction expansion (Stern-Brocot mediant convergence).
-fn rationalizeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+fn rationalizeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     // If already rational or integer, return as-is
     if (args[0].isInt()) return args[0];
@@ -4904,8 +4952,7 @@ fn rationalizeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (rational? x) — true if x is a rational object
-fn isRationalObjP(args: []Value, _: *GC, _: *Env) anyerror!Value {
+fn isRationalObjP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .rational);
 }
-

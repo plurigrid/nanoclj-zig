@@ -21,6 +21,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const compat = @import("compat.zig");
 
 /// Channel data stored in ObjData.channel
@@ -82,7 +83,7 @@ fn asChan(v: Value) ?*ChannelData {
 }
 
 /// (chan) or (chan n)
-pub fn chanFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn chanFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.channel);
     if (args.len > 0) {
         if (args[0].isInt()) {
@@ -94,13 +95,13 @@ pub fn chanFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (chan? x)
-pub fn chanPredFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn chanPredFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(asChan(args[0]) != null);
 }
 
 /// (chan! ch val) — blocking put (in single-threaded: immediate if buffer allows)
-pub fn chanPutFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn chanPutFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const ch = asChan(args[0]) orelse return error.TypeError;
     if (ch.closed) return Value.makeBool(false);
@@ -113,7 +114,7 @@ pub fn chanPutFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (<! ch) — blocking take
-pub fn chanTakeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn chanTakeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const ch = asChan(args[0]) orelse return error.TypeError;
     // First try buffer
@@ -145,7 +146,7 @@ pub fn chanTakeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (close! ch)
-pub fn chanCloseFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn chanCloseFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const ch = asChan(args[0]) orelse return error.TypeError;
     ch.closed = true;
@@ -153,14 +154,14 @@ pub fn chanCloseFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (closed? ch)
-pub fn chanClosedPredFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn chanClosedPredFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const ch = asChan(args[0]) orelse return error.TypeError;
     return Value.makeBool(ch.closed);
 }
 
 /// (chan-count ch)
-pub fn chanCountFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn chanCountFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const ch = asChan(args[0]) orelse return error.TypeError;
     const n: i48 = @intCast(ch.buf.items.len + ch.pending_puts.items.len);
@@ -168,7 +169,7 @@ pub fn chanCountFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (offer! ch val) — non-blocking put, returns true/false
-pub fn chanOfferFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn chanOfferFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const ch = asChan(args[0]) orelse return error.TypeError;
     if (ch.closed) return Value.makeBool(false);
@@ -177,7 +178,7 @@ pub fn chanOfferFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (poll! ch) — non-blocking take, returns value or nil
-pub fn chanPollFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn chanPollFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const ch = asChan(args[0]) orelse return error.TypeError;
     return ch.tryTake() orelse Value.makeNil();

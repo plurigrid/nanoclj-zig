@@ -20,6 +20,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const substrate = @import("substrate.zig");
 
 // ============================================================================
@@ -316,7 +317,7 @@ pub fn auditClaim(claim: GuidelineClaim) AuditResult {
 
 /// (computable-set kind) → enumerate members up to 100
 /// kind: "evens" | "odds" | "primes" | "squares" | "mult-of-N"
-pub fn computableSetFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn computableSetFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -353,7 +354,7 @@ pub fn computableSetFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (set-density kind n) → float density approximation
-pub fn setDensityFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn setDensityFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     if (!args[1].isInt()) return error.TypeError;
@@ -382,7 +383,7 @@ pub fn setDensityFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (reduce-verify source target bound) → bool
 /// Verify that source ≤_m target via canonical reduction, for all x < bound.
-pub fn reduceVerifyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn reduceVerifyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.ArityError;
     if (!args[0].isString() or !args[1].isString() or !args[2].isInt())
         return error.TypeError;
@@ -409,7 +410,7 @@ pub fn reduceVerifyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (weihrauch-degree problem) → map with degree info
 /// problem: "ivt" | "halting" | "spectral-gap" | "channel-capacity" | "alignment" | "tiling"
-pub fn weihrauchDegreeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn weihrauchDegreeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -452,7 +453,7 @@ pub fn weihrauchDegreeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// (audit-guideline claim) → map with audit result
 /// claim: "universal-semantic" | "permanent" | "compliance" | "coverage" |
 ///        "membership" | "termination" | "convergence" | "open"
-pub fn auditGuidelineFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn auditGuidelineFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -501,7 +502,7 @@ pub fn auditGuidelineFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (audit-all-guidelines) → vector of all audit results
 /// Audits every claim type. The meta-guideline: a guideline about guidelines.
-pub fn auditAllGuidelinesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn auditAllGuidelinesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const obj = try gc.allocObj(.vector);
     const claims = [_]GuidelineClaim{
@@ -611,7 +612,7 @@ fn findProblem(name: []const u8) ?ProblemEntry {
 }
 
 /// (classify-problem name) → {:class "sigma" :n 1 :trit +1 :label "c.e."}
-pub fn classifyProblemFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn classifyProblemFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isString()) return error.ArityError;
     const name = gc.getString(args[0].asStringId());
     const p = findProblem(name) orelse return error.TypeError;
@@ -643,7 +644,7 @@ pub fn classifyProblemFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (detect-morphism source target) → {:kind "embedding" :source-trit +1 :target-trit -1 :trit-sum 0}
-pub fn detectMorphismFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn detectMorphismFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2 or !args[0].isString() or !args[1].isString()) return error.ArityError;
     const src_name = gc.getString(args[0].asStringId());
     const tgt_name = gc.getString(args[1].asStringId());
@@ -694,7 +695,7 @@ pub fn detectMorphismFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (list-problems) → vector of all classified problem names
-pub fn listProblemsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn listProblemsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const obj = try gc.allocObj(.vector);
     for (&problem_table) |*p| {
@@ -753,19 +754,19 @@ fn mertensTritImpl(n: i48) i48 {
 }
 
 /// (mobius n) → μ(n) ∈ {-1, 0, 1}
-pub fn mobiusBuiltinFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn mobiusBuiltinFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     return Value.makeInt(mobiusFn_impl(args[0].asInt()));
 }
 
 /// (mertens n) → M(n) = Σ_{k=1}^{n} μ(k)
-pub fn mertensBuiltinFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn mertensBuiltinFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     return Value.makeInt(mertens_impl(args[0].asInt()));
 }
 
 /// (moebius-boundary) → {:exclusive-mertens M(1068) :inclusive-mertens M(1069) :flips? true}
-pub fn moebiusBoundaryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn moebiusBoundaryFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const seed: i48 = @intCast(substrate.CANONICAL_SEED);
     const excl = mertens_impl(seed - 1);
@@ -816,7 +817,7 @@ pub fn moebiusBoundaryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (flip-primes n) → vector of primes p ≤ n where Mertens trit flips Π→Σ
-pub fn flipPrimesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn flipPrimesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isInt()) return error.ArityError;
     const bound = args[0].asInt();
     if (bound < 2) return Value.makeNil();
@@ -832,7 +833,7 @@ pub fn flipPrimesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (morphism-graph) → vector of {:source s :target t :kind k :trit-sum n} for all problem pairs
-pub fn morphismGraphFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn morphismGraphFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const obj = try gc.allocObj(.vector);
     const kw = struct {
@@ -894,7 +895,7 @@ const gorard_tower = [_]GorardEntry{
 };
 
 /// (gorard-tower) → vector of {:index n :ordinal str :system str :causal str :trit n}
-pub fn gorardTowerFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn gorardTowerFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const kw = struct {
         fn intern(g: *GC, s: []const u8) !Value {
@@ -920,7 +921,7 @@ pub fn gorardTowerFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (gorard-trit-sum) → GF(3) conservation check of the tower
-pub fn gorardTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn gorardTritSumFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     var sum: i48 = 0;
     for (&gorard_tower) |*level| {
@@ -942,7 +943,7 @@ fn isqrt(n: u64) u64 {
 }
 
 /// (pythagorean-triples bound) → vector of [a b c] triples with a≤b, c≤bound
-pub fn pythagoreanTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn pythagoreanTriplesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return Value.makeNil();
     const bound_val = if (args[0].isInt()) args[0].asInt() else return Value.makeNil();
     if (bound_val <= 0) return Value.makeNil();
@@ -973,7 +974,7 @@ pub fn pythagoreanTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (pell-solve D) → {:x n :y m} fundamental solution of x²-Dy²=1, or nil
-pub fn pellSolveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn pellSolveFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return Value.makeNil();
     const d_val = if (args[0].isInt()) args[0].asInt() else return Value.makeNil();
     if (d_val < 2) return Value.makeNil();
@@ -1028,7 +1029,7 @@ pub fn pellSolveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (markov-triples bound) → vector of [a b c] with a²+b²+c²=3abc, a≤b≤c≤bound
-pub fn markovTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn markovTriplesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return Value.makeNil();
     const bound_val = if (args[0].isInt()) args[0].asInt() else return Value.makeNil();
     if (bound_val <= 0) return Value.makeNil();
@@ -1057,7 +1058,7 @@ pub fn markovTriplesFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (rh-check bound) → vector of {:x n :pi π(n) :li Li(n) :error |π-Li| :bound C√n·ln(n) :ok? bool}
-pub fn rhCheckFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn rhCheckFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return Value.makeNil();
     const bound_val = if (args[0].isInt()) args[0].asInt() else return Value.makeNil();
     if (bound_val < 10) return Value.makeNil();
@@ -1139,7 +1140,7 @@ pub fn rhCheckFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // The REPL's fuel limit (semantics.Resources) is literally the simulation wall.
 
 /// (simulation-fuel) → current fuel limit of the evaluator
-pub fn simulationFuelFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn simulationFuelFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     // The default fuel from semantics.Resources.initDefault()
     // This IS the simulation boundary — computation beyond this diverges
@@ -1148,7 +1149,7 @@ pub fn simulationFuelFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 /// (simulation-escape? expr-cost) → true if expression cost exceeds simulator fuel
 /// The philosophical point: you can't escape, but you CAN detect the wall.
-pub fn simulationEscapeFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn simulationEscapeFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isInt()) return error.ArityError;
     const cost = args[0].asInt();
     const fuel: i48 = 1_000_000; // simulator's budget
@@ -1163,7 +1164,7 @@ pub fn simulationEscapeFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 /// (matrix-derivation D A) → 𝔻(A) = D·A - A·D for 2×2 matrices
 /// Each matrix is [[a b] [c d]]
-pub fn matrixDerivationFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn matrixDerivationFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     const d = parse2x2(args[0], gc) orelse return error.TypeError;
     const a = parse2x2(args[1], gc) orelse return error.TypeError;
@@ -1174,7 +1175,7 @@ pub fn matrixDerivationFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (matrix-derivation-trace D A) → tr(𝔻(A)), always 0
-pub fn matrixDerivationTraceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn matrixDerivationTraceFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     const d = parse2x2(args[0], gc) orelse return error.TypeError;
     const a = parse2x2(args[1], gc) orelse return error.TypeError;
@@ -1228,7 +1229,7 @@ fn make2x2(m: [4]i48, gc: *GC) !Value {
 // Positive iff the metric is of negative type (trees are always negative type).
 
 /// (gromov-matrix [d01 d02 d12]) → {:d01 .. :gromov-product-2x .. :trit .. :negative-type? ..}
-pub fn gromovMatrixFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn gromovMatrixFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const dists_obj = args[0].asObj();
@@ -1269,7 +1270,7 @@ pub fn gromovMatrixFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // GF(3) trit sum conserved under pours.
 
 /// (color-sort-trit-sum [[0 1 2] [1 0 2] []]) → GF(3) sum of all tube contents
-pub fn colorSortTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn colorSortTritSumFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const tubes_obj = args[0].asObj();
@@ -1291,7 +1292,7 @@ pub fn colorSortTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 // This is a deterministic pushdown automaton (Δ⁰₁, decidable).
 
 /// (turn-state moves) → {:steps n :reversible true :hierarchy "delta-1"}
-pub fn turnStateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn turnStateFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isInt()) return error.ArityError;
     const moves = args[0].asInt();
     const obj = try gc.allocObj(.map);
@@ -1318,7 +1319,7 @@ pub fn turnStateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // - Byzantine: Π⁰₁ (must verify all honest nodes agree)
 
 /// (consensus-classify n failures) → {:n n :failures f :hierarchy str :trit n}
-pub fn consensusClassifyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn consensusClassifyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const n = args[0].asInt();
     const f = args[1].asInt();
@@ -1398,7 +1399,7 @@ const stacks_tags = [_]StacksTag{
 };
 
 /// (stacks-tags) → vector of {:tag "00VH" :name "Site" :connection str :trit n}
-pub fn stacksTagsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn stacksTagsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const kw = struct {
         fn intern(g: *GC, s: []const u8) !Value {
@@ -1424,7 +1425,7 @@ pub fn stacksTagsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (stacks-trit-sum) → GF(3) conservation across Stacks Project connections
-pub fn stacksTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn stacksTritSumFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     var sum: i48 = 0;
     for (&stacks_tags) |*t| sum += t.trit;
@@ -1432,7 +1433,7 @@ pub fn stacksTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (stacks-lookup tag-string) → tag entry or nil
-pub fn stacksLookupFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn stacksLookupFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isString()) return error.ArityError;
     const needle = gc.getString(args[0].asStringId());
     const kw = struct {
@@ -1511,7 +1512,7 @@ fn hsvToRgb(hue: i48, sat: i48, val: i48) [3]u8 {
 }
 
 /// (matter-lamp hue sat level) → {:hue h :sat s :level l :r R :g G :b B :trit t :hex "#RRGGBB"}
-pub fn matterLampFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn matterLampFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt() or !args[2].isInt()) return error.TypeError;
     const hue = args[0].asInt();
@@ -1547,7 +1548,7 @@ pub fn matterLampFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (bilresa-commands) → vector of 6 commands with GF(3) trits
-pub fn bilresaCommandsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn bilresaCommandsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const kw = struct {
         fn intern(g: *GC, s: []const u8) !Value {
@@ -1571,7 +1572,7 @@ pub fn bilresaCommandsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (bilresa-trit-sum) → 0 (GF(3) conserved across 6 commands)
-pub fn bilresaTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn bilresaTritSumFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     var sum: i48 = 0;
     for (&bilresa_commands) |*cmd| sum += cmd.trit;
@@ -1579,7 +1580,7 @@ pub fn bilresaTritSumFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (matter-scene name) → preset scene: "warm" "cool" "red" "green" "blue" "party"
-pub fn matterSceneFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn matterSceneFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isString()) return error.ArityError;
     const name = gc.getString(args[0].asStringId());
     const S = struct { h: i48, s: i48, l: i48 };
@@ -1594,5 +1595,390 @@ pub fn matterSceneFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     if (scene == null) return Value.makeNil();
     const sc = scene.?;
     var lamp_args = [3]Value{ Value.makeInt(sc.h), Value.makeInt(sc.s), Value.makeInt(sc.l) };
-    return matterLampFn(&lamp_args, gc, undefined);
+    return matterLampFn(&lamp_args, gc, undefined, undefined);
+}
+
+// ============================================================================
+// CHROMATIC OBSERVER: COLORBLIND DETECTION VIA ORDINALS & CARDINALS
+//
+// Three complementary number systems for color perception:
+//   Cardinals (-1) = topology: how many equivalence classes (|confusion set|)
+//   Ordinals  ( 0) = geometry: which class is first (well-ordering of hues)
+//   Color     (+1) = phenomenology: what it looks like to a body in an OLC tile
+//
+// The colorblind detection game:
+//   3 observers, each with ConeType ∈ {normal, protan, deutan, tritan}
+//   2 golden-angle probes → unique binary response per cone type
+//   Product map is injective → 64 triads, 64 distinct response matrices
+// ============================================================================
+
+fn coneFromInt(idx: i48) ?ConeType {
+    if (idx < 0 or idx > 3) return null;
+    return @as(ConeType, @enumFromInt(@as(u8, @intCast(idx))));
+}
+
+pub const ConeType = enum(u8) {
+    normal = 0, // trichromat: all three cone classes
+    protan = 1, // missing L-cones (red) → trit -1
+    deutan = 2, // missing M-cones (green) → trit 0
+    tritan = 3, // missing S-cones (blue) → trit +1
+};
+
+/// Confusion cardinal: how many hue equivalence classes collapse under this condition.
+/// Normal sees ~1M distinguishable colors; each dichromacy collapses one axis.
+fn confusionCardinal(ct: ConeType) i48 {
+    return switch (ct) {
+        .normal => 0, // no confusion
+        .protan => 1, // red-green axis collapses
+        .deutan => 1, // red-green axis collapses (different locus)
+        .tritan => 1, // blue-yellow axis collapses
+    };
+}
+
+/// Confusion ordinal: rank in the severity ordering.
+/// Normal < tritan < deutan < protan (by prevalence × impact)
+fn confusionOrdinal(ct: ConeType) i48 {
+    return switch (ct) {
+        .normal => 0,
+        .tritan => 1,
+        .deutan => 2,
+        .protan => 3,
+    };
+}
+
+/// GF(3) trit assignment for cone types
+fn coneTrit(ct: ConeType) i48 {
+    return switch (ct) {
+        .normal => 0,
+        .protan => -1,
+        .deutan => 0,
+        .tritan => 1,
+    };
+}
+
+/// Binary probe response: 2 probes at golden angle spacing.
+/// Probe 1 (0°→137.508°): red-green confusion axis
+/// Probe 2 (137.508°→275.016°): cross-axis (blue-yellow + red-green)
+/// Returns (probe1, probe2) each in {0=distinguishes, 1=confused}
+fn probeResponse(ct: ConeType) [2]u8 {
+    return switch (ct) {
+        .normal => .{ 0, 0 }, // sees both axes
+        .protan => .{ 1, 1 }, // confused on both (severe red deficiency)
+        .deutan => .{ 1, 0 }, // confused on axis 1 only
+        .tritan => .{ 0, 1 }, // confused on axis 2 only
+    };
+}
+
+/// (cone-probe observer-index) → {:type str :probe1 n :probe2 n :cardinal n :ordinal n :trit n}
+/// observer-index: 0-3 mapping to cone types
+pub fn coneProbeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    const idx = args[0].asInt();
+    const ct = coneFromInt(idx) orelse return error.TypeError;
+    const resp = probeResponse(ct);
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    const entry = try gc.allocObj(.map);
+    const names = [_][]const u8{ "normal", "protan", "deutan", "tritan" };
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "type"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(names[@intFromEnum(ct)])));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "probe1"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(resp[0])));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "probe2"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(resp[1])));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "cardinal"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(confusionCardinal(ct)));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "ordinal"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(confusionOrdinal(ct)));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(coneTrit(ct)));
+    return Value.makeObj(entry);
+}
+
+/// (observer-triad a b c) → {:observers [a b c] :responses [[p1 p2] [p1 p2] [p1 p2]]
+///                            :unique? bool :trit-sum n}
+/// a, b, c ∈ {0,1,2,3} = cone type indices
+pub fn observerTriadFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 3) return error.ArityError;
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    var types: [3]ConeType = undefined;
+    var resps: [3][2]u8 = undefined;
+    var trit_sum: i48 = 0;
+    for (0..3) |i| {
+        const idx = args[i].asInt();
+        types[i] = coneFromInt(idx) orelse return error.TypeError;
+        resps[i] = probeResponse(types[i]);
+        trit_sum += coneTrit(types[i]);
+    }
+    // Check uniqueness: all 3 response pairs must be... actually they CAN match
+    // if two observers have the same cone type. The theorem says the TRIAD is
+    // uniquely determined, not that each observer is unique.
+    // Two triads are indistinguishable iff they produce identical response matrices.
+    // Since probeResponse is injective on ConeType, matching responses ↔ matching types.
+
+    const entry = try gc.allocObj(.map);
+    // observers vector
+    const obs_vec = try gc.allocObj(.vector);
+    for (0..3) |i| {
+        try obs_vec.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(@intFromEnum(types[i]))));
+    }
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "observers"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeObj(obs_vec));
+    // responses vector of vectors
+    const resp_vec = try gc.allocObj(.vector);
+    for (0..3) |i| {
+        const pair = try gc.allocObj(.vector);
+        try pair.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(resps[i][0])));
+        try pair.data.vector.items.append(gc.allocator, Value.makeInt(@intCast(resps[i][1])));
+        try resp_vec.data.vector.items.append(gc.allocator, Value.makeObj(pair));
+    }
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "responses"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeObj(resp_vec));
+    // trit-sum mod 3
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "trit-sum"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(@mod(trit_sum + 300, 3)));
+    // response-key: encode 6 bits as single int for O(1) lookup
+    const resp_key: i48 = @as(i48, resps[0][0]) * 32 + @as(i48, resps[0][1]) * 16 +
+        @as(i48, resps[1][0]) * 8 + @as(i48, resps[1][1]) * 4 +
+        @as(i48, resps[2][0]) * 2 + @as(i48, resps[2][1]);
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "response-key"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(resp_key));
+    return Value.makeObj(entry);
+}
+
+/// (all-triads) → vector of all 64 observer triads with their response keys
+/// Demonstrates the injectivity theorem: all 64 response-keys are distinct
+pub fn allTriadsFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
+    _ = args;
+    const result = try gc.allocObj(.vector);
+    var triad_args: [3]Value = undefined;
+    for (0..4) |a| {
+        for (0..4) |b| {
+            for (0..4) |c| {
+                triad_args = .{ Value.makeInt(@intCast(a)), Value.makeInt(@intCast(b)), Value.makeInt(@intCast(c)) };
+                const triad = try observerTriadFn(&triad_args, gc, env, res);
+                try result.data.vector.items.append(gc.allocator, triad);
+            }
+        }
+    }
+    return Value.makeObj(result);
+}
+
+/// (detection-theorem) → {:triads 64 :distinct-keys n :injective? bool :proof str}
+/// Computationally verifies the main theorem by checking all 64 triads
+pub fn detectionTheoremFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    _ = args;
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    // Compute all 64 response keys
+    var keys: [64]i48 = undefined;
+    var idx: usize = 0;
+    for (0..4) |a| {
+        for (0..4) |b| {
+            for (0..4) |c| {
+                const ra = probeResponse(@enumFromInt(@as(u8, @intCast(a))));
+                const rb = probeResponse(@enumFromInt(@as(u8, @intCast(b))));
+                const rc = probeResponse(@enumFromInt(@as(u8, @intCast(c))));
+                keys[idx] = @as(i48, ra[0]) * 32 + @as(i48, ra[1]) * 16 +
+                    @as(i48, rb[0]) * 8 + @as(i48, rb[1]) * 4 +
+                    @as(i48, rc[0]) * 2 + @as(i48, rc[1]);
+                idx += 1;
+            }
+        }
+    }
+    // Count distinct keys
+    var distinct: i48 = 0;
+    for (0..64) |i| {
+        var dup = false;
+        for (0..i) |j| {
+            if (keys[i] == keys[j]) { dup = true; break; }
+        }
+        if (!dup) distinct += 1;
+    }
+    const injective = (distinct == 64);
+
+    const entry = try gc.allocObj(.map);
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "triads"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(64));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "distinct-keys"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(distinct));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "injective?"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeBool(injective));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "proof"));
+    const proof_str = if (injective)
+        "probeResponse injective on ConeType (4 distinct outputs) => product map injective => 64 triads distinguishable by 2 golden-angle probes (6 bits)"
+    else
+        "FAILED: response collision detected — probe design insufficient";
+    try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(proof_str)));
+    return Value.makeObj(entry);
+}
+
+/// (cone-cardinal ct) → confusion cardinal (number of collapsed axes)
+pub fn coneCardinalFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    const idx = args[0].asInt();
+    const ct = @as(ConeType, @enumFromInt(@as(u8, @intCast(idx))));
+    return Value.makeInt(confusionCardinal(ct));
+}
+
+/// (cone-ordinal ct) → confusion ordinal (severity rank)
+pub fn coneOrdinalFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
+    const idx = args[0].asInt();
+    const ct = @as(ConeType, @enumFromInt(@as(u8, @intCast(idx))));
+    return Value.makeInt(confusionOrdinal(ct));
+}
+
+// ============================================================================
+// TESTS: Chromatic Observer
+// ============================================================================
+
+test "probe response injective" {
+    // All 4 cone types produce distinct probe response pairs
+    const types = [_]ConeType{ .normal, .protan, .deutan, .tritan };
+    for (0..4) |i| {
+        for (i + 1..4) |j| {
+            const ri = probeResponse(types[i]);
+            const rj = probeResponse(types[j]);
+            try std.testing.expect(ri[0] != rj[0] or ri[1] != rj[1]);
+        }
+    }
+}
+
+test "64 triads all distinguishable" {
+    // The main detection theorem: product map is injective
+    var keys: [64]i48 = undefined;
+    var idx: usize = 0;
+    for (0..4) |a| {
+        for (0..4) |b| {
+            for (0..4) |c| {
+                const ra = probeResponse(@enumFromInt(@as(u8, @intCast(a))));
+                const rb = probeResponse(@enumFromInt(@as(u8, @intCast(b))));
+                const rc = probeResponse(@enumFromInt(@as(u8, @intCast(c))));
+                keys[idx] = @as(i48, ra[0]) * 32 + @as(i48, ra[1]) * 16 +
+                    @as(i48, rb[0]) * 8 + @as(i48, rb[1]) * 4 +
+                    @as(i48, rc[0]) * 2 + @as(i48, rc[1]);
+                idx += 1;
+            }
+        }
+    }
+    // Check all pairs distinct
+    for (0..64) |i| {
+        for (i + 1..64) |j| {
+            try std.testing.expect(keys[i] != keys[j]);
+        }
+    }
+}
+
+test "GF(3) cone trit sum" {
+    // Sum of all 4 cone trits: -1 + 0 + 0 + 1 = 0 (conserved)
+    var sum: i48 = 0;
+    const types = [_]ConeType{ .normal, .protan, .deutan, .tritan };
+    for (types) |ct| sum += coneTrit(ct);
+    try std.testing.expectEqual(@as(i48, 0), sum);
+}
+
+test "ordinal ordering" {
+    // normal < tritan < deutan < protan
+    try std.testing.expect(confusionOrdinal(.normal) < confusionOrdinal(.tritan));
+    try std.testing.expect(confusionOrdinal(.tritan) < confusionOrdinal(.deutan));
+    try std.testing.expect(confusionOrdinal(.deutan) < confusionOrdinal(.protan));
+}
+
+test "cardinal topology" {
+    // normal has 0 collapsed axes; all dichromacies collapse exactly 1
+    try std.testing.expectEqual(@as(i48, 0), confusionCardinal(.normal));
+    try std.testing.expectEqual(@as(i48, 1), confusionCardinal(.protan));
+    try std.testing.expectEqual(@as(i48, 1), confusionCardinal(.deutan));
+    try std.testing.expectEqual(@as(i48, 1), confusionCardinal(.tritan));
+}
+
+// ============================================================================
+// BUDDY STATE: Monotonic propagator cell for companion rarity
+// ============================================================================
+//
+// Rarity = f(witnessed_events). Monotonic: once an event is witnessed,
+// it cannot be un-witnessed. The buddy cell is a Radul-Sussman propagator
+// that only grows. Rarity tiers:
+//   common(0): < 3 events
+//   uncommon(1): 3-7 events
+//   rare(2): 8-15 events
+//   epic(3): 16-31 events
+//   legendary(4): >= 32 events
+
+pub const BuddyRarity = enum(u8) {
+    common = 0,
+    uncommon = 1,
+    rare = 2,
+    epic = 3,
+    legendary = 4,
+};
+
+fn rarityFromCount(n: u32) BuddyRarity {
+    if (n >= 32) return .legendary;
+    if (n >= 16) return .epic;
+    if (n >= 8) return .rare;
+    if (n >= 3) return .uncommon;
+    return .common;
+}
+
+fn rarityName(r: BuddyRarity) []const u8 {
+    return switch (r) {
+        .common => "common",
+        .uncommon => "uncommon",
+        .rare => "rare",
+        .epic => "epic",
+        .legendary => "legendary",
+    };
+}
+
+/// (buddy-state) → {:rarity "rare" :events 8 :tier 2}
+pub fn buddyStateFn(args: []Value, gc: *GC, _: *Env, res: *Resources) anyerror!Value {
+    if (args.len != 0) return error.ArityError;
+    const count = res.buddy_events;
+    const rarity = rarityFromCount(count);
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    };
+    const entry = try gc.allocObj(.map);
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "rarity"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(rarityName(rarity))));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "events"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(count)));
+    try entry.data.map.keys.append(gc.allocator, try kw.intern(gc, "tier"));
+    try entry.data.map.vals.append(gc.allocator, Value.makeInt(@as(i48, @intFromEnum(rarity))));
+    return Value.makeObj(entry);
+}
+
+/// (buddy-witness event-name) → new rarity tier (monotonic: count only goes up)
+pub fn buddyWitnessFn(args: []Value, _: *GC, _: *Env, res: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    _ = args[0]; // consumed but we only track count for now
+    res.buddy_events +|= 1; // saturating add
+    const rarity = rarityFromCount(res.buddy_events);
+    return Value.makeInt(@as(i48, @intFromEnum(rarity)));
+}
+
+test "buddy rarity progression" {
+    try std.testing.expectEqual(BuddyRarity.common, rarityFromCount(0));
+    try std.testing.expectEqual(BuddyRarity.common, rarityFromCount(2));
+    try std.testing.expectEqual(BuddyRarity.uncommon, rarityFromCount(3));
+    try std.testing.expectEqual(BuddyRarity.uncommon, rarityFromCount(7));
+    try std.testing.expectEqual(BuddyRarity.rare, rarityFromCount(8));
+    try std.testing.expectEqual(BuddyRarity.rare, rarityFromCount(15));
+    try std.testing.expectEqual(BuddyRarity.epic, rarityFromCount(16));
+    try std.testing.expectEqual(BuddyRarity.legendary, rarityFromCount(32));
+    try std.testing.expectEqual(BuddyRarity.legendary, rarityFromCount(1000));
 }

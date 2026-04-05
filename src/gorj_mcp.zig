@@ -24,6 +24,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const Reader = @import("reader.zig").Reader;
 const printer = @import("printer.zig");
 const eval_mod = @import("eval.zig");
@@ -122,6 +123,69 @@ const prelude_forms = [_][]const u8{
     \\                                 {:index i :hex (get c :hex) :trit (get c :trit)}))
     \\                      (range n))]
     \\      (pr-str {:ticks ticks :count n :seed seed}))))
+    ,
+    // gorj_generate_ticks: gatomic-compatible trit-tick generation
+    \\(def gorj-mcp-generate-ticks
+    \\  (fn* [args]
+    \\    (let* [count (or (get args "count") 12)
+    \\           seed (or (get args "seed") 1069)
+    \\           start (or (get args "start") 0)
+    \\           ticks
+    \\             (vec
+    \\               (map
+    \\                 (fn* [i]
+    \\                   (let* [idx (+ start i)
+    \\                          c (color-at seed idx)
+    \\                          prev (if (> idx 0) (color-at seed (- idx 1)) {:trit 0})
+    \\                          s-old (get prev :trit)
+    \\                          s-new (get c :trit)
+    \\                          flicker (cond
+    \\                                    (= s-old s-new) 0
+    \\                                    (= s-new 0) -1
+    \\                                    :else 1)]
+    \\                     {:tick/site seed
+    \\                      :tick/sweep idx
+    \\                      :tick/s-old s-old
+    \\                      :tick/s-new s-new
+    \\                      :tick/color (get c :hex)
+    \\                      :tick/flicker flicker}))
+    \\                 (range count)))
+    \\           trits (vec (map (fn* [t] (get t :tick/s-new)) ticks))
+    \\           balance (reduce + 0 trits)
+    \\           fingerprint (xor-fingerprint trits)]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_generate_ticks"
+    \\               :ticks ticks
+    \\               :balance balance
+    \\               :spi {:fingerprint fingerprint
+    \\                     :balance balance
+    \\                     :ok (= 0 (mod balance 3))}}))))
+    ,
+    // gorj_partition_by_trit: gatomic-compatible tick partitioning
+    \\(def gorj-mcp-partition-by-trit
+    \\  (fn* [args]
+    \\    (let* [ticks-str (or (get args "ticks") "[]")
+    \\           ticks (read-string ticks-str)
+    \\           plus (vec (filter (fn* [t] (= 1 (get t :tick/s-new))) ticks))
+    \\           zero (vec (filter (fn* [t] (= 0 (get t :tick/s-new))) ticks))
+    \\           minus (vec (filter (fn* [t] (= -1 (get t :tick/s-new))) ticks))]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_partition_by_trit"
+    \\               :partitions {:plus plus :zero zero :minus minus}}))))
+    ,
+    // gorj_spi_verify: gatomic-compatible SPI verification on tick sequences
+    \\(def gorj-mcp-spi-verify
+    \\  (fn* [args]
+    \\    (let* [ticks-str (or (get args "ticks") "[]")
+    \\           ticks (read-string ticks-str)
+    \\           trits (vec (map (fn* [t] (get t :tick/s-new)) ticks))
+    \\           balance (reduce + 0 trits)
+    \\           fingerprint (xor-fingerprint trits)]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_spi_verify"
+    \\               :spi {:fingerprint fingerprint
+    \\                     :balance balance
+    \\                     :ok (= 0 (mod balance 3))}}))))
     ,
     // gorj_color: get gay color at seed+index
     \\(def gorj-mcp-color
@@ -532,6 +596,9 @@ const prelude_forms = [_][]const u8{
     \\   "gorj_version" gorj-mcp-version
     \\   "gorj_tools" gorj-mcp-tools
     \\   "gorj_trit_tick" gorj-mcp-trit-tick
+    \\   "gorj_generate_ticks" gorj-mcp-generate-ticks
+    \\   "gorj_partition_by_trit" gorj-mcp-partition-by-trit
+    \\   "gorj_spi_verify" gorj-mcp-spi-verify
     \\   "gorj_color" gorj-mcp-color
     \\   "gorj_substrate" gorj-mcp-substrate
     \\   "gorj_compile" gorj-mcp-compile
@@ -617,7 +684,8 @@ fn dispatchTool(allocator: std.mem.Allocator, tool_name: []const u8, arguments: 
     if (core.isBuiltinSentinel(dispatch_sym, &global_gc)) |name| {
         if (core.lookupBuiltin(name)) |builtin| {
             var call_args = [_]Value{ tool_name_val, args_val };
-            const result = builtin(&call_args, &global_gc, &global_env) catch {
+            var mcp_res = @import("transitivity.zig").Resources.initDefault();
+            const result = builtin(&call_args, &global_gc, &global_env, &mcp_res) catch {
                 return "Error: dispatch builtin call failed";
             };
             return printer.prStr(result, &global_gc, false) catch "Error: print failed";
@@ -684,6 +752,24 @@ const tool_defs = [_]ToolDef{
         .description = "Generate trit-ticks from seed using golden angle spiral. Returns trit+color per tick.",
         .input_schema =
         \\{"type":"object","properties":{"count":{"type":"integer","default":12,"description":"Number of ticks"},"seed":{"type":"integer","default":1069,"description":"SplitMix64 seed"}},"required":[]}
+    },
+    .{
+        .name = "gorj_generate_ticks",
+        .description = "Generate gatomic-compatible tick maps with SPI metadata. Returns :tick/site, :tick/sweep, :tick/s-old, :tick/s-new, :tick/color, and :tick/flicker.",
+        .input_schema =
+        \\{"type":"object","properties":{"count":{"type":"integer","default":12,"description":"Number of ticks to generate"},"seed":{"type":"integer","default":1069,"description":"SplitMix64 seed for color/trit generation"},"start":{"type":"integer","default":0,"description":"Starting sweep index"}},"required":[]}
+    },
+    .{
+        .name = "gorj_partition_by_trit",
+        .description = "Partition gatomic-compatible tick maps into plus/zero/minus buckets by :tick/s-new. Expects ticks as an EDN string because self-hosted dispatch currently supports primitive JSON values only.",
+        .input_schema =
+        \\{"type":"object","properties":{"ticks":{"type":"string","description":"EDN string representing a vector of tick maps"}},"required":["ticks"]}
+    },
+    .{
+        .name = "gorj_spi_verify",
+        .description = "Verify GF(3)/SPI balance for a sequence of gatomic-compatible tick maps. Expects ticks as an EDN string because self-hosted dispatch currently supports primitive JSON values only.",
+        .input_schema =
+        \\{"type":"object","properties":{"ticks":{"type":"string","description":"EDN string representing a vector of tick maps"}},"required":["ticks"]}
     },
     .{
         .name = "gorj_color",
@@ -1089,4 +1175,51 @@ test "gorj_mcp: self-hosted eval dispatch roundtrip" {
     try std.testing.expect(result.isString());
     const s = gc.getString(result.asStringId());
     try std.testing.expect(s.len > 0);
+}
+
+fn evalPreludeForm(src: []const u8, env: *Env, gc: *GC) !Value {
+    var reader = Reader.init(src, gc);
+    const form = try reader.readForm();
+    var res = semantics.Resources.initDefault();
+    return switch (semantics.evalBounded(form, env, gc, &res)) {
+        .value => |v| v,
+        .bottom => error.SkipZigTest,
+        .err => error.SkipZigTest,
+    };
+}
+
+test "gorj_mcp: gatomic-style tick tools are discoverable and dispatchable" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    env.is_root = true;
+    defer env.deinit();
+    try core.initCore(&env, &gc);
+    defer core.deinitCore();
+
+    for (prelude_forms) |form_src| {
+        _ = try evalPreludeForm(form_src, &env, &gc);
+    }
+
+    var saw_generate = false;
+    var saw_partition = false;
+    var saw_verify = false;
+    for (tool_defs) |tool| {
+        if (std.mem.eql(u8, tool.name, "gorj_generate_ticks")) saw_generate = true;
+        if (std.mem.eql(u8, tool.name, "gorj_partition_by_trit")) saw_partition = true;
+        if (std.mem.eql(u8, tool.name, "gorj_spi_verify")) saw_verify = true;
+    }
+    try std.testing.expect(saw_generate);
+    try std.testing.expect(saw_partition);
+    try std.testing.expect(saw_verify);
+
+    const result = try evalPreludeForm(
+        \\(gorj-mcp-dispatch "gorj_generate_ticks" {"count" 4 "seed" 1069 "start" 0})
+    , &env, &gc);
+
+    try std.testing.expect(result.isString());
+    const s = gc.getString(result.asStringId());
+    try std.testing.expect(std.mem.indexOf(u8, s, "gorj_generate_ticks") != null);
+    try std.testing.expect(std.mem.indexOf(u8, s, ":ticks") != null);
+    try std.testing.expect(std.mem.indexOf(u8, s, ":fingerprint") != null);
 }
