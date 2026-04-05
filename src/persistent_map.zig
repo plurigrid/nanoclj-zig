@@ -40,6 +40,10 @@ fn hashValue(v: Value, gc: *GC) u32 {
             std.mem.writeInt(u32, buf[12..16], @bitCast(c.alpha), .little);
             return @truncate(std.hash.Wyhash.hash(4, &buf));
         }
+        // Channels: hash by identity (pointer address)
+        if (obj.kind == .channel) {
+            return @truncate(std.hash.Wyhash.hash(5, std.mem.asBytes(&@intFromPtr(obj))));
+        }
     }
     // fallback: treat as zero hash
     return 0;

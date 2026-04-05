@@ -334,6 +334,17 @@ pub const Value = packed struct {
         return true;
     }
 
+    /// Coerce to f64: works for int, float, rational. Returns null for non-numeric.
+    pub fn asNumber(self: Value) ?f64 {
+        if (self.isFloat()) return self.asFloat();
+        if (self.isInt()) return @floatFromInt(self.asInt());
+        if (self.isObj()) {
+            const obj = self.asObj();
+            if (obj.kind == .rational) return obj.data.rational.toFloat();
+        }
+        return null;
+    }
+
     pub fn eql(a: Value, b: Value) bool {
         return a.bits == b.bits;
     }

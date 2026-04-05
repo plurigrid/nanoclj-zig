@@ -9,6 +9,10 @@ Thermodynamic floor: kT·ln(3) per trit, kT·ln(2) per bit (Landauer).
 
 ---
 
+## Tactics Documents (`.topos/`)
+
+- `molecular-upscale-tactics.md` — 7 tactics for molecular structure upscaling via band decomposition, GF(3) ring conservation, inet-based per-band upscale, kanren constraint propagation. Maps to faces 1,5,6,8,12,13,15.
+
 ## Skill Maps (`.topos/`)
 
 - `SKILL_MAP.md` — runtime builtin/skill topology mapped to expander faces, levels, and communities served.

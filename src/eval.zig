@@ -1314,6 +1314,12 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
             }
         }
 
+        // Push stack frame for source location tracking
+        const frame_name = fn_data.name orelse "<anonymous>";
+        const loc = if (obj.meta) |m| @import("srcloc.zig").getLocFromMeta(m, gc) else null;
+        @import("srcloc.zig").pushFrame(frame_name, loc);
+        defer @import("srcloc.zig").popFrame();
+
         var result = Value.makeNil();
         for (fn_data.body.items) |form| {
             result = try eval(form, child, gc);

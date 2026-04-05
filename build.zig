@@ -132,6 +132,27 @@ pub fn build(b: *std.Build) void {
     const sector_step = b.step("sector", "Build SectorClojure freestanding boot image");
     sector_step.dependOn(&sector_install.step);
 
+    // WASM target: nanoclj as a WebAssembly module
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+        .abi = .none,
+    });
+    const wasm_exe = b.addExecutable(.{
+        .name = "nanoclj.wasm",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/wasm_main.zig"),
+            .target = wasm_target,
+            .optimize = .ReleaseSmall,
+            .strip = true,
+        }),
+    });
+    // Export eval entry point for JS host
+    wasm_exe.root_module.export_symbol_names = &.{ "nanoclj_init", "nanoclj_eval", "nanoclj_alloc", "nanoclj_free" };
+    b.installArtifact(wasm_exe);
+    const wasm_step = b.step("wasm", "Build nanoclj WebAssembly module");
+    wasm_step.dependOn(&wasm_exe.step);
+
     // Tests
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
