@@ -9,6 +9,7 @@ const core = @import("core.zig");
 const semantics = @import("semantics.zig");
 const color_strip = @import("color_strip.zig");
 const substrate = @import("substrate.zig");
+const holy = @import("holy.zig");
 const bc = @import("bytecode.zig");
 const Compiler = @import("compiler.zig").Compiler;
 const disasm = @import("disasm.zig");
@@ -719,4 +720,7 @@ test {
     // sector_boot.zig: x86 real-mode only, skip on ARM/macOS
     _ = @import("regex.zig");
     _ = @import("pluralism.zig");
+    _ = @import("holy.zig");
+    _ = @import("congrunet.zig");
+    _ = @import("decomp.zig");
 }

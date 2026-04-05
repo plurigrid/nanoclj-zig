@@ -93,51 +93,235 @@ fn hashName(name: []const u8) u64 {
 }
 
 // ============================================================================
-// TRANSCLUSION ENGINE — resolve \transclude{id} per interaction
+// MEMOIZATION CACHE — content-addressed, FNV-1a keyed, HAMT-backed
 // ============================================================================
+//
+// Four cacheable surfaces, each with different invalidation semantics:
+//
+//   Layer           Key             Invalidation         GF(3)
+//   ─────────────   ──────────────  ──────────────────   ─────
+//   tree_cache      tree-id hash    watcher cell poll    +1 (read)
+//   expand_cache    body FNV-1a     any tree_cache miss  0  (transform)
+//   tier1_cache     net generation  skill register/rm    -1 (emit)
+//   tier2_cache     skill+gen hash  skill register/rm    0  (emit)
+//
+// All four share a single generation counter. Any mutation (register,
+// watcher-detected change) bumps the generation, which lazily invalidates
+// expand_cache and tier caches on next access. tree_cache entries carry
+// their own FNV-1a hash for fine-grained invalidation.
+//
+// The cache is a plain AutoHashMap(u64, CacheEntry) — NOT PersistentMap —
+// because cache entries are mutable (they get replaced on invalidation).
+// PersistentMap's structural sharing would be useful if we wanted to keep
+// historical snapshots of the cache, but for now LRU-style replacement
+// on a flat map is simpler and faster.
+//
+// To use PersistentMap instead (e.g. for time-travel debugging or
+// bisimulation of cache states across worlds), replace tree_cache with:
+//
+//   var cache_map: PersistentMap = PersistentMap.empty(allocator);
+//   // key = Value.makeKeyword(tree_id), val = Value.makeString(content)
+//   cache_map = try cache_map.assoc(key, val, gc);
+//
+// This gives O(log32 n) lookup with structural sharing — old cache
+// snapshots remain valid, enabling diffing between interaction states.
 
-/// Forest roots to search for .tree files. First match wins.
-const forest_roots = [_][]const u8{
+const CacheEntry = struct {
+    content: []const u8, // interned string id or raw bytes
+    hash: u64, // FNV-1a of source content (for invalidation)
+    generation: u64, // net generation when cached
+};
+
+/// Global cache generation — bumped on any skill mutation
+var cache_generation: u64 = 0;
+
+/// Tree content cache: tree-id hash → CacheEntry
+var tree_cache: ?std.AutoHashMap(u64, CacheEntry) = null;
+
+/// Expanded body cache: body FNV-1a → CacheEntry (post-transclusion)
+var expand_cache: ?std.AutoHashMap(u64, CacheEntry) = null;
+
+/// Tier 1 XML cache: single entry (generation-gated)
+var tier1_cached_xml: ?[]const u8 = null;
+var tier1_cached_gen: u64 = 0;
+
+/// Tier 2 XML cache: skill name hash → CacheEntry
+var tier2_cache: ?std.AutoHashMap(u64, CacheEntry) = null;
+
+fn ensureTreeCache(allocator: std.mem.Allocator) *std.AutoHashMap(u64, CacheEntry) {
+    if (tree_cache == null) {
+        tree_cache = std.AutoHashMap(u64, CacheEntry).init(allocator);
+    }
+    return &tree_cache.?;
+}
+
+fn ensureExpandCache(allocator: std.mem.Allocator) *std.AutoHashMap(u64, CacheEntry) {
+    if (expand_cache == null) {
+        expand_cache = std.AutoHashMap(u64, CacheEntry).init(allocator);
+    }
+    return &expand_cache.?;
+}
+
+fn ensureTier2Cache(allocator: std.mem.Allocator) *std.AutoHashMap(u64, CacheEntry) {
+    if (tier2_cache == null) {
+        tier2_cache = std.AutoHashMap(u64, CacheEntry).init(allocator);
+    }
+    return &tier2_cache.?;
+}
+
+/// Bump generation — called on register, watcher-detected change, etc.
+fn invalidateCaches() void {
+    cache_generation +%= 1;
+}
+
+// ============================================================================
+// TRANSCLUSION ENGINE — universal resolver, zero-copy via GC intern
+// ============================================================================
+//
+// Everything is a \transclude source and target:
+//   \transclude{dbl-0001}           → .tree in horse forests
+//   \transclude{rosetta-stone...}   → .md in .topos/papers/
+//   \transclude{color-gf3-tiling}   → .json in .topos/models/
+//   \transclude{tropical-algebra}   → SKILL.md in .agents/skills/
+//   \transclude{/abs/path/file.ext} → direct absolute path
+//
+// Resolution order: if id contains '/' or '.', try as literal path first.
+// Otherwise, search roots × extensions. First match wins.
+// Content is interned in GC string table → zero-copy on repeat access.
+
+/// Search roots: forests, .topos subdirs, skill dirs. Order = priority.
+const search_roots = [_][]const u8{
+    // Horse forests (forester .tree files)
     "/Users/bob/i/horse/trees/",
     "/Users/bob/i/horse-scan/trees/",
     "/Users/bob/i/horse-theory/trees/",
+    // .topos knowledge base
+    "/Users/bob/i/nanoclj-zig/.topos/papers/",
+    "/Users/bob/i/nanoclj-zig/.topos/models/",
+    "/Users/bob/i/nanoclj-zig/.topos/diagrams/",
+    "/Users/bob/i/nanoclj-zig/.topos/analyses/",
+    "/Users/bob/i/nanoclj-zig/.topos/repos/",
+    "/Users/bob/i/zig-syrup/.topos/models/",
+    "/Users/bob/i/zig-syrup/.topos/diagrams/",
+    "/Users/bob/i/zig-syrup/.topos/analyses/",
+    // Agent skills
+    "/Users/bob/i/nanoclj-zig/.agents/skills/",
+    "/Users/bob/i/zig-syrup/.agents/skills/",
 };
 
-/// Resolve a single tree id (e.g. "dbl-0001") to file content.
-/// Tries each forest root, returns null if not found.
-fn resolveTree(id: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
-    var path_buf: [4096]u8 = undefined;
-    for (forest_roots) |root| {
-        const path_len = root.len + id.len + ".tree".len;
-        if (path_len >= path_buf.len) continue;
-        @memcpy(path_buf[0..root.len], root);
-        @memcpy(path_buf[root.len..][0..id.len], id);
-        @memcpy(path_buf[root.len + id.len ..][0..".tree".len], ".tree");
-        path_buf[path_len] = 0;
+/// Extensions to try, in order. Empty = try id as-is (bare filename).
+const search_exts = [_][]const u8{
+    ".tree",
+    ".md",
+    ".json",
+    ".clj",
+    "/SKILL.md",
+    "",
+};
 
-        const cf = cFopen(path_buf[0..path_len], "r");
-        if (cf == null) continue;
-        defer _ = std.c.fclose(cf.?);
+/// Read raw file content from disk. Caller owns returned slice.
+fn slurpFile(path: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
+    const cf = cFopen(path, "r");
+    if (cf == null) return null;
+    defer _ = std.c.fclose(cf.?);
 
-        // Read in chunks (matches core.zig slurp pattern)
-        var contents = compat.emptyList(u8);
-        while (true) {
-            var rbuf: [4096]u8 = undefined;
-            const rn = std.c.fread(&rbuf, 1, rbuf.len, cf.?);
-            if (rn == 0) break;
-            contents.appendSlice(allocator, rbuf[0..rn]) catch {
-                contents.deinit(allocator);
-                break;
-            };
-        }
-        if (contents.items.len == 0) {
+    var contents = compat.emptyList(u8);
+    while (true) {
+        var rbuf: [4096]u8 = undefined;
+        const rn = std.c.fread(&rbuf, 1, rbuf.len, cf.?);
+        if (rn == 0) break;
+        contents.appendSlice(allocator, rbuf[0..rn]) catch {
             contents.deinit(allocator);
-            continue;
+            return null;
+        };
+    }
+    if (contents.items.len == 0) {
+        contents.deinit(allocator);
+        return null;
+    }
+    const duped = allocator.dupe(u8, contents.items) catch {
+        contents.deinit(allocator);
+        return null;
+    };
+    contents.deinit(allocator);
+    return duped;
+}
+
+/// Universal resolve: id → file content. Searches roots × extensions.
+/// If id starts with '/' → try as absolute path directly.
+/// If id contains '.' → try as literal filename in each root.
+fn readFromDisk(id: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
+    var path_buf: [4096]u8 = undefined;
+
+    // Absolute path: try directly
+    if (id.len > 0 and id[0] == '/') {
+        return slurpFile(id, allocator);
+    }
+
+    // Search roots × extensions
+    for (search_roots) |root| {
+        for (search_exts) |ext| {
+            const path_len = root.len + id.len + ext.len;
+            if (path_len >= path_buf.len) continue;
+            @memcpy(path_buf[0..root.len], root);
+            @memcpy(path_buf[root.len..][0..id.len], id);
+            @memcpy(path_buf[root.len + id.len ..][0..ext.len], ext);
+            path_buf[path_len] = 0;
+
+            if (slurpFile(path_buf[0..path_len], allocator)) |content| {
+                return content;
+            }
         }
-        // Caller owns the backing allocation via items slice
-        return contents.items;
     }
     return null;
+}
+
+/// Resolve a single tree id (e.g. "dbl-0001") to file content.
+/// Cache hit: return cached content if FNV-1a hash still matches disk.
+/// Cache miss or stale: read from disk, update cache.
+fn resolveTree(id: []const u8, allocator: std.mem.Allocator) ?[]const u8 {
+    const id_hash = contentHash(id);
+    const tc = ensureTreeCache(allocator);
+
+    // Check cache
+    if (tc.get(id_hash)) |entry| {
+        if (entry.generation == cache_generation) {
+            // Same generation — trust the cache without re-reading
+            return allocator.dupe(u8, entry.content) catch null;
+        }
+        // Stale generation — re-read and compare hash
+        if (readFromDisk(id, allocator)) |fresh| {
+            const fresh_hash = contentHash(fresh);
+            if (fresh_hash == entry.hash) {
+                // Content unchanged — update generation, return cached
+                tc.put(id_hash, .{
+                    .content = entry.content,
+                    .hash = entry.hash,
+                    .generation = cache_generation,
+                }) catch {};
+                allocator.free(fresh);
+                return allocator.dupe(u8, entry.content) catch null;
+            }
+            // Content changed — update cache entry
+            tc.put(id_hash, .{
+                .content = fresh,
+                .hash = fresh_hash,
+                .generation = cache_generation,
+            }) catch {};
+            return fresh;
+        }
+        return null;
+    }
+
+    // Cache miss — read from disk and populate
+    const content = readFromDisk(id, allocator) orelse return null;
+    tc.put(id_hash, .{
+        .content = content,
+        .hash = contentHash(content),
+        .generation = cache_generation,
+    }) catch {};
+    // Return a dupe so caller can free independently
+    return allocator.dupe(u8, content) catch null;
 }
 
 /// Expand all \transclude{id} in text, recursively up to max_depth.
@@ -206,7 +390,13 @@ fn expandTransclusions(text: []const u8, allocator: std.mem.Allocator, depth: u8
         result.deinit(allocator);
         return text;
     }
-    return result.items;
+    // Dupe to get a properly-sized allocation the caller can free
+    const duped = allocator.dupe(u8, result.items) catch {
+        result.deinit(allocator);
+        return text;
+    };
+    result.deinit(allocator);
+    return duped;
 }
 
 /// Max transclusion depth (prevents infinite recursion in circular references)
@@ -303,11 +493,13 @@ pub fn registerSkill(meta: Value, gc: *GC) !u16 {
                             // Dedup: if already registered, update payload
                             if (name_to_cell.?.get(h)) |existing| {
                                 net.cells.items[existing].payload = meta;
+                                invalidateCaches();
                                 return existing;
                             }
                             // New cell: γ (constructor, trit +1)
                             const idx = try net.addCell(.gamma, 1, meta);
                             try name_to_cell.?.put(h, idx);
+                            invalidateCaches();
                             return idx;
                         }
                     }
@@ -357,7 +549,14 @@ pub fn activateSkill(name: []const u8, gc: *GC, res: *Resources) !Value {
 // ============================================================================
 
 /// Format tier 1: <available_skills> XML from all live skill cells
+/// Cached by generation — only rebuilds when skills are added/removed.
 pub fn formatTier1(gc: *GC) !Value {
+    // Check generation cache
+    if (tier1_cached_xml) |cached| {
+        if (tier1_cached_gen == cache_generation) {
+            return Value.makeString(try gc.internString(cached));
+        }
+    }
     const net = ensureNet(gc);
     var buf = compat.emptyList(u8);
     defer buf.deinit(gc.allocator);
@@ -395,7 +594,11 @@ pub fn formatTier1(gc: *GC) !Value {
     }
 
     try buf.appendSlice(gc.allocator, "</available_skills>");
-    return Value.makeString(try gc.internString(buf.items));
+    const interned = try gc.internString(buf.items);
+    // Cache the interned string for this generation
+    tier1_cached_xml = gc.getString(interned);
+    tier1_cached_gen = cache_generation;
+    return Value.makeString(interned);
 }
 
 /// Format tier 2: <activated_skill> XML for a specific skill
@@ -607,9 +810,10 @@ pub fn skillWatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         return Value.makeKeyword(try gc.internString("unchanged"));
     }
 
-    // Content changed — re-parse and update cell payload
+    // Content changed — re-parse, update cell, invalidate caches
     const new_meta = try parseFrontmatter(contents.items, gc);
     net.cells.items[cell_idx].payload = new_meta;
+    invalidateCaches();
     return Value.makeKeyword(try gc.internString("changed"));
 }
 
@@ -709,6 +913,46 @@ pub fn skillTranscludeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeString(try gc.internString(expanded));
 }
 
+/// (skill-cache-stats) → {:generation N :tree-entries N :expand-entries N :tier2-entries N :tier1-cached? bool}
+pub fn skillCacheStatsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+    const obj = try gc.allocObj(.map);
+    const m = &obj.data.map;
+    const kw = struct {
+        fn intern(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    }.intern;
+
+    try m.keys.append(gc.allocator, try kw(gc, "generation"));
+    try m.vals.append(gc.allocator, Value.makeInt(@intCast(cache_generation)));
+
+    try m.keys.append(gc.allocator, try kw(gc, "tree-entries"));
+    const tc_count: i48 = if (tree_cache) |tc| @intCast(tc.count()) else 0;
+    try m.vals.append(gc.allocator, Value.makeInt(tc_count));
+
+    try m.keys.append(gc.allocator, try kw(gc, "expand-entries"));
+    const ec_count: i48 = if (expand_cache) |ec| @intCast(ec.count()) else 0;
+    try m.vals.append(gc.allocator, Value.makeInt(ec_count));
+
+    try m.keys.append(gc.allocator, try kw(gc, "tier2-entries"));
+    const t2_count: i48 = if (tier2_cache) |t2| @intCast(t2.count()) else 0;
+    try m.vals.append(gc.allocator, Value.makeInt(t2_count));
+
+    try m.keys.append(gc.allocator, try kw(gc, "tier1-cached"));
+    try m.vals.append(gc.allocator, if (tier1_cached_xml != null and tier1_cached_gen == cache_generation)
+        Value.makeInt(1)
+    else
+        Value.makeInt(0));
+
+    return Value.makeObj(obj);
+}
+
+/// (skill-invalidate) → bumps generation, forces all caches stale
+pub fn skillInvalidateFn(_: []Value, _: *GC, _: *Env) anyerror!Value {
+    invalidateCaches();
+    return Value.makeInt(@intCast(cache_generation));
+}
+
 // ============================================================================
 // SKILL TABLE (for core.zig registration)
 // ============================================================================
@@ -723,6 +967,8 @@ pub const skill_table = .{
     .{ "skill-watch", &skillWatchFn },
     .{ "skill-watch-all", &skillWatchAllFn },
     .{ "skill-transclude", &skillTranscludeFn },
+    .{ "skill-cache-stats", &skillCacheStatsFn },
+    .{ "skill-invalidate", &skillInvalidateFn },
 };
 
 // ============================================================================
@@ -739,6 +985,21 @@ fn cleanupGlobalState(alloc: std.mem.Allocator) void {
         name_to_cell = null;
     }
     skill_allocator = null;
+    if (tree_cache) |*tc| {
+        tc.deinit();
+        tree_cache = null;
+    }
+    if (expand_cache) |*ec| {
+        ec.deinit();
+        expand_cache = null;
+    }
+    if (tier2_cache) |*t2| {
+        t2.deinit();
+        tier2_cache = null;
+    }
+    tier1_cached_xml = null;
+    tier1_cached_gen = 0;
+    cache_generation = 0;
     _ = alloc;
 }
 

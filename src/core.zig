@@ -35,7 +35,10 @@ const tower = @import("tower.zig");
 const marsaglia_bumpus = @import("marsaglia_bumpus.zig");
 const scoped_propagators = @import("scoped_propagators.zig");
 const skill_inet = @import("skill_inet.zig");
+const decomp = @import("decomp.zig");
 const brainfloj = @import("brainfloj.zig");
+const congrunet = @import("congrunet.zig");
+const holy = @import("holy.zig");
 
 fn getSeedMs() i64 {
     var ts: std.c.timespec = undefined;
@@ -159,6 +162,14 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Brainfloj builtins
         .{ "brainfloj-parse", &brainfloj.brainflojParseFn },
         .{ "brainfloj-read", &brainfloj.brainflojReadFn },
+        // HolyZig builtins
+        .{ "holy-eval", &holy.holyEvalFn },
+        .{ "holy-converge", &holy.holyConvergeFn },
+        .{ "holy-converge-trace", &holy.holyConvergeTraceFn },
+        .{ "holy-converge-summary", &holy.holyConvergeSummaryFn },
+        .{ "congrunet-summary", &congrunet.congrunetSummaryFn },
+        .{ "congrunet-trace", &congrunet.congrunetTraceFn },
+        .{ "congrunet-presheaf", &congrunet.congrunetPresheafFn },
         // nREPL
         .{ "nrepl-start", &substrate.nreplStartFn },
         // Substrate traversal
@@ -604,6 +615,23 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "skill-watch", &skill_inet.skillWatchFn },
         .{ "skill-watch-all", &skill_inet.skillWatchAllFn },
         .{ "skill-transclude", &skill_inet.skillTranscludeFn },
+        .{ "skill-cache-stats", &skill_inet.skillCacheStatsFn },
+        .{ "skill-invalidate", &skill_inet.skillInvalidateFn },
+        // Structured decompositions + sheaves
+        .{ "decompose", &decomp.decomposeFn },
+        .{ "decomp-bags", &decomp.decompBagsFn },
+        .{ "decomp-width", &decomp.decompWidthFn },
+        .{ "decomp-glue", &decomp.decompGlueFn },
+        .{ "decomp-map", &decomp.decompMapFn },
+        .{ "decomp-decide", &decomp.decompDecideFn },
+        .{ "decomp-skeleton", &decomp.decompSkeletonFn },
+        .{ "decomp-adhesions", &decomp.decompAdhesionsFn },
+        .{ "sheaf", &decomp.sheafFn },
+        .{ "section", &decomp.sectionFn },
+        .{ "restrict", &decomp.restrictFn },
+        .{ "extend-section", &decomp.extendSectionFn },
+        .{ "trit-trajectory", &decomp.tritTrajectoryFn },
+        .{ "decomp-gf3", &decomp.decompGf3Fn },
     };
 
     inline for (builtins) |b| {

@@ -36,6 +36,18 @@
 (println "  body length:" (count (get cg :body)))
 (println)
 
+;; ── Phase 3: Transclusion ───────────────────────────────────────
+(println "=== Phase 3: Tree Transclusion ===")
+(skill-register (skill-parse-file ".agents/skills/double-category/SKILL.md"))
+(println "=== Tier 2 with transclusion (double-category): ===")
+(println (skill-load "double-category"))
+(println)
+
+;; Direct transclusion
+(println "=== Direct transclude bci-0003: ===")
+(println (skill-transclude "bci-0003"))
+(println)
+
 ;; ── GF(3) conservation check ────────────────────────────────────
 (println "=== GF(3) Conservation ===")
 (def stats (skill-net-stats))

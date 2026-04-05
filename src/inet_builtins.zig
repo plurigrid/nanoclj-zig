@@ -52,6 +52,19 @@ fn findFreeSlot() ?usize {
     return null;
 }
 
+/// Public accessors for decomp.zig
+pub fn findFreeSlotPub() ?usize {
+    return findFreeSlot();
+}
+
+pub fn setNet(slot: usize, net: Net) void {
+    nets[slot] = net;
+}
+
+pub fn ensureAllocatorPub(gc: *GC) void {
+    _ = ensureAllocator(gc);
+}
+
 // ============================================================================
 // BUILTINS
 // ============================================================================

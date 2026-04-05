@@ -1,7 +1,7 @@
 //! MCP (Model Context Protocol) Server for nanoclj-zig
 //!
 //! Exposes nanoclj-zig Clojure interpreter as MCP tools over JSON-RPC 2.0 on stdio.
-//! Tools: nanoclj_eval, nanoclj_color_at, nanoclj_bci_read, nanoclj_substrate, nanoclj_traverse
+//! Tools: nanoclj_eval, nanoclj_color_at, nanoclj_bci_read, nanoclj_brainfloj_read, nanoclj_substrate, nanoclj_traverse
 
 const std = @import("std");
 const compat = @import("compat.zig");
@@ -182,6 +182,12 @@ const tools = [_]Tool{
         \\{"type":"object","properties":{"channels":{"type":"integer","default":8,"description":"Number of channels (default 8)"}},"required":[]}
     },
     .{
+        .name = "nanoclj_brainfloj_read",
+        .description = "Read delimited EEG/BrainFlow-style data from a file and summarize a channel block.",
+        .input_schema =
+        \\{"type":"object","properties":{"path":{"type":"string","description":"Path to CSV/TSV-style EEG matrix"},"channels":{"type":"integer","description":"Number of channels to read (e.g. 72)"},"column_offset":{"type":"integer","default":0,"description":"Number of leading columns to skip before EEG data"}},"required":["path","channels"]}
+    },
+    .{
         .name = "nanoclj_substrate",
         .description = "Get nanoclj-zig substrate info: runtime, GC objects, builtin count",
         .input_schema =
@@ -347,6 +353,58 @@ fn handleBciRead(allocator: std.mem.Allocator, args: json.ObjectMap) !json.Value
     return toolResult(allocator, text);
 }
 
+fn appendCljString(buf: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, s: []const u8) !void {
+    try buf.append(allocator, '"');
+    for (s) |c| {
+        switch (c) {
+            '\\' => try buf.appendSlice(allocator, "\\\\"),
+            '"' => try buf.appendSlice(allocator, "\\\""),
+            '\n' => try buf.appendSlice(allocator, "\\n"),
+            '\r' => try buf.appendSlice(allocator, "\\r"),
+            '\t' => try buf.appendSlice(allocator, "\\t"),
+            else => try buf.append(allocator, c),
+        }
+    }
+    try buf.append(allocator, '"');
+}
+
+fn handleBrainflojRead(allocator: std.mem.Allocator, args: json.ObjectMap) !json.Value {
+    const path_val = args.get("path") orelse return toolError(allocator, "missing 'path'");
+    const path = switch (path_val) {
+        .string => |s| s,
+        else => return toolError(allocator, "'path' must be string"),
+    };
+
+    const channels_val = args.get("channels") orelse return toolError(allocator, "missing 'channels'");
+    const channels = switch (channels_val) {
+        .integer => |i| i,
+        else => return toolError(allocator, "'channels' must be integer"),
+    };
+    if (channels <= 0) return toolError(allocator, "'channels' must be positive");
+
+    const column_offset: i64 = if (args.get("column_offset")) |v| switch (v) {
+        .integer => |i| i,
+        else => return toolError(allocator, "'column_offset' must be integer"),
+    } else 0;
+    if (column_offset < 0) return toolError(allocator, "'column_offset' must be non-negative");
+
+    var expr = compat.emptyList(u8);
+    defer expr.deinit(allocator);
+    try expr.appendSlice(allocator, "(brainfloj-read ");
+    try appendCljString(&expr, allocator, path);
+    var tmp: [128]u8 = undefined;
+    const channels_s = std.fmt.bufPrint(&tmp, " {d}", .{channels}) catch return toolError(allocator, "fmt error");
+    try expr.appendSlice(allocator, channels_s);
+    if (column_offset != 0) {
+        const offset_s = std.fmt.bufPrint(&tmp, " {d}", .{column_offset}) catch return toolError(allocator, "fmt error");
+        try expr.appendSlice(allocator, offset_s);
+    }
+    try expr.append(allocator, ')');
+
+    const result_str = try rep(allocator, expr.items);
+    return toolResult(allocator, result_str);
+}
+
 fn handleSubstrate(allocator: std.mem.Allocator) !json.Value {
     const gc_count: u64 = if (nanoclj_initialized) global_gc.objects.items.len else 0;
 
@@ -439,6 +497,8 @@ fn handleCallTool(allocator: std.mem.Allocator, params: json.ObjectMap) !json.Va
         return handleColorAt(allocator, arguments);
     } else if (std.mem.eql(u8, name, "nanoclj_bci_read")) {
         return handleBciRead(allocator, arguments);
+    } else if (std.mem.eql(u8, name, "nanoclj_brainfloj_read")) {
+        return handleBrainflojRead(allocator, arguments);
     } else if (std.mem.eql(u8, name, "nanoclj_substrate")) {
         return handleSubstrate(allocator);
     } else if (std.mem.eql(u8, name, "nanoclj_traverse")) {
