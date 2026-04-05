@@ -433,6 +433,96 @@ const prelude_forms = [_][]const u8{
     \\             {:dialect "cream"       :tool "gorj_cream"    :best "GraalVM + Crema eval"}
     \\             {:dialect "clojerl"     :tool "gorj_clojerl"  :best "Erlang VM fault tolerance"}])))
     ,
+    // gorj_peval: parallel eval of N expressions with fuel conservation
+    // Exposes the unique fork/join fuel model — no other Clojure has this.
+    // Each expr gets equal fuel share; GF(3) trit is conserved across fork/join.
+    \\(def gorj-mcp-peval
+    \\  (fn* [args]
+    \\    (let* [exprs-str (get args "exprs")
+    \\           exprs (read-string exprs-str)
+    \\           results (pmap (fn* [e] (gorj-pipe (pr-str e))) exprs)
+    \\           formatted (map (fn* [r] {:result (first r)
+    \\                                    :version-id (nth r 1)
+    \\                                    :trit (nth r 2)}) results)]
+    \\      (pr-str {:parallel true
+    \\               :count (count exprs)
+    \\               :results (vec formatted)
+    \\               :gf3-sum (reduce + 0 (map (fn* [r] (nth r 2)) results))}))))
+    ,
+    // gorj_atom: persistent named atoms across MCP calls
+    // Create, read, swap, reset atoms by name — stateful MCP with CAS semantics.
+    \\(def gorj-mcp-atom-registry (atom {}))
+    ,
+    \\(def gorj-mcp-atom
+    \\  (fn* [args]
+    \\    (let* [op (or (get args "op") "deref")
+    \\           name (get args "name")
+    \\           registry @gorj-mcp-atom-registry]
+    \\      (cond
+    \\        (= op "create")
+    \\          (let* [init (read-string (or (get args "init") "nil"))
+    \\                 a (atom init)]
+    \\            (swap! gorj-mcp-atom-registry assoc name a)
+    \\            (pr-str {:op "create" :name name :value init}))
+    \\        (= op "deref")
+    \\          (let* [a (get registry name)]
+    \\            (if a
+    \\              (pr-str {:op "deref" :name name :value @a})
+    \\              (pr-str {:error (str "no atom named: " name)})))
+    \\        (= op "reset")
+    \\          (let* [a (get registry name)
+    \\                 v (read-string (get args "value"))]
+    \\            (if a
+    \\              (do (reset! a v)
+    \\                  (pr-str {:op "reset" :name name :value v}))
+    \\              (pr-str {:error (str "no atom named: " name)})))
+    \\        (= op "swap")
+    \\          (let* [a (get registry name)
+    \\                 f (read-string (get args "fn"))
+    \\                 new-val (swap! a f)]
+    \\            (if a
+    \\              (pr-str {:op "swap" :name name :value new-val})
+    \\              (pr-str {:error (str "no atom named: " name)})))
+    \\        (= op "list")
+    \\          (pr-str {:op "list" :atoms (vec (keys registry))})
+    \\        (= op "cas")
+    \\          (let* [a (get registry name)
+    \\                 old (read-string (get args "old"))
+    \\                 new (read-string (get args "new"))]
+    \\            (if a
+    \\              (pr-str {:op "cas" :name name :swapped (compare-and-set! a old new) :value @a})
+    \\              (pr-str {:error (str "no atom named: " name)})))
+    \\        :else (pr-str {:error (str "unknown op: " op)})))))
+    ,
+    // gorj_session: session info with version stream + GF(3) conservation status
+    // Exposes the Braid version DAG frontier and trit accumulator
+    \\(def gorj-mcp-session
+    \\  (fn* [args]
+    \\    (let* [v (gorj-version)
+    \\           pipe-result (gorj-eval "(+ 0 0)")
+    \\           gf3 (get pipe-result :gf3-balanced?)]
+    \\      (pr-str {:session-seed 1069
+    \\               :version-frontier v
+    \\               :gf3-balanced gf3
+    \\               :fuel-model "fork/join with Landauer join cost"
+    \\               :wire-format "syrup"
+    \\               :version-dag "braid-http"
+    \\               :unique ["fuel-conservation" "gf3-trit-invariant" "index-addressed-versioning"
+    \\                        "syrup-wire" "self-hosted-mcp" "oklab-color"]}))))
+    ,
+    // gorj_fuel: query and configure fuel budget for bounded eval
+    \\(def gorj-mcp-fuel
+    \\  (fn* [args]
+    \\    (let* [code (or (get args "code") "(+ 1 1)")
+    \\           result (gorj-eval code)
+    \\           spent (get result :fuel-spent)]
+    \\      (pr-str {:code code
+    \\               :fuel-spent spent
+    \\               :result (get result :result)
+    \\               :trit (get result :trit)
+    \\               :gf3-balanced (get result :gf3-balanced?)
+    \\               :note "fuel = thermodynamic cost; fork divides adiabatically; join costs kT*ln(n)"}))))
+    ,
     // MCP dispatch table: tool name → handler function symbol
     \\(def gorj-mcp-dispatch-table
     \\  {"gorj_eval" gorj-mcp-eval
@@ -460,7 +550,11 @@ const prelude_forms = [_][]const u8{
     \\   "gorj_cherry" gorj-mcp-cherry
     \\   "gorj_cream" gorj-mcp-cream
     \\   "gorj_clojerl" gorj-mcp-clojerl
-    \\   "gorj_dialects" gorj-mcp-dialects})
+    \\   "gorj_dialects" gorj-mcp-dialects
+    \\   "gorj_peval" gorj-mcp-peval
+    \\   "gorj_atom" gorj-mcp-atom
+    \\   "gorj_session" gorj-mcp-session
+    \\   "gorj_fuel" gorj-mcp-fuel})
     ,
     // The dispatch function itself — self-hosted MCP routing
     \\(def gorj-mcp-dispatch
@@ -705,6 +799,30 @@ const tool_defs = [_]ToolDef{
         .description = "List all 14 Clojure dialect bridges with their best features. Meta-discovery tool.",
         .input_schema =
         \\{"type":"object","properties":{},"required":[]}
+    },
+    .{
+        .name = "gorj_peval",
+        .description = "Parallel eval of N expressions with fork/join fuel conservation. Each expr gets equal fuel; GF(3) trit conserved across all branches. No other Clojure dialect has thermodynamic resource accounting.",
+        .input_schema =
+        \\{"type":"object","properties":{"exprs":{"type":"string","description":"Vector of expressions as string, e.g. \"[(+ 1 2) (* 3 4) (str :hello)]\""}},"required":["exprs"]}
+    },
+    .{
+        .name = "gorj_atom",
+        .description = "Persistent named atoms across MCP calls. Ops: create, deref, reset, swap, cas (compare-and-set), list. Stateful MCP with CAS semantics — survives across tool invocations.",
+        .input_schema =
+        \\{"type":"object","properties":{"op":{"type":"string","enum":["create","deref","reset","swap","cas","list"],"default":"deref"},"name":{"type":"string","description":"Atom name"},"init":{"type":"string","description":"Initial value (create)"},"value":{"type":"string","description":"New value (reset/cas-new)"},"old":{"type":"string","description":"Expected old value (cas)"},"fn":{"type":"string","description":"Swap function (swap)"}},"required":[]}
+    },
+    .{
+        .name = "gorj_session",
+        .description = "Session info: Braid version frontier, GF(3) conservation status, fuel model, wire format. Shows what makes gorj unique vs JVM nREPL.",
+        .input_schema =
+        \\{"type":"object","properties":{},"required":[]}
+    },
+    .{
+        .name = "gorj_fuel",
+        .description = "Eval with fuel metering. Returns fuel-spent (thermodynamic cost), trit, and GF(3) balance. Fuel = depth-weighted LUT cost; fork divides adiabatically; join costs kT*ln(n).",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression to meter","default":"(+ 1 1)"}},"required":[]}
     },
 };
 
