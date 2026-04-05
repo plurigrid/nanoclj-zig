@@ -26,6 +26,14 @@ const computable_sets = @import("computable_sets.zig");
 const avalon_api_example = @import("avalon_api_example.zig");
 const simd_str = @import("simd_str.zig");
 const transcendental = @import("transcendental.zig");
+const ergodic_bridge = @import("ergodic_bridge.zig");
+const concept_tensor = @import("concept_tensor.zig");
+const chromatic_propagator = @import("chromatic_propagator.zig");
+const gaymc = @import("gaymc.zig");
+const hyperdoctrine = @import("hyperdoctrine.zig");
+const tower = @import("tower.zig");
+const marsaglia_bumpus = @import("marsaglia_bumpus.zig");
+const scoped_propagators = @import("scoped_propagators.zig");
 
 fn getSeedMs() i64 {
     var ts: std.c.timespec = undefined;
@@ -274,6 +282,46 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Avalon integration API sample spec
         .{ "avalon-api-spec", &avalon_api_example.avalonApiSpecFn },
         .{ "avalon-api-example", &avalon_api_example.avalonApiExampleFn },
+        // Ergodic bridge (Gay.jl ergodic_bridge.jl)
+        .{ "wall-clock-bridge", &ergodic_bridge.wallClockBridgeFn },
+        .{ "color-bandwidth", &ergodic_bridge.colorBandwidthFn },
+        .{ "ergodic-measure", &ergodic_bridge.ergodicMeasureFn },
+        .{ "detect-obstructions", &ergodic_bridge.detectObstructionsFn },
+        // Concept tensor (Gay.jl concept_tensor.jl)
+        .{ "concept-lattice", &concept_tensor.conceptLatticeFn },
+        .{ "concept-at", &concept_tensor.conceptAtFn },
+        .{ "lattice-magnetization", &concept_tensor.latticeMagnetizationFn },
+        .{ "verify-monoid", &concept_tensor.verifyMonoidFn },
+        .{ "lattice-step", &concept_tensor.latticeStepFn },
+        // Chromatic propagator (Gay.jl chromatic_propagator.jl)
+        .{ "chromatic-env", &chromatic_propagator.chromaticEnvFn },
+        .{ "chromatic-define", &chromatic_propagator.chromaticDefineFn },
+        .{ "chromatic-tell", &chromatic_propagator.chromaticTellFn },
+        .{ "chromatic-conservation", &chromatic_propagator.chromaticConservationFn },
+        // Colored Monte Carlo (Gay.jl gaymc.jl)
+        .{ "mc-context", &gaymc.mcContextFn },
+        .{ "mc-sweep", &gaymc.mcSweepFn },
+        .{ "mc-metropolis", &gaymc.mcMetropolisFn },
+        .{ "mc-ladder", &gaymc.mcLadderFn },
+        .{ "mc-replica", &gaymc.mcReplicaFn },
+        // Hyperdoctrine (Gay.jl hyperdoctrine.jl)
+        .{ "heyting-and", &hyperdoctrine.heytingAndFn },
+        .{ "heyting-or", &hyperdoctrine.heytingOrFn },
+        .{ "heyting-not", &hyperdoctrine.heytingNotFn },
+        .{ "heyting-implies", &hyperdoctrine.heytingImpliesFn },
+        .{ "beck-chevalley", &hyperdoctrine.beckChevalleyFn },
+        // 12-layer SPI tower (Gay.jl tower.jl)
+        .{ "tower-run", &tower.towerRunFn },
+        .{ "tower-layer", &tower.towerLayerFn },
+        .{ "tower-trit-sum", &tower.towerTritSumFn },
+        // Marsaglia-Bumpus SPI audit (Gay.jl marsaglia_bumpus_tests.jl)
+        .{ "spi-audit", &marsaglia_bumpus.spiAuditFn },
+        .{ "runs-test", &marsaglia_bumpus.runsTestFn },
+        .{ "split-tree", &marsaglia_bumpus.splitTreeFn },
+        // Scoped propagators (Gay.jl scoped_propagators.jl)
+        .{ "ancestry-acset", &scoped_propagators.ancestryAcsetFn },
+        .{ "materialize", &scoped_propagators.materializeFn },
+        .{ "propagate-strategy", &scoped_propagators.propagateStrategyFn },
         // Core data ops
         .{ "dissoc", &dissocFn },
         .{ "update", &updateFn },

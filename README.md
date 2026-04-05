@@ -31,7 +31,7 @@ zig build -Doptimize=ReleaseFast run  # optimized build
 
 ## What's in the box
 
-**A Clojure you can read in a weekend.** The entire language -- reader, evaluator, compiler, GC, 195+ builtins -- is 61 Zig files. No JVM. No runtime linking. Compiles in seconds.
+**A Clojure you can read in a weekend.** The entire language -- reader, evaluator, compiler, GC, 450+ builtins -- is 61 Zig files. No JVM. No runtime linking. Compiles in seconds.
 
 **Two execution engines.** Tree-walk interpreter (eval.zig) for interactive use and a register-based bytecode compiler (compiler.zig + bytecode.zig) for when you need speed. Switch between them in the REPL with `(bc expr)` and compare with `(bench expr)`.
 
@@ -84,7 +84,7 @@ src/
 ├── eval.zig          1,410       Tree-walk evaluator
 ├── compiler.zig      1,720       Expression → register bytecode
 ├── bytecode.zig        820       Bytecode VM
-├── core.zig          4,717       195+ builtins
+├── core.zig          4,717       450+ builtins
 ├── env.zig             132       Lexical scope chain
 ├── gc.zig              290       Mark-sweep garbage collector
 ├── kanren.zig        1,033       miniKanren: unification, goals, streams
@@ -127,14 +127,16 @@ Three semantic layers verify that evaluation is sound:
 
 ## Examples
 
-The `examples/` directory contains runnable scripts. Load them in the REPL:
+`examples/` has runnable demos, `test/` has regression suites. Load in the REPL:
 
 ```clojure
-(load-file "examples/spj_type_inference.clj")  ;; type inference via miniKanren
-(load-file "examples/bumpus_kocsis.clj")        ;; structured decomposition theory
-(load-file "examples/evalo_synthesis.clj")       ;; program synthesis (run* backward)
-(load-file "examples/brainfloj_flow.clj")        ;; BCI signal processing pipeline
-(load-file "examples/realizability.clj")          ;; computability classification
+(load-file "examples/spj_type_inference.clj")     ;; Hindley-Milner via miniKanren
+(load-file "examples/evalo_synthesis.clj")         ;; program synthesis (run* backward)
+(load-file "examples/street_fighting_kanren.clj")  ;; dimensional analysis as constraints
+(load-file "examples/bumpus_kocsis.clj")           ;; structured decomposition theory
+(load-file "examples/realizability.clj")            ;; computability classification
+(load-file "examples/brainfloj_flow.clj")           ;; BCI signal processing pipeline
+(load-file "examples/topos.clj")                    ;; full effective topos demo
 ```
 
 ## Language features
