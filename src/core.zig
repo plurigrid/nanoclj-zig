@@ -12,6 +12,7 @@ const eval_mod = @import("eval.zig");
 const semantics = @import("semantics.zig");
 const substrate = @import("substrate.zig");
 const gay_skills = @import("gay_skills.zig");
+const profile = @import("profile.zig");
 const tree_vfs = @import("tree_vfs.zig");
 const inet_builtins = @import("inet_builtins.zig");
 const inet_compile = @import("inet_compile.zig");
@@ -38,6 +39,7 @@ const scoped_propagators = @import("scoped_propagators.zig");
 const skill_inet = @import("skill_inet.zig");
 const decomp = @import("decomp.zig");
 const brainfloj = @import("brainfloj.zig");
+const cgx = @import("cgx.zig");
 const congrunet = @import("congrunet.zig");
 const holy = @import("holy.zig");
 const zipf = @import("zipf.zig");
@@ -45,7 +47,8 @@ const channel = @import("channel.zig");
 const srcloc = @import("srcloc.zig");
 const time_units = @import("time_units.zig");
 const nrepl = @import("nrepl.zig");
-const behavior_lattice = @import("behavior_lattice.zig");
+const plural = @import("plural.zig");
+const juvix_bridge = @import("juvix_bridge.zig");
 
 fn getSeedMs() i64 {
     var ts: std.c.timespec = undefined;
@@ -169,6 +172,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Brainfloj builtins
         .{ "brainfloj-parse", &brainfloj.brainflojParseFn },
         .{ "brainfloj-read", &brainfloj.brainflojReadFn },
+        .{ "brainfloj-serial", &brainfloj.brainflojSerialFn },
+        // CGX protocol builtins
+        .{ "cgx-serial", &cgx.cgxSerialFn },
+        .{ "cgx-parse", &cgx.cgxParseFn },
         // HolyZig builtins
         .{ "holy-eval", &holy.holyEvalFn },
         .{ "holy-converge", &holy.holyConvergeFn },
@@ -177,15 +184,34 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "congrunet-summary", &congrunet.congrunetSummaryFn },
         .{ "congrunet-trace", &congrunet.congrunetTraceFn },
         .{ "congrunet-presheaf", &congrunet.congrunetPresheafFn },
-        // nREPL superstructure (bencode over TCP, color identity, trit phase)
-        .{ "nrepl-start", &nrepl.nreplStartFn },
-        .{ "nrepl-stop", &nrepl.nreplStopFn },
-        .{ "nrepl-status", &nrepl.nreplStatusFn },
-        .{ "behavior-lattice", &behavior_lattice.behaviorLatticeFn },
-        .{ "behavioral-equivalence", &behavior_lattice.behavioralEquivalenceFn },
-        .{ "behavioral-dominance", &behavior_lattice.behavioralDominanceFn },
-        .{ "behavior-compare", &behavior_lattice.behaviorCompareFn },
-        .{ "behavior-profile", &behavior_lattice.behaviorProfileFn },
+        // nREPL superstructure — gated by profile.enable_nrepl (see below)
+        .{ "behavior-lattice", &plural.behaviorLatticeFn },
+        .{ "behavioral-equivalence", &plural.behavioralEquivalenceFn },
+        .{ "behavioral-dominance", &plural.behavioralDominanceFn },
+        .{ "behavior-compare", &plural.behaviorCompareFn },
+        .{ "behavior-profile", &plural.behaviorProfileFn },
+        .{ "plural-profile", &plural.pluralProfileFn },
+        .{ "logical-world", &plural.logicWorldFn },
+        .{ "logic-mode", &plural.logicWorldFn },
+        .{ "set-logic!", &plural.setLogicFn },
+        .{ "cross-logic-eval", &plural.crossLogicEvalFn },
+        .{ "logic-dominance", &plural.logicDominanceFn },
+        .{ "plural-proof", &plural.pluralProofFn },
+        .{ "juvix-encode", &juvix_bridge.juvixEncodeFn },
+        .{ "juvix-decode", &juvix_bridge.juvixDecodeFn },
+        .{ "juvix-bridge-profile", &juvix_bridge.juvixBridgeProfileFn },
+        .{ "juvix-print", &juvix_bridge.juvixPrintFn },
+        .{ "juvix-parse", &juvix_bridge.juvixParseFn },
+        .{ "juvix-read", &juvix_bridge.juvixReadFn },
+        .{ "juvix-lambda", &juvix_bridge.juvixLambdaFn },
+        .{ "juvix-apply", &juvix_bridge.juvixApplyFn },
+        .{ "juvix-ctor", &juvix_bridge.juvixCtorFn },
+        .{ "juvix-let", &juvix_bridge.juvixLetFn },
+        .{ "juvix-ann", &juvix_bridge.juvixAnnFn },
+        .{ "juvix-match", &juvix_bridge.juvixMatchFn },
+        .{ "juvix-pat-var", &juvix_bridge.juvixPatVarFn },
+        .{ "juvix-pat-wildcard", &juvix_bridge.juvixPatWildcardFn },
+        .{ "juvix-pat-ctor", &juvix_bridge.juvixPatCtorFn },
         // Substrate traversal
         .{ "substrate", &substrate.substrateFn },
         .{ "traverse", &substrate.traverseFn },
@@ -213,21 +239,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "tree-meta", &tree_vfs.treeMetaFn },
         .{ "tree-imports", &tree_vfs.treeImportsFn },
         .{ "tree-by-taxon", &tree_vfs.treeByTaxonFn },
-        // Interaction net builtins
-        .{ "inet-new", &inet_builtins.inetNewFn },
-        .{ "inet-cell", &inet_builtins.inetCellFn },
-        .{ "inet-wire", &inet_builtins.inetWireFn },
-        .{ "inet-reduce", &inet_builtins.inetReduceFn },
-        .{ "inet-live", &inet_builtins.inetLiveFn },
-        .{ "inet-pairs", &inet_builtins.inetPairsFn },
-        .{ "inet-trit", &inet_builtins.inetTritFn },
-        .{ "inet-from-forest", &inet_builtins.inetFromForestFn },
-        .{ "inet-dot", &inet_builtins.inetDotFn },
-        .{ "inet-compile", &inet_compile.inetCompileFn },
-        .{ "inet-readback", &inet_compile.inetReadbackFn },
-        .{ "inet-eval", &inet_compile.inetEvalFn },
-        // Partial evaluation (first Futamura projection)
-        .{ "peval", &peval_mod.pevalFn },
+        // Interaction net builtins — gated by profile.enable_inet (see below)
+        // Partial evaluation — gated by profile.enable_peval (see below)
         // HTTP fetch
         .{ "http-fetch", &http_fetch.httpFetchFn },
         // IBC denom (bmorphism/shitcoin geodesic)
@@ -244,21 +257,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "halting-witness", &church_turing.haltingWitnessFn },
         .{ "epochal-witness", &church_turing.epochalWitnessFn },
         .{ "primitive-recursive", &church_turing.primitiveRecursiveFn },
-        // miniKanren — relational programming (SPJ→Fogus→Hickey)
-        .{ "lvar", &kanren.lvarFn },
-        .{ "lvar?", &kanren.lvarP },
-        .{ "unify", &kanren.unifyFn },
-        .{ "walk*", &kanren.walkStarFn },
-        .{ "==", &kanren.eqGoalFn },
-        .{ "conde", &kanren.condeFn },
-        .{ "conj-goal", &kanren.conjGoalFn },
-        .{ "fresh-goal", &kanren.freshGoalFn },
-        .{ "run-goal", &kanren.runGoalFn },
-        .{ "conso", &kanren.consoFn },
-        .{ "appendo", &kanren.appendoFn },
-        .{ "membero", &kanren.memberoFn },
-        .{ "evalo", &kanren.evaloFn },
-        .{ "lookupo", &kanren.lookupoFn },
+        // miniKanren — gated by profile.enable_kanren (see below)
         // gorj bridge — collapsed loops (no hex roundtrip, fused eval pipeline)
         .{ "gorj-pipe", &gorj_bridge.gorjPipeFn },
         .{ "gorj-eval", &gorj_bridge.gorjEvalFn },
@@ -712,6 +711,82 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         const id = try gc.internString(b[0]);
         try env.set(b[0], Value.makeKeyword(id));
         try env.setById(id, Value.makeKeyword(id));
+    }
+
+    // ── Feature-gated subsystems (dead-code eliminated when disabled) ──
+
+    if (profile.enable_inet) {
+        const inet_gates = .{
+            .{ "inet-new", &inet_builtins.inetNewFn },
+            .{ "inet-cell", &inet_builtins.inetCellFn },
+            .{ "inet-wire", &inet_builtins.inetWireFn },
+            .{ "inet-reduce", &inet_builtins.inetReduceFn },
+            .{ "inet-live", &inet_builtins.inetLiveFn },
+            .{ "inet-pairs", &inet_builtins.inetPairsFn },
+            .{ "inet-trit", &inet_builtins.inetTritFn },
+            .{ "inet-from-forest", &inet_builtins.inetFromForestFn },
+            .{ "inet-dot", &inet_builtins.inetDotFn },
+            .{ "inet-compile", &inet_compile.inetCompileFn },
+            .{ "inet-readback", &inet_compile.inetReadbackFn },
+            .{ "inet-eval", &inet_compile.inetEvalFn },
+        };
+        inline for (inet_gates) |b| {
+            try builtin_table.put(b[0], b[1]);
+            const id = try gc.internString(b[0]);
+            try env.set(b[0], Value.makeKeyword(id));
+            try env.setById(id, Value.makeKeyword(id));
+        }
+    }
+
+    if (profile.enable_peval) {
+        const peval_gates = .{
+            .{ "peval", &peval_mod.pevalFn },
+        };
+        inline for (peval_gates) |b| {
+            try builtin_table.put(b[0], b[1]);
+            const id = try gc.internString(b[0]);
+            try env.set(b[0], Value.makeKeyword(id));
+            try env.setById(id, Value.makeKeyword(id));
+        }
+    }
+
+    if (profile.enable_kanren) {
+        const kanren_gates = .{
+            .{ "lvar", &kanren.lvarFn },
+            .{ "lvar?", &kanren.lvarP },
+            .{ "unify", &kanren.unifyFn },
+            .{ "walk*", &kanren.walkStarFn },
+            .{ "==", &kanren.eqGoalFn },
+            .{ "conde", &kanren.condeFn },
+            .{ "conj-goal", &kanren.conjGoalFn },
+            .{ "fresh-goal", &kanren.freshGoalFn },
+            .{ "run-goal", &kanren.runGoalFn },
+            .{ "conso", &kanren.consoFn },
+            .{ "appendo", &kanren.appendoFn },
+            .{ "membero", &kanren.memberoFn },
+            .{ "evalo", &kanren.evaloFn },
+            .{ "lookupo", &kanren.lookupoFn },
+        };
+        inline for (kanren_gates) |b| {
+            try builtin_table.put(b[0], b[1]);
+            const id = try gc.internString(b[0]);
+            try env.set(b[0], Value.makeKeyword(id));
+            try env.setById(id, Value.makeKeyword(id));
+        }
+    }
+
+    if (profile.enable_nrepl) {
+        const nrepl_gates = .{
+            .{ "nrepl-start", &nrepl.nreplStartFn },
+            .{ "nrepl-stop", &nrepl.nreplStopFn },
+            .{ "nrepl-status", &nrepl.nreplStatusFn },
+        };
+        inline for (nrepl_gates) |b| {
+            try builtin_table.put(b[0], b[1]);
+            const id = try gc.internString(b[0]);
+            try env.set(b[0], Value.makeKeyword(id));
+            try env.setById(id, Value.makeKeyword(id));
+        }
     }
 }
 
@@ -1455,7 +1530,20 @@ fn stringLengthFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value
 
 fn notFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
-    return Value.makeBool(!args[0].isTruthy());
+    const world = pluralism.getWorld();
+    if (world.truth == .classical) {
+        return Value.makeBool(!args[0].isTruthy());
+    }
+    // Non-classical: dispatch through pluralTruth
+    const trit = pluralism.pluralTruth(args[0], world.truth);
+    const negated = pluralism.Trit.not(trit);
+    // For intuitionistic: not(.true_) = .false_, not(.false_) = .true_
+    //   but double negation: not(not(x)) should NOT simplify to x
+    //   This is already handled because Trit.not is involutive on true_/false_
+    //   but the key intuitionistic behavior is that not(not(x)) in the *evaluator*
+    //   goes through pluralTruth again, which may re-classify the value.
+    // For paraconsistent: not(.both) = .both (self-dual)
+    return Value.makeInt(@intFromEnum(negated));
 }
 
 // ── Splittable RNG (SplitMix64) ──
