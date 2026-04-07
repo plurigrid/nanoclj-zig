@@ -103,43 +103,67 @@ Config is a byte array (`CONFIG_START[]`) indexed by `LOC_*` offsets:
 | — | ARRAY_NUM_REMAP (10) | Remap table |
 | — | ARRAY_NUM_POS (12) | Position table |
 
-## Packet Format (mainDAQThread)
+## Packet Formats
 
-The device streams continuously once connected. Each packet:
+Two formats exist, selected by `legacyFormat` flag (derived from `CONFIG_START[LOC_DATA_MODE]`).
+
+### Legacy Format
+
+Sync: single `0xFF` byte, then:
 
 ```
-┌─────────┬──────────────┬─────────────────────────┬──────────┬──────────┐
-│ Header  │ Status Word  │ EEG Channels            │ EXT Data │ ACC Data │
-│ 1 byte  │ 4 bytes      │ NumEEG × 3 bytes        │ NumEXT×3 │ NumACC×3 │
-└─────────┴──────────────┴─────────────────────────┴──────────┴──────────┘
+┌──────────┬──────────────────────────┬───────────┬─────────┬─────────┐
+│ Counter  │ EEG + EXT + ACC Channels │ Impedance │ Battery │ Trigger │
+│ 1 byte   │ N × 3 bytes              │ 1 byte    │ 1 byte  │ 2 bytes │
+└──────────┴──────────────────────────┴───────────┴─────────┴─────────┘
 ```
 
-### Header Byte
-- Top 7 bits: packet sequence counter (mask 0x7F)
-- Bit 0: flag
-- Validation: check against 0x81 pattern
+- **Counter**: 7-bit sequence (& 0x7F), lost packet detection via diff > 0x81
+- **Channels**: 3 bytes each. If `Encrypted`, XOR with `{0xAD, 0x39, 0xBF}`.
+  Assembly: `value = (b0<<24 | b1<<17 | b2<<10) >> 8` (unusual bit shifts!)
+- **Impedance**: 1 byte, compared to 0x11
+- **Battery**: 1 byte × `BatteryGain` → voltage
+- **Trigger**: 2 bytes big-endian → `(b<<8 | b)`
+- **Total**: 1 + N×3 + 1 + 1 + 2 bytes (HD-72: N=67 → 206 bytes)
 
-### Status Word (4 bytes, big-endian)
-- ADS1299 status + trigger information
-- Stored in `TriggerAtIndex`
+### Modern (Non-Legacy) Format
 
-### EEG Channels
-- Each channel: 3 bytes, big-endian, 24-bit signed
-- `value = (byte0 << 24 | byte1 << 16 | byte2 << 8) >> 8`  (sign-extend)
-- Floating inputs read near 0xFFFFxx (positive rail)
-- Battery channel uses `BatteryGain` scaling
+Sync: three consecutive `0xFF` bytes, then:
 
-### Additional Constants in mainDAQThread
-- 0xAD (173), 0x39 (57), 0xBF (191): packet validation/checksum bytes
-- Shift values: 24, 16, 8 for 32-bit word assembly
-- Lost packet detection via `LostPackets` counter
+```
+┌──────────┬───────┬──────────────────┬──────────┬──────────┬────────┬──────────────────┬─────────┐
+│ Sequence │ Reset │ Delta EEG Data   │ EXT Data │ ACC Data │ Status │ Trigger (opt)    │ Batt    │
+│ 2 bytes  │ 1 B   │ variable         │ N×3 B    │ N×3 B    │ 1 byte │ 4 bytes if bit2  │ 2B bit5 │
+└──────────┴───────┴──────────────────┴──────────┴──────────┴────────┴──────────────────┴─────────┘
+```
 
-### Packet Size (HD-72)
-- Header: 1 byte
-- Status: 4 bytes
+- **Sequence**: 16-bit big-endian counter
+- **Reset flag**: if `== 1`, clear all `prevSampleBuffer` entries to zero
+- **Delta EEG** (per channel, variable length — see below)
+- **EXT**: 3 bytes each, standard 24-bit BE signed
+- **ACC**: 3 bytes each, standard 24-bit BE signed
+- **Status byte** flags: bit0=impedance, bit1=trigger-linked, bit2=trigger, bit5=battery
+- **Trigger**: 4 bytes BE (only if status bit 2 set)
+- **Battery**: 2 bytes (only if status bit 5 set)
+
+#### ReadDeltaData Encoding (verified from CIL disassembly)
+
+Each EEG channel is encoded as 1, 2, or 3 bytes, keyed on the low 2 bits:
+
+| bits[1:0] | Bytes | Type     | Decoding |
+|-----------|-------|----------|----------|
+| `x1`      | 1     | Delta    | `delta = ((b>>1) << 25) >> 25` (7-bit sign-ext), `delta <<= 3`, `value = prev + delta` |
+| `10`      | 2     | Delta    | `combined = (b & 0xFC) \| (b2 << 8)`, `combined = (combined << 16) >> 15` (sign-ext+scale), `value = prev + combined` |
+| `00`      | 3     | Absolute | `value = ((b3<<24) \| (b2<<16) \| ((b & 0xF8)<<8)) >> 8` (24-bit sign-ext) |
+
+Previous values stored in circular `prevSampleBuffer[pastSampleIndex][]`, advancing `pastSampleIndex` mod `numPrevSamples` after each sample.
+
+### Legacy Packet Size (HD-72)
+- Counter: 1 byte
 - EEG: 64 × 3 = 192 bytes
 - EXT: variable × 3 bytes
 - ACC: variable × 3 bytes
+- Impedance + Battery + Trigger: 4 bytes
 - **Minimum total: ~197 bytes**
 - At 500 Hz: ~98,500 bytes/sec
 
@@ -155,18 +179,39 @@ Two device profiles found in MSI:
 - 64 EEG channels
 - Different remap table (8 groups of 8 channels)
 
-## Config Read Sequence
+## keepAlive Thread (verified from CIL)
+
+```csharp
+void keepAlive() {
+    byte[] buf = new byte[128];
+    do {
+        byteInterface.ReadBytes(buf);   // drain bytes to maintain wireless link
+    } while (keepAliveOn);
+}
+```
+
+The keepAlive thread must be stopped before entering config mode. Without continuous
+reads, the wireless link may drop.
+
+## Config Read Sequence (verified from CIL)
 
 ```
-1. Set keepAliveOn = false          (stop read thread)
-2. Sleep(250ms)
-3. preFlush()                       (read & discard 65536 bytes)
-4. WriteByte(0x14)                  (send READ_CONFIG_CMD_BYTE)
-5. Read bytes → CONFIG_START[]      (until timeout or 262144 bytes)
+1. if (keepAliveOn):
+     keepAliveOn = false
+     Thread.Sleep(250ms)
+     aliveThread.Abort()
+2. preFlush()                       (read & discard up to MAX_BYTES_PREFLUSH bytes)
+3. DAQWriteByte(0x14)               (send READ_CONFIG_CMD_BYTE)
+4. remaining = 262144               (MAX_BYTES_FLUSH)
+5. Loop: read byte-by-byte into configBuf[writeIdx++ % len]:
+     - decrement remaining
+     - compare configBuf against CONFIG_START (magic word check)
+     - break on match or remaining == 0
 6. downloadConfig()                 (parse at LOC_ offsets)
 7. Look for magic 0x392802          (24-bit config sync word)
 8. Look for 0x499602D2              (DEVICE_DL_FINISHED sentinel)
 9. Retry up to 3 times on failure
+10. Return true if remaining > 0, false otherwise
 ```
 
 ## Config Write Sequence
