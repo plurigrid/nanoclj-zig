@@ -249,6 +249,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "noble-usdc-on", &ibc_denom.nobleUsdcOnFn },
         .{ "noble-precompute", &ibc_denom.noblePrecomputeFn },
         .{ "noble-channels", &ibc_denom.nobleChannelsFn },
+        .{ "noble-collisions", &ibc_denom.nobleCollisionsFn },
+        .{ "noble-census", &ibc_denom.nobleCensusFn },
         // Church-Turing ill-posedness witness
         .{ "ill-posed", &church_turing.illPosedFn },
         // Decidability hierarchy

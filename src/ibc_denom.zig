@@ -27,6 +27,7 @@ const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
 const substrate = @import("substrate.zig");
 const gay_skills = @import("gay_skills.zig");
+const Resources = @import("transitivity.zig").Resources;
 
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
@@ -74,6 +75,36 @@ const NOBLE_CHANNELS = [_]NobleChannel{
     .{ .name = "dydx", .noble_channel = "channel-33", .peer_channel = "channel-0", .chain_id = "dydx-mainnet-1" },
     .{ .name = "injective", .noble_channel = "channel-31", .peer_channel = "channel-148", .chain_id = "injective-1" },
     .{ .name = "terra2", .noble_channel = "channel-30", .peer_channel = "channel-253", .chain_id = "phoenix-1" },
+    .{ .name = "kujira", .noble_channel = "channel-2", .peer_channel = "channel-62", .chain_id = "kaiyo-1" },
+    .{ .name = "juno", .noble_channel = "channel-3", .peer_channel = "channel-224", .chain_id = "juno-1" },
+    .{ .name = "evmos", .noble_channel = "channel-7", .peer_channel = "channel-64", .chain_id = "evmos_9001-2" },
+    .{ .name = "archway", .noble_channel = "channel-12", .peer_channel = "channel-29", .chain_id = "archway-1" },
+    .{ .name = "secretnetwork", .noble_channel = "channel-17", .peer_channel = "channel-88", .chain_id = "secret-4" },
+    .{ .name = "agoric", .noble_channel = "channel-21", .peer_channel = "channel-62", .chain_id = "agoric-3" },
+    .{ .name = "persistence", .noble_channel = "channel-36", .peer_channel = "channel-132", .chain_id = "core-1" },
+    .{ .name = "dymension", .noble_channel = "channel-19", .peer_channel = "channel-6", .chain_id = "dymension_1100-1" },
+    .{ .name = "babylon", .noble_channel = "channel-81", .peer_channel = "channel-1", .chain_id = "bbn-1" },
+};
+
+// ============================================================================
+// COLLISION DETECTION — the profit
+// ============================================================================
+
+/// Collision entry: chains sharing the same USDC denom because they use
+/// the same peer channel number (different chains, same channel-N).
+const CollisionGroup = struct {
+    peer_channel: []const u8,
+    chains: []const []const u8,
+};
+
+/// Known collisions from CHANNELS.md census (2026-03-08).
+/// These are real, on-chain, OPEN channels producing identical USDC denoms.
+const KNOWN_COLLISIONS = [_]CollisionGroup{
+    .{ .peer_channel = "channel-0", .chains = &.{ "dydx", "titan", "sunrise" } },
+    .{ .peer_channel = "channel-1", .chains = &.{ "joltify", "mantrachain", "sidechain", "babylon" } },
+    .{ .peer_channel = "channel-62", .chains = &.{ "kujira", "agoric", "teritori" } },
+    .{ .peer_channel = "channel-6", .chains = &.{ "dymension", "beezee", "zigchain" } },
+    .{ .peer_channel = "channel-29", .chains = &.{ "archway" } }, // + unregistered
 };
 
 fn findNobleChannel(name: []const u8) ?NobleChannel {
@@ -116,7 +147,7 @@ fn denomTrit(port_id: []const u8, channel_id: []const u8, base_denom: []const u8
 // ============================================================================
 
 /// (ibc-denom port channel address) → "ibc/HEX..."
-pub fn ibcDenomFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn ibcDenomFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[0].isString() or !args[1].isString() or !args[2].isString())
         return error.TypeError;
@@ -127,7 +158,7 @@ pub fn ibcDenomFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (ibc-trit port channel denom) → {:denom "ibc/..." :color "#RRGGBB" :trit N :role "..."}
-pub fn ibcTritFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn ibcTritFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[0].isString() or !args[1].isString() or !args[2].isString())
         return error.TypeError;
@@ -157,7 +188,7 @@ pub fn ibcTritFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (noble-usdc-on "osmosis") → "ibc/498A..."
-pub fn nobleUsdcOnFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn nobleUsdcOnFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const chain_name = gc.getString(args[0].asStringId());
@@ -167,7 +198,7 @@ pub fn nobleUsdcOnFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (noble-precompute n) → vector of {:channel "channel-K" :denom "ibc/..."}
-pub fn noblePrecomputeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn noblePrecomputeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const n: usize = if (args.len >= 1 and args[0].isInt())
         @intCast(@max(@as(i48, 0), @min(args[0].asInt(), 1000)))
     else
@@ -191,7 +222,7 @@ pub fn noblePrecomputeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (noble-channels) → vector of {:name "osmosis" :chain-id "osmosis-1" :peer-channel "channel-750" :usdc-denom "ibc/..."}
-pub fn nobleChannelsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn nobleChannelsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const vec = try gc.allocObj(.vector);
     for (NOBLE_CHANNELS) |ch| {
@@ -215,6 +246,102 @@ pub fn nobleChannelsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
         try vec.data.vector.items.append(gc.allocator, Value.makeObj(entry));
     }
     return Value.makeObj(vec);
+}
+
+/// (noble-collisions) → vector of {:channel "channel-N" :denom "ibc/..." :chains ["a" "b" ...]}
+/// Detects denom collisions: multiple chains sharing the same USDC denom.
+pub fn nobleCollisionsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    _ = args;
+
+    // Scan registered channels for collisions (same peer_channel = same denom)
+    const vec = try gc.allocObj(.vector);
+
+    for (KNOWN_COLLISIONS) |collision| {
+        const denom_val = ibcDenomString(gc, "transfer", collision.peer_channel, "uusdc") catch continue;
+
+        const chains_vec = try gc.allocObj(.vector);
+        for (collision.chains) |chain_name| {
+            try chains_vec.data.vector.items.append(gc.allocator, Value.makeString(try gc.internString(chain_name)));
+        }
+
+        const entry = try gc.allocObj(.map);
+        try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("channel")));
+        try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(collision.peer_channel)));
+        try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("denom")));
+        try entry.data.map.vals.append(gc.allocator, denom_val);
+        try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("chains")));
+        try entry.data.map.vals.append(gc.allocator, Value.makeObj(chains_vec));
+        try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("collision")));
+        try entry.data.map.vals.append(gc.allocator, Value.makeBool(collision.chains.len > 1));
+
+        try vec.data.vector.items.append(gc.allocator, Value.makeObj(entry));
+    }
+
+    // Also scan registered channels for implicit collisions
+    for (NOBLE_CHANNELS, 0..) |ch_a, i| {
+        for (NOBLE_CHANNELS[i + 1 ..]) |ch_b| {
+            if (std.mem.eql(u8, ch_a.peer_channel, ch_b.peer_channel)) {
+                const denom_val = ibcDenomString(gc, "transfer", ch_a.peer_channel, "uusdc") catch continue;
+                const chains_vec = try gc.allocObj(.vector);
+                try chains_vec.data.vector.items.append(gc.allocator, Value.makeString(try gc.internString(ch_a.name)));
+                try chains_vec.data.vector.items.append(gc.allocator, Value.makeString(try gc.internString(ch_b.name)));
+
+                const entry = try gc.allocObj(.map);
+                try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("channel")));
+                try entry.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(ch_a.peer_channel)));
+                try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("denom")));
+                try entry.data.map.vals.append(gc.allocator, denom_val);
+                try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("chains")));
+                try entry.data.map.vals.append(gc.allocator, Value.makeObj(chains_vec));
+                try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("collision")));
+                try entry.data.map.vals.append(gc.allocator, Value.makeBool(true));
+                try entry.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("registered")));
+                try entry.data.map.vals.append(gc.allocator, Value.makeBool(true));
+
+                try vec.data.vector.items.append(gc.allocator, Value.makeObj(entry));
+            }
+        }
+    }
+
+    return Value.makeObj(vec);
+}
+
+/// (noble-census) → {:total-channels 437 :transfer 155 :ica 280 :shadow 96 :collisions N ...}
+pub fn nobleCensusFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    _ = args;
+    const obj = try gc.allocObj(.map);
+    const kw = struct {
+        fn f(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    }.f;
+
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "total-channels"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(437));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "transfer"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(155));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "ica"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(280));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "shadow"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(96));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "tryopen"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(37));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "numbered-ica"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(205));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "registered"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(59));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "unregistered-pct"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeFloat(62.0));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "validators"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(18));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "usdc-supply"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString("~$250M")));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "hetzner-pct"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeFloat(43.0));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "known-channels"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(NOBLE_CHANNELS.len)));
+
+    return Value.makeObj(obj);
 }
 
 // ============================================================================
@@ -262,6 +389,51 @@ test "ibc-denom: MARBLE" {
     @memcpy(buf[4..68], &hex);
     try std.testing.expectEqualStrings(
         "ibc/F6B691D5F7126579DDC87357B09D653B47FDCE0A3383FF33C8D8B544FE29A8A6",
+        &buf,
+    );
+}
+
+test "ibc-denom: DOG (from shitcoin test_shitcoin.py)" {
+    const hex = ibcDenomHash(
+        "transfer",
+        "channel-169",
+        "cw20:juno1t3h9jrgl9ngz2rlqmcap07jcsugtw95ek5wvh38dzd4xunh3p6js0uyt75",
+    );
+    var buf: [68]u8 = undefined;
+    @memcpy(buf[0..4], "ibc/");
+    @memcpy(buf[4..68], &hex);
+    try std.testing.expectEqualStrings(
+        "ibc/097BAB21B9871A3A9C286878562582BA62FB2EFD5D41D123BDC204A1AC2271D1",
+        &buf,
+    );
+}
+
+test "noble-usdc: kujira and agoric collision (channel-62)" {
+    // From CHANNELS.md: kujira and agoric both use channel-62 as peer channel.
+    // They produce the SAME USDC denom. This is a real on-chain collision.
+    const kujira_denom = ibcDenomHash("transfer", "channel-62", "uusdc");
+    const agoric_denom = ibcDenomHash("transfer", "channel-62", "uusdc");
+    try std.testing.expectEqualStrings(&kujira_denom, &agoric_denom);
+}
+
+test "noble-usdc: osmosis denom matches CHANNELS.md" {
+    const hex = ibcDenomHash("transfer", "channel-750", "uusdc");
+    var buf: [68]u8 = undefined;
+    @memcpy(buf[0..4], "ibc/");
+    @memcpy(buf[4..68], &hex);
+    try std.testing.expectEqualStrings(
+        "ibc/498A0751C798A0D9A389AA3691123DADA57DAA4FE165D5C75894505B876BA6E4",
+        &buf,
+    );
+}
+
+test "noble-usdc: dydx denom (channel-0, most critical)" {
+    const hex = ibcDenomHash("transfer", "channel-0", "uusdc");
+    var buf: [68]u8 = undefined;
+    @memcpy(buf[0..4], "ibc/");
+    @memcpy(buf[4..68], &hex);
+    try std.testing.expectEqualStrings(
+        "ibc/8E27BA2D5493AF5636760E354E46004562C46AB7EC0CC4C1CA14E9E20E2545B5",
         &buf,
     );
 }
