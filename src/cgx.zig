@@ -244,30 +244,50 @@ pub const StreamParser = struct {
         out.num_acc = self.num_acc;
 
         // Delta-compressed EEG data (ReadDeltaData)
-        // Each channel: variable-length delta from previous value.
-        // Encoding: if first byte has bit 7 set, it's a 2-byte delta;
-        // otherwise 1-byte delta (sign-extended).
+        // Verified from CIL disassembly of CGX Acquisition v66.
+        // First byte is a reset flag: if 1, clear all prev sample buffers.
+        if (pos >= data.len) return ParseError.NeedMoreData;
+        const reset_flag = data[pos];
+        pos += 1;
+        if (reset_flag == 1) {
+            @memset(&self.prev_eeg, 0);
+        }
+
+        // Per-channel: variable-length encoding keyed on low 2 bits of first byte.
         for (0..self.num_eeg) |ch| {
             if (pos >= data.len) return ParseError.NeedMoreData;
-            const first = data[pos];
+            const b: i32 = @intCast(data[pos]);
             pos += 1;
 
-            var delta: i32 = undefined;
-            if (first & 0x80 != 0) {
-                // 2-byte delta: 14-bit signed
+            if (b & 1 != 0) {
+                // 1-byte delta: bit0=1 flag. Bits [7:1] are 7-bit signed delta, scaled <<3.
+                // CIL: b >>= 1; b <<= 25; b >>= 25; b <<= 3;
+                var delta: i32 = b >> 1;
+                delta = (delta << 25) >> 25; // sign-extend 7 bits
+                delta <<= 3; // scale
+                self.prev_eeg[ch] +%= delta;
+                out.eeg[ch] = self.prev_eeg[ch];
+            } else if ((b >> 1) & 1 != 0) {
+                // 2-byte delta: bits [1:0]=10. Second byte from stream.
+                // CIL: combined = (b & 0xFC) | (b2 << 8); combined <<= 16; combined >>= 15;
                 if (pos >= data.len) return ParseError.NeedMoreData;
-                const second = data[pos];
+                const b2: i32 = @intCast(data[pos]);
                 pos += 1;
-                const raw14: i32 = (@as(i32, first & 0x7F) << 7) | @as(i32, second & 0x7F);
-                delta = if (raw14 & 0x2000 != 0) raw14 - 0x4000 else raw14;
+                var combined: i32 = (b & 0xFC) | (b2 << 8);
+                combined = (combined << 16) >> 15; // sign-extend and scale
+                self.prev_eeg[ch] +%= combined;
+                out.eeg[ch] = self.prev_eeg[ch];
             } else {
-                // 1-byte delta: 7-bit signed
-                delta = if (first & 0x40 != 0) @as(i32, first) - 0x80 else @as(i32, first);
+                // 3-byte absolute value: bits [1:0]=00. Two more bytes from stream.
+                // CIL: val = (b3<<24 | b2<<16 | (b & 0xF8)<<8); val >>= 8;
+                if (pos + 2 > data.len) return ParseError.NeedMoreData;
+                const b2: i32 = @intCast(data[pos]);
+                const b3: i32 = @intCast(data[pos + 1]);
+                pos += 2;
+                const val: i32 = ((b3 << 24) | (b2 << 16) | ((b & 0xF8) << 8)) >> 8;
+                self.prev_eeg[ch] = val;
+                out.eeg[ch] = val;
             }
-
-            self.prev_eeg[ch] +%= delta;
-            // EEG values shifted left by 5 per .NET
-            out.eeg[ch] = self.prev_eeg[ch] << 5;
         }
 
         // EXT channels: 3 bytes each, standard 24-bit BE, shifted left by 3
@@ -475,6 +495,61 @@ test "sync scan legacy" {
     const consumed = try parser.parseNext(&buf, &out);
     try std.testing.expectEqual(@as(usize, 11), consumed); // 2 garbage + 1 sync + 8 payload
     try std.testing.expectEqual(@as(u32, 7), out.sequence());
+}
+
+test "modern delta decode - 1 byte delta" {
+    var parser = StreamParser.init(2, 0, 0, false, false);
+    // Set prev values
+    parser.prev_eeg[0] = 1000;
+    parser.prev_eeg[1] = 2000;
+
+    // Build packet: seq(2) + reset(1) + ch0_delta(1) + ch1_delta(1) + status(1)
+    // 1-byte delta: bit0=1, bits[7:1] = signed 7-bit value, scaled <<3
+    // delta=5: (5<<1)|1 = 0x0B. After decode: 5<<3=40, prev+40=1040
+    // delta=-3: two's complement 7-bit: (-3)&0x7F=0x7D, (0x7D<<1)|1=0xFB. After: -3<<3=-24, prev-24=1976
+    const pkt = [_]u8{
+        0x00, 0x01, // sequence
+        0x00, // reset=no
+        0x0B, // ch0: delta=+5 -> +40
+        0xFB, // ch1: delta=-3 -> -24
+        0x00, // status
+    };
+    var out: ModernPacket = .{ .sequence = 0 };
+    _ = try parser.parseModern(&pkt, &out);
+    try std.testing.expectEqual(@as(i32, 1040), out.eeg[0]);
+    try std.testing.expectEqual(@as(i32, 1976), out.eeg[1]);
+}
+
+test "modern delta decode - 3 byte absolute" {
+    var parser = StreamParser.init(1, 0, 0, false, false);
+    // 3-byte absolute: bits[1:0]=00, then 2 more bytes
+    // b=0x00, b2=0x12, b3=0x34 -> (0x34<<24 | 0x12<<16 | 0<<8) >> 8 = 0x341200 >> 8 = 0x003412
+    const pkt = [_]u8{
+        0x00, 0x01, // sequence
+        0x00, // reset=no
+        0x00, 0x12, 0x34, // ch0: absolute
+        0x00, // status
+    };
+    var out: ModernPacket = .{ .sequence = 0 };
+    _ = try parser.parseModern(&pkt, &out);
+    const expected: i32 = (@as(i32, 0x34) << 24 | @as(i32, 0x12) << 16 | 0) >> 8;
+    try std.testing.expectEqual(expected, out.eeg[0]);
+}
+
+test "modern delta decode - reset flag" {
+    var parser = StreamParser.init(1, 0, 0, false, false);
+    parser.prev_eeg[0] = 99999;
+    // Reset flag=1 should clear prev, then 1-byte delta of 0 -> value = 0
+    const pkt = [_]u8{
+        0x00, 0x01, // sequence
+        0x01, // reset=YES
+        0x01, // ch0: 1-byte delta=0 (0x01 -> val>>1=0, sign-ext=0, <<3=0)
+        0x00, // status
+    };
+    var out: ModernPacket = .{ .sequence = 0 };
+    _ = try parser.parseModern(&pkt, &out);
+    try std.testing.expectEqual(@as(i32, 0), out.eeg[0]);
+    try std.testing.expectEqual(@as(i32, 0), parser.prev_eeg[0]);
 }
 
 test "config parse" {
