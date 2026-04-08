@@ -97,25 +97,30 @@ const CollisionGroup = struct {
     chains: []const []const u8,
 };
 
-/// Known collisions from live Noble API census (2026-04-07).
+/// Known collisions from live Noble API + client state resolution (2026-04-07).
 /// These are real, on-chain, OPEN channels producing identical USDC denoms.
-/// The numbers are staggering: 18 chains share channel-0, 16 share channel-1.
+/// Resolved via: channel -> connection -> client_state -> chain_id.
 const KNOWN_COLLISIONS = [_]CollisionGroup{
-    // Top-3 mega-collisions: low channel numbers are reused by every new chain
-    .{ .peer_channel = "channel-0", .chains = &.{ "dydx", "titan", "sunrise", "+15 unidentified" } }, // 18 Noble channels
-    .{ .peer_channel = "channel-1", .chains = &.{ "babylon", "joltify", "mantrachain", "sidechain", "+12 unidentified" } }, // 16 Noble channels
-    .{ .peer_channel = "channel-2", .chains = &.{ "+13 unidentified" } }, // 13 Noble channels
-    .{ .peer_channel = "channel-3", .chains = &.{ "+7 unidentified" } }, // 7 Noble channels
-    .{ .peer_channel = "channel-4", .chains = &.{ "+7 unidentified" } }, // 7 Noble channels
-    .{ .peer_channel = "channel-5", .chains = &.{ "+5 unidentified" } }, // 5 Noble channels
-    .{ .peer_channel = "channel-9", .chains = &.{ "+5 unidentified" } }, // 5 Noble channels
-    .{ .peer_channel = "channel-13", .chains = &.{ "+4 unidentified" } }, // 4 Noble channels
-    // Known named collisions
-    .{ .peer_channel = "channel-62", .chains = &.{ "kujira", "agoric", "teritori" } }, // 3 Noble channels
-    .{ .peer_channel = "channel-6", .chains = &.{ "dymension", "beezee", "zigchain" } }, // 3 Noble channels
-    .{ .peer_channel = "channel-7", .chains = &.{ "evmos", "+2 unidentified" } }, // 3 Noble channels (evmos uses channel-64 not 7, but 3 peers use channel-7)
-    .{ .peer_channel = "channel-38", .chains = &.{ "+3 unidentified" } }, // 3 Noble channels
-    // 21 total collision groups across 69 unique peer channels
+    // MEGA-COLLISION: 18 Noble channels all have peer channel-0
+    .{ .peer_channel = "channel-0", .chains = &.{
+        "dydx", "titan", "sunrise", "luwak", "exachain", "viexchain", "hyve",
+    } },
+    // 16 Noble channels share peer channel-1
+    .{ .peer_channel = "channel-1", .chains = &.{
+        "babylon", "joltify", "mantra", "sidechain", "astria", "omniflix", "grand",
+    } },
+    // 13 Noble channels share peer channel-2
+    .{ .peer_channel = "channel-2", .chains = &.{ "kiichain", "hyve" } },
+    .{ .peer_channel = "channel-3", .chains = &.{} }, // 7 Noble channels
+    .{ .peer_channel = "channel-4", .chains = &.{} }, // 7 Noble channels
+    .{ .peer_channel = "channel-5", .chains = &.{} }, // 5 Noble channels
+    .{ .peer_channel = "channel-9", .chains = &.{} }, // 5 Noble channels
+    .{ .peer_channel = "channel-13", .chains = &.{} }, // 4 Noble channels
+    .{ .peer_channel = "channel-62", .chains = &.{ "kujira", "agoric", "teritori" } },
+    .{ .peer_channel = "channel-6", .chains = &.{ "dymension", "beezee", "zigchain" } },
+    .{ .peer_channel = "channel-7", .chains = &.{} }, // 3 Noble channels
+    .{ .peer_channel = "channel-38", .chains = &.{} }, // 3 Noble channels
+    // 21 total collision groups, 69 unique peer channels, 129 transfer channels
 };
 
 fn findNobleChannel(name: []const u8) ?NobleChannel {
