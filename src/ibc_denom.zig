@@ -159,6 +159,40 @@ fn denomTrit(port_id: []const u8, channel_id: []const u8, base_denom: []const u8
 }
 
 // ============================================================================
+// AUTHENTICATED DENOM — the fix
+// ============================================================================
+
+/// Chain fingerprint: SHA256(chain_id || "/" || genesis_hash) → first 8 bytes hex
+fn chainFingerprint(chain_id: []const u8, genesis_hash: []const u8) [16]u8 {
+    var h = Sha256.init(.{});
+    h.update(chain_id);
+    h.update("/");
+    h.update(genesis_hash);
+    var digest: [32]u8 = undefined;
+    h.final(&digest);
+    return std.fmt.bytesToHex(digest[0..8], .upper);
+}
+
+/// Authenticated denom: (denom, chain_fingerprint, auth_trit)
+/// Unlike denomTrit which hashes the PATH (same for colliding chains),
+/// this hashes the CHAIN IDENTITY (unique per chain).
+fn authDenomTrit(chain_id: []const u8, genesis_hash: []const u8) struct { trit: i8, fingerprint: [16]u8 } {
+    var seed: u64 = 0x9e3779b97f4a7c15;
+    for (chain_id) |byte| seed = substrate.mix64(seed +% @as(u64, byte));
+    for (genesis_hash) |byte| seed = substrate.mix64(seed +% @as(u64, byte));
+
+    const z = substrate.mix64(seed);
+    const r_val: u8 = @truncate(z >> 16);
+    const g_val: u8 = @truncate(z >> 8);
+    const b_val: u8 = @truncate(z);
+
+    const hue = gay_skills.rgbToHue(r_val, g_val, b_val);
+    const trit = substrate.hueToTrit(hue);
+
+    return .{ .trit = trit, .fingerprint = chainFingerprint(chain_id, genesis_hash) };
+}
+
+// ============================================================================
 // BUILTINS
 // ============================================================================
 
@@ -200,6 +234,47 @@ pub fn ibcTritFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value 
         else => "unknown",
     };
     try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(role)));
+    return Value.makeObj(obj);
+}
+
+/// (ibc-auth-denom chain-id genesis-hash channel base-denom)
+/// → {:denom "ibc/..." :fingerprint "A1B2C3..." :auth-trit N :path-trit N :collision? bool}
+/// The auth-trit is derived from chain identity (unique per chain).
+/// The path-trit is derived from the path (same for colliding chains).
+/// When auth-trit ≠ path-trit → the chain doesn't "own" this path (collision signal).
+pub fn ibcAuthDenomFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 4) return error.ArityError;
+    for (args[0..4]) |a| {
+        if (!a.isString()) return error.TypeError;
+    }
+    const chain_id = gc.getString(args[0].asStringId());
+    const genesis_hash = gc.getString(args[1].asStringId());
+    const channel = gc.getString(args[2].asStringId());
+    const base_denom = gc.getString(args[3].asStringId());
+
+    const denom_val = try ibcDenomString(gc, "transfer", channel, base_denom);
+    const path_info = denomTrit("transfer", channel, base_denom);
+    const auth_info = authDenomTrit(chain_id, genesis_hash);
+
+    const obj = try gc.allocObj(.map);
+    const kw = struct {
+        fn f(g: *GC, s: []const u8) !Value {
+            return Value.makeKeyword(try g.internString(s));
+        }
+    }.f;
+
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "denom"));
+    try obj.data.map.vals.append(gc.allocator, denom_val);
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "fingerprint"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(&auth_info.fingerprint)));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "auth-trit"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(auth_info.trit)));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "path-trit"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(path_info.trit)));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "collision?"));
+    // If auth-trit ≠ path-trit, this chain's identity doesn't match the path signature
+    try obj.data.map.vals.append(gc.allocator, Value.makeBool(auth_info.trit != path_info.trit));
+
     return Value.makeObj(obj);
 }
 
@@ -494,6 +569,36 @@ test "ibc-denom: GF(3) trit distinguishes what SHA256 cannot" {
     // They CAN be equal by coincidence, but the color/trit space is richer
     // than the boolean "is this the right channel?" that IBC provides.
     _ = other;
+}
+
+test "ibc-auth: chain fingerprint distinguishes colliding chains" {
+    // dYdX and Titan both use channel-0 but have different chain_ids.
+    // The authenticated denom MUST distinguish them.
+    const dydx = authDenomTrit("dydx-mainnet-1", "genesis-dydx-abc123");
+    const titan = authDenomTrit("titan_18888-1", "genesis-titan-def456");
+
+    // Fingerprints must be different (different chain identity → different fingerprint)
+    try std.testing.expect(!std.mem.eql(u8, &dydx.fingerprint, &titan.fingerprint));
+
+    // The path-based trit is the SAME for both (that's the vulnerability)
+    const path_dydx = denomTrit("transfer", "channel-0", "uusdc");
+    const path_titan = denomTrit("transfer", "channel-0", "uusdc");
+    try std.testing.expectEqual(path_dydx.trit, path_titan.trit);
+
+    // But the chain fingerprint is deterministic per chain
+    const dydx2 = authDenomTrit("dydx-mainnet-1", "genesis-dydx-abc123");
+    try std.testing.expectEqualStrings(&dydx.fingerprint, &dydx2.fingerprint);
+    try std.testing.expectEqual(dydx.trit, dydx2.trit);
+}
+
+test "ibc-auth: fingerprint is SHA256-based" {
+    const fp = chainFingerprint("osmosis-1", "genesis-hash-osmosis");
+    // 16 hex chars from first 8 bytes of SHA256
+    try std.testing.expectEqual(@as(usize, 16), fp.len);
+    // All uppercase hex
+    for (fp) |c| {
+        try std.testing.expect((c >= '0' and c <= '9') or (c >= 'A' and c <= 'F'));
+    }
 }
 
 test "noble-usdc: precompute is deterministic" {

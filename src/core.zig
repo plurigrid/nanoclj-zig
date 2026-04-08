@@ -251,6 +251,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "noble-channels", &ibc_denom.nobleChannelsFn },
         .{ "noble-collisions", &ibc_denom.nobleCollisionsFn },
         .{ "noble-census", &ibc_denom.nobleCensusFn },
+        .{ "ibc-auth-denom", &ibc_denom.ibcAuthDenomFn },
         // Church-Turing ill-posedness witness
         .{ "ill-posed", &church_turing.illPosedFn },
         // Decidability hierarchy
