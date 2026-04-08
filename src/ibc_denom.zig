@@ -356,11 +356,11 @@ pub fn nobleCensusFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Va
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "highest-channel"));
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(487));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "validators"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(16)); // equal-weight authority set
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(15)); // equal-weight authority set
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "bft-threshold"));
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(11)); // 2/3+1 needed to sign
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "collude-to-control"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(6)); // floor((16-1)/3)+1
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(5)); // floor((15-1)/3)+1
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "usdc-supply"));
     try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString("~$250M")));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "hetzner-pct"));
