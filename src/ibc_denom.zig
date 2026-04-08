@@ -361,10 +361,17 @@ pub fn nobleCensusFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Va
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(11)); // 2/3+1 needed to sign
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "collude-to-control"));
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(5)); // floor((15-1)/3)+1
-    try obj.data.map.keys.append(gc.allocator, try kw(gc, "usdc-supply"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString("~$250M")));
-    try obj.data.map.keys.append(gc.allocator, try kw(gc, "hetzner-pct"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeFloat(43.0));
+    // Supply at risk (2026-04-08 live query)
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "noble-usdc-supply"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeFloat(161.8)); // $161.8M minted on Noble
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "dydx-usdc"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeFloat(108.0)); // $108M under 18-chain collision denom
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "osmosis-usdc"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeFloat(15.9)); // $15.9M (unique, no collision)
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "neutron-usdc"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeFloat(4.5)); // $4.5M (2-chain collision)
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "babylon-usdc"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeFloat(0.62)); // $620K under 16-chain collision denom
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "known-channels"));
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(NOBLE_CHANNELS.len)));
 
