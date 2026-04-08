@@ -97,14 +97,25 @@ const CollisionGroup = struct {
     chains: []const []const u8,
 };
 
-/// Known collisions from CHANNELS.md census (2026-03-08).
+/// Known collisions from live Noble API census (2026-04-07).
 /// These are real, on-chain, OPEN channels producing identical USDC denoms.
+/// The numbers are staggering: 18 chains share channel-0, 16 share channel-1.
 const KNOWN_COLLISIONS = [_]CollisionGroup{
-    .{ .peer_channel = "channel-0", .chains = &.{ "dydx", "titan", "sunrise" } },
-    .{ .peer_channel = "channel-1", .chains = &.{ "joltify", "mantrachain", "sidechain", "babylon" } },
-    .{ .peer_channel = "channel-62", .chains = &.{ "kujira", "agoric", "teritori" } },
-    .{ .peer_channel = "channel-6", .chains = &.{ "dymension", "beezee", "zigchain" } },
-    .{ .peer_channel = "channel-29", .chains = &.{ "archway" } }, // + unregistered
+    // Top-3 mega-collisions: low channel numbers are reused by every new chain
+    .{ .peer_channel = "channel-0", .chains = &.{ "dydx", "titan", "sunrise", "+15 unidentified" } }, // 18 Noble channels
+    .{ .peer_channel = "channel-1", .chains = &.{ "babylon", "joltify", "mantrachain", "sidechain", "+12 unidentified" } }, // 16 Noble channels
+    .{ .peer_channel = "channel-2", .chains = &.{ "+13 unidentified" } }, // 13 Noble channels
+    .{ .peer_channel = "channel-3", .chains = &.{ "+7 unidentified" } }, // 7 Noble channels
+    .{ .peer_channel = "channel-4", .chains = &.{ "+7 unidentified" } }, // 7 Noble channels
+    .{ .peer_channel = "channel-5", .chains = &.{ "+5 unidentified" } }, // 5 Noble channels
+    .{ .peer_channel = "channel-9", .chains = &.{ "+5 unidentified" } }, // 5 Noble channels
+    .{ .peer_channel = "channel-13", .chains = &.{ "+4 unidentified" } }, // 4 Noble channels
+    // Known named collisions
+    .{ .peer_channel = "channel-62", .chains = &.{ "kujira", "agoric", "teritori" } }, // 3 Noble channels
+    .{ .peer_channel = "channel-6", .chains = &.{ "dymension", "beezee", "zigchain" } }, // 3 Noble channels
+    .{ .peer_channel = "channel-7", .chains = &.{ "evmos", "+2 unidentified" } }, // 3 Noble channels (evmos uses channel-64 not 7, but 3 peers use channel-7)
+    .{ .peer_channel = "channel-38", .chains = &.{ "+3 unidentified" } }, // 3 Noble channels
+    // 21 total collision groups across 69 unique peer channels
 };
 
 fn findNobleChannel(name: []const u8) ?NobleChannel {
@@ -316,22 +327,29 @@ pub fn nobleCensusFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Va
         }
     }.f;
 
+    // Live Noble API census: 2026-04-07
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "total-channels"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(437));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(498)); // 129 transfer + 369 ICA
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "transfer"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(155));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(129));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "transfer-open"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(126));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "ica"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(280));
-    try obj.data.map.keys.append(gc.allocator, try kw(gc, "shadow"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(96));
-    try obj.data.map.keys.append(gc.allocator, try kw(gc, "tryopen"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(37));
-    try obj.data.map.keys.append(gc.allocator, try kw(gc, "numbered-ica"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(205));
-    try obj.data.map.keys.append(gc.allocator, try kw(gc, "registered"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(59));
-    try obj.data.map.keys.append(gc.allocator, try kw(gc, "unregistered-pct"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeFloat(62.0));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(369));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "ica-open"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(343));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "connections"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(203));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "connections-open"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(176));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "unique-peer-channels"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(69));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "collision-groups"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(21));
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "max-collision-size"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(18)); // 18 chains share channel-0
+    try obj.data.map.keys.append(gc.allocator, try kw(gc, "highest-channel"));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(487));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "validators"));
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(18));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "usdc-supply"));
