@@ -332,13 +332,13 @@ pub fn nobleCensusFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Va
         }
     }.f;
 
-    // Live Noble API census: 2026-04-07
+    // Live Noble API census: 2026-04-08 (full pagination)
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "total-channels"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(498)); // 129 transfer + 369 ICA
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(526)); // 157 transfer + 369 ICA
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "transfer"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(129));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(157));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "transfer-open"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(126));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(152));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "ica"));
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(369));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "ica-open"));
@@ -350,7 +350,7 @@ pub fn nobleCensusFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Va
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "unique-peer-channels"));
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(69));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "collision-groups"));
-    try obj.data.map.vals.append(gc.allocator, Value.makeInt(21));
+    try obj.data.map.vals.append(gc.allocator, Value.makeInt(24));
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "max-collision-size"));
     try obj.data.map.vals.append(gc.allocator, Value.makeInt(18)); // 18 chains share channel-0
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "highest-channel"));
