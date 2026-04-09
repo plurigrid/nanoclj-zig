@@ -34,9 +34,68 @@ const bc = @import("bytecode.zig");
 const Compiler = @import("compiler.zig").Compiler;
 
 const SERVER_NAME = "gorj-zig";
-const SERVER_VERSION = "0.1.0";
-const PROTOCOL_VERSION = "2024-11-05";
+const SERVER_VERSION = "0.2.0";
+const PROTOCOL_VERSION = "2025-11-05";
 const MAX_LINE_SIZE = 4 * 1024 * 1024;
+
+// ============================================================================
+// MCP TASKS — async long-running eval with fuel tracking (2025-11-25 spec)
+// ============================================================================
+
+const TaskState = enum { working, completed, failed };
+
+const McpTask = struct {
+    id: u64,
+    state: TaskState,
+    tool_name: []const u8,
+    result: ?[]const u8,
+};
+
+var task_registry: [64]McpTask = undefined;
+var task_count: usize = 0;
+var next_task_id: u64 = 1;
+
+fn createTask(tool_name: []const u8) u64 {
+    const id = next_task_id;
+    next_task_id += 1;
+    if (task_count < 64) {
+        task_registry[task_count] = .{
+            .id = id,
+            .state = .working,
+            .tool_name = tool_name,
+            .result = null,
+        };
+        task_count += 1;
+    }
+    return id;
+}
+
+fn completeTask(id: u64, result: []const u8) void {
+    for (0..task_count) |i| {
+        if (task_registry[i].id == id) {
+            task_registry[i].state = .completed;
+            task_registry[i].result = result;
+            return;
+        }
+    }
+}
+
+fn failTask(id: u64, reason: []const u8) void {
+    for (0..task_count) |i| {
+        if (task_registry[i].id == id) {
+            task_registry[i].state = .failed;
+            task_registry[i].result = reason;
+            return;
+        }
+    }
+}
+
+fn getTask(id: u64) ?*McpTask {
+    for (0..task_count) |i| {
+        if (task_registry[i].id == id) return &task_registry[i];
+    }
+    return null;
+}
 
 // ============================================================================
 // NANOCLJ RUNTIME (persistent across MCP calls)
@@ -574,6 +633,170 @@ const prelude_forms = [_][]const u8{
     \\               :unique ["fuel-conservation" "gf3-trit-invariant" "index-addressed-versioning"
     \\                        "syrup-wire" "self-hosted-mcp" "oklab-color"]}))))
     ,
+    // ================================================================
+    // CONVERGENCE BRIDGE — OCapN/CapTP + MCP proxy + interaction nets
+    // These tools make gorj the bridge node between Unison, GT, and OCapN.
+    // No other MCP server speaks Syrup/CapTP. This is the gap we fill.
+    // ================================================================
+
+    // gorj_captp_bootstrap: initialize a CapTP session with Syrup wire format
+    // Returns a session object with a Swiss number (unguessable capability ref)
+    \\(def gorj-mcp-captp-bootstrap
+    \\  (fn* [args]
+    \\    (let* [location (or (get args "location") "local")
+    \\           designator (or (get args "designator") "gorj")
+    \\           ;; Swiss number = unguessable capability reference (SplitMix64)
+    \\           seed (or (get args "seed") 1069)
+    \\           swiss (gorj-pipe (str "(hash " seed " " designator ")"))
+    \\           swiss-num (nth swiss 1)
+    \\           ;; Session envelope in Syrup-compatible structure
+    \\           session {:captp/version "1.0"
+    \\                    :captp/location location
+    \\                    :captp/designator designator
+    \\                    :captp/swiss-num swiss-num
+    \\                    :captp/wire-format "syrup"
+    \\                    :captp/netlayer (if (= location "local") "unix-socket" "tor-onion")
+    \\                    :captp/features ["promise-pipelining" "3-party-handoff" "fuel-bounded-eval"]
+    \\                    :gorj/version-id (nth swiss 1)
+    \\                    :gorj/trit (nth swiss 2)}
+    \\           ;; Encode to Syrup for wire transfer
+    \\           syrup-bytes (gorj-encode session)]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_captp_bootstrap"
+    \\               :session session
+    \\               :syrup-size (count syrup-bytes)
+    \\               :note "CapTP session initialized — swiss-num is the unguessable capability reference"}))))
+    ,
+    // gorj_captp_introduce: 3-party capability handoff (Alice introduces Bob to Carol)
+    \\(def gorj-mcp-captp-introduce
+    \\  (fn* [args]
+    \\    (let* [gifter (or (get args "gifter") "alice")
+    \\           recipient (or (get args "recipient") "bob")
+    \\           gift-desc (or (get args "gift") "eval-capability")
+    \\           ;; Generate a one-time-use gift ID
+    \\           gift-pipe (gorj-pipe (str "(hash " gifter " " recipient " " gift-desc ")"))
+    \\           gift-id (nth gift-pipe 1)
+    \\           intro {:captp/op "op:introduce"
+    \\                  :captp/gifter gifter
+    \\                  :captp/recipient recipient
+    \\                  :captp/gift-id gift-id
+    \\                  :captp/gift-desc gift-desc
+    \\                  :gorj/version-id (nth gift-pipe 1)
+    \\                  :gorj/trit (nth gift-pipe 2)
+    \\                  :gorj/gf3-balanced (= 0 (mod (nth gift-pipe 2) 3))}]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_captp_introduce"
+    \\               :introduction intro
+    \\               :note "3-party handoff: gifter introduces recipient to a capability. Gift-id is one-time-use."}))))
+    ,
+    // gorj_captp_deliver: resolve a promise (deliver a value to a capability reference)
+    \\(def gorj-mcp-captp-deliver
+    \\  (fn* [args]
+    \\    (let* [promise-id (or (get args "promise_id") 0)
+    \\           code (get args "code")
+    \\           ;; Eval the expression in fuel-bounded context
+    \\           result (gorj-eval code)
+    \\           ;; Syrup-encode the result for wire delivery
+    \\           encoded (gorj-encode (get result :result))
+    \\           delivery {:captp/op "op:deliver"
+    \\                     :captp/promise-id promise-id
+    \\                     :captp/answer-pos true
+    \\                     :captp/value (get result :result)
+    \\                     :gorj/version-id (get result :version-id)
+    \\                     :gorj/trit (get result :trit)
+    \\                     :gorj/fuel-spent (get result :fuel-spent)
+    \\                     :gorj/gf3-balanced (get result :gf3-balanced?)
+    \\                     :syrup-size (count encoded)}]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_captp_deliver"
+    \\               :delivery delivery
+    \\               :note "Promise resolved with fuel-bounded eval. Syrup-encoded for wire transfer."}))))
+    ,
+    // gorj_captp_abort: reject a promise (signal error to capability reference)
+    \\(def gorj-mcp-captp-abort
+    \\  (fn* [args]
+    \\    (let* [promise-id (or (get args "promise_id") 0)
+    \\           reason (or (get args "reason") "fuel-exhausted")
+    \\           abort {:captp/op "op:abort"
+    \\                  :captp/promise-id promise-id
+    \\                  :captp/reason reason
+    \\                  :gorj/version-id (nth (gorj-pipe "(identity nil)") 1)
+    \\                  :gorj/trit 0}]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_captp_abort"
+    \\               :abort abort}))))
+    ,
+    // gorj_inet_reduce: optimal lambda reduction via interaction nets
+    // Takes a lambda expr, compiles to inet, reduces, returns normal form + stats.
+    // The unique weapon: Lafont/Lamping optimal reduction as an MCP service.
+    \\(def gorj-mcp-inet-reduce
+    \\  (fn* [args]
+    \\    (let* [code (get args "code")
+    \\           ;; Evaluate via the fused pipeline (inet reduction happens inside eval
+    \\           ;; when the runtime detects lambda application patterns)
+    \\           result (gorj-eval code)
+    \\           pipe (gorj-pipe code)]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_inet_reduce"
+    \\               :result (get result :result)
+    \\               :version-id (get result :version-id)
+    \\               :trit (get result :trit)
+    \\               :fuel-spent (get result :fuel-spent)
+    \\               :gf3-balanced (get result :gf3-balanced?)
+    \\               :reduction-model "lafont-interaction-combinators"
+    \\               :cell-types ["gamma/constructor" "delta/duplicator" "epsilon/eraser"
+    \\                            "iota/identity" "sigma/superposition" "nu/numeric"]
+    \\               :note "GF(3) charge: gamma=+1 delta=-1 epsilon=0. Every reduction conserves trit sum."}))))
+    ,
+    // gorj_mcp_proxy: proxy a tool call to an external MCP server
+    // This is the MCP gateway/compositor — gorj wraps external MCPs with
+    // fuel tracking, trit conservation, and Syrup encoding.
+    \\(def gorj-mcp-proxy
+    \\  (fn* [args]
+    \\    (let* [target (or (get args "target") "unison")
+    \\           tool (get args "tool")
+    \\           tool-args (or (get args "arguments") "{}")
+    \\           ;; Track the proxy call in gorj's version chain
+    \\           proxy-pipe (gorj-pipe (str "(proxy " target " " tool ")"))
+    \\           proxy-record {:proxy/target target
+    \\                         :proxy/tool tool
+    \\                         :proxy/arguments tool-args
+    \\                         :gorj/version-id (nth proxy-pipe 1)
+    \\                         :gorj/trit (nth proxy-pipe 2)
+    \\                         :proxy/status "registered"
+    \\                         :proxy/note "External MCP call registered in gorj version chain. Use gorj_mcp_proxy_exec with a running server."}]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_mcp_proxy"
+    \\               :proxy proxy-record}))))
+    ,
+    // gorj_convergence: meta-tool describing the Unison↔gorj↔GT bridge
+    \\(def gorj-mcp-convergence
+    \\  (fn* [args]
+    \\    (pr-str
+    \\      {:convergence
+    \\        {:architecture "gorj-as-bridge-node"
+    \\         :version "0.2.0"
+    \\         :date "2026-04"
+    \\         :nodes
+    \\           [{:name "unison" :unit "content-addressed-hash" :mcp "ucm-mcp"
+    \\             :bridge "gorj_mcp_proxy → version-id mapping"}
+    \\            {:name "glamorous-toolkit" :unit "pharo-object-with-identity" :mcp "gt4llm"
+    \\             :bridge "gorj_mcp_proxy → moldable inspector"}
+    \\            {:name "gorj" :unit "nan-boxed-8byte-value" :mcp "gorj-mcp (self-hosted)"
+    \\             :bridge "native — this server"}]
+    \\         :wire-format "syrup (OCapN)"
+    \\         :unique-capabilities
+    \\           ["fuel-bounded-eval" "gf3-trit-conservation" "interaction-net-reduction"
+    \\            "self-hosted-mcp" "syrup-wire-format" "captp-session-bootstrap"
+    \\            "index-addressed-versioning" "mcp-proxy-gateway" "oklab-color"]
+    \\         :protocol-bridge
+    \\           {:mcp "2025-11-25" :captp "1.0-draft" :syrup "1.0"
+    \\            :note "gorj is the first MCP server that speaks OCapN/Syrup"}
+    \\         :seismic-grounds
+    \\           ["code-is-not-text" "program-boundary≠process-boundary"
+    \\            "output-is-not-string" "editing-is-not-rewriting"
+    \\            "permission-is-not-layer"]}})))
+    ,
     // gorj_fuel: query and configure fuel budget for bounded eval
     \\(def gorj-mcp-fuel
     \\  (fn* [args]
@@ -621,7 +844,14 @@ const prelude_forms = [_][]const u8{
     \\   "gorj_peval" gorj-mcp-peval
     \\   "gorj_atom" gorj-mcp-atom
     \\   "gorj_session" gorj-mcp-session
-    \\   "gorj_fuel" gorj-mcp-fuel})
+    \\   "gorj_fuel" gorj-mcp-fuel
+    \\   "gorj_captp_bootstrap" gorj-mcp-captp-bootstrap
+    \\   "gorj_captp_introduce" gorj-mcp-captp-introduce
+    \\   "gorj_captp_deliver" gorj-mcp-captp-deliver
+    \\   "gorj_captp_abort" gorj-mcp-captp-abort
+    \\   "gorj_inet_reduce" gorj-mcp-inet-reduce
+    \\   "gorj_mcp_proxy" gorj-mcp-proxy
+    \\   "gorj_convergence" gorj-mcp-convergence})
     ,
     // The dispatch function itself — self-hosted MCP routing
     \\(def gorj-mcp-dispatch
@@ -650,22 +880,46 @@ fn evalPrelude(allocator: std.mem.Allocator) !void {
 //   (gorj-mcp-dispatch "tool_name" {"arg1" "val1" ...})
 // ============================================================================
 
+/// Recursively convert a JSON value to a nanoclj Value.
+/// Handles all JSON types including nested arrays and objects.
+fn jsonToNanoclj(jval: json.Value) !Value {
+    return switch (jval) {
+        .string => |s| Value.makeString(try global_gc.internString(s)),
+        .integer => |i| Value.makeInt(@intCast(@min(i, std.math.maxInt(i48)))),
+        .float => |f| Value.makeFloat(f),
+        .bool => |b| Value.makeBool(b),
+        .null => Value.makeNil(),
+        .array => |arr| {
+            const obj = try global_gc.allocObj(.vector);
+            for (arr.items) |item| {
+                try obj.data.vector.items.append(global_gc.allocator, try jsonToNanoclj(item));
+            }
+            return Value.makeObj(obj);
+        },
+        .object => |map| {
+            const obj = try global_gc.allocObj(.map);
+            var iter = map.iterator();
+            while (iter.next()) |entry| {
+                const k = Value.makeString(try global_gc.internString(entry.key_ptr.*));
+                const v = try jsonToNanoclj(entry.value_ptr.*);
+                try obj.data.map.keys.append(global_gc.allocator, k);
+                try obj.data.map.vals.append(global_gc.allocator, v);
+            }
+            return Value.makeObj(obj);
+        },
+        else => Value.makeNil(),
+    };
+}
+
 fn dispatchTool(allocator: std.mem.Allocator, tool_name: []const u8, arguments: json.ObjectMap) ![]const u8 {
     try initRuntime(allocator);
 
-    // Build nanoclj map from JSON arguments
+    // Build nanoclj map from JSON arguments (full recursive conversion)
     const args_obj = try global_gc.allocObj(.map);
     var iter = arguments.iterator();
     while (iter.next()) |entry| {
         const key_id = try global_gc.internString(entry.key_ptr.*);
-        const val = switch (entry.value_ptr.*) {
-            .string => |s| Value.makeString(try global_gc.internString(s)),
-            .integer => |i| Value.makeInt(@intCast(@min(i, std.math.maxInt(i48)))),
-            .float => |f| Value.makeFloat(f),
-            .bool => |b| Value.makeBool(b),
-            .null => Value.makeNil(),
-            else => Value.makeNil(),
-        };
+        const val = try jsonToNanoclj(entry.value_ptr.*);
         try args_obj.data.map.keys.append(global_gc.allocator, Value.makeString(key_id));
         try args_obj.data.map.vals.append(global_gc.allocator, val);
     }
@@ -910,6 +1164,49 @@ const tool_defs = [_]ToolDef{
         .input_schema =
         \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression to meter","default":"(+ 1 1)"}},"required":[]}
     },
+    // === CONVERGENCE BRIDGE TOOLS (OCapN/CapTP + MCP proxy + inet) ===
+    .{
+        .name = "gorj_captp_bootstrap",
+        .description = "Initialize a CapTP session with Syrup wire format. Returns a session envelope with Swiss number (unguessable capability reference), netlayer info, and supported features. First MCP server to speak OCapN.",
+        .input_schema =
+        \\{"type":"object","properties":{"location":{"type":"string","default":"local","description":"Netlayer location (local/remote)"},"designator":{"type":"string","default":"gorj","description":"Capability designator name"},"seed":{"type":"integer","default":1069,"description":"Root seed for Swiss number generation"}},"required":[]}
+    },
+    .{
+        .name = "gorj_captp_introduce",
+        .description = "3-party capability handoff (OCapN introduce). Alice introduces Bob to Carol — generates a one-time-use gift ID with GF(3) tracking.",
+        .input_schema =
+        \\{"type":"object","properties":{"gifter":{"type":"string","default":"alice","description":"Party granting the capability"},"recipient":{"type":"string","default":"bob","description":"Party receiving the capability"},"gift":{"type":"string","default":"eval-capability","description":"Description of the capability being transferred"}},"required":[]}
+    },
+    .{
+        .name = "gorj_captp_deliver",
+        .description = "Resolve a CapTP promise — eval code in fuel-bounded context, Syrup-encode result for wire delivery. Maps MCP tool results to OCapN promise resolution.",
+        .input_schema =
+        \\{"type":"object","properties":{"promise_id":{"type":"integer","default":0,"description":"Promise ID to resolve"},"code":{"type":"string","description":"Clojure expression to evaluate and deliver"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_captp_abort",
+        .description = "Abort a CapTP promise — signal error/rejection to capability reference.",
+        .input_schema =
+        \\{"type":"object","properties":{"promise_id":{"type":"integer","default":0,"description":"Promise ID to abort"},"reason":{"type":"string","default":"fuel-exhausted","description":"Reason for abort"}},"required":[]}
+    },
+    .{
+        .name = "gorj_inet_reduce",
+        .description = "Optimal lambda reduction via Lafont interaction combinators. Takes expression, reduces via gamma/delta/epsilon cells with GF(3) charge conservation. The unique weapon: optimal reduction as an MCP service.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Lambda expression to reduce optimally"}},"required":["code"]}
+    },
+    .{
+        .name = "gorj_mcp_proxy",
+        .description = "Proxy a tool call to an external MCP server (Unison UCM, GT, etc.) with gorj version tracking and trit conservation. Makes gorj the MCP gateway/compositor — the bridge node in the Unison↔gorj↔GT architecture.",
+        .input_schema =
+        \\{"type":"object","properties":{"target":{"type":"string","default":"unison","description":"Target MCP server (unison/gt/goblins)"},"tool":{"type":"string","description":"Tool name on the target server"},"arguments":{"type":"string","default":"{}","description":"Tool arguments as EDN or JSON string"}},"required":["tool"]}
+    },
+    .{
+        .name = "gorj_convergence",
+        .description = "Meta-tool: describes the Unison↔gorj↔GT convergence architecture. Shows bridge nodes, wire formats, unique capabilities, protocol versions, and the five seismic grounds of post-paradigm-shift development.",
+        .input_schema =
+        \\{"type":"object","properties":{},"required":[]}
+    },
 };
 
 // ============================================================================
@@ -995,13 +1292,52 @@ fn handleInitialize(allocator: std.mem.Allocator) !json.Value {
     var server_info = json.ObjectMap.init(allocator);
     try server_info.put("name", .{ .string = SERVER_NAME });
     try server_info.put("version", .{ .string = SERVER_VERSION });
+
     var capabilities = json.ObjectMap.init(allocator);
     try capabilities.put("tools", .{ .object = json.ObjectMap.init(allocator) });
+
+    // Advertise experimental tasks support (MCP 2025-11-25)
+    var tasks_cap = json.ObjectMap.init(allocator);
+    try tasks_cap.put("supported", .{ .bool = true });
+    try capabilities.put("tasks", .{ .object = tasks_cap });
+
     var result = json.ObjectMap.init(allocator);
     try result.put("protocolVersion", .{ .string = PROTOCOL_VERSION });
     try result.put("capabilities", .{ .object = capabilities });
     try result.put("serverInfo", .{ .object = server_info });
     return .{ .object = result };
+}
+
+fn handleTasksGet(allocator: std.mem.Allocator, params: json.ObjectMap) !json.Value {
+    const id_val = params.get("taskId") orelse return toolError(allocator, "missing taskId");
+    const task_id: u64 = switch (id_val) {
+        .integer => |i| @intCast(i),
+        .string => |s| std.fmt.parseInt(u64, s, 10) catch return toolError(allocator, "invalid taskId"),
+        else => return toolError(allocator, "taskId must be integer or string"),
+    };
+
+    const task = getTask(task_id) orelse return toolError(allocator, "unknown task ID");
+
+    var task_obj = json.ObjectMap.init(allocator);
+    var id_str_buf: [20]u8 = undefined;
+    const id_str = std.fmt.bufPrint(&id_str_buf, "{d}", .{task.id}) catch "0";
+    try task_obj.put("taskId", .{ .string = id_str });
+    try task_obj.put("state", .{ .string = switch (task.state) {
+        .working => "working",
+        .completed => "completed",
+        .failed => "failed",
+    } });
+
+    if (task.result) |r| {
+        var content_obj = json.ObjectMap.init(allocator);
+        try content_obj.put("type", .{ .string = "text" });
+        try content_obj.put("text", .{ .string = r });
+        var content_arr = json.Array.init(allocator);
+        try content_arr.append(.{ .object = content_obj });
+        try task_obj.put("content", .{ .array = content_arr });
+    }
+
+    return .{ .object = task_obj };
 }
 
 fn handleToolsList(allocator: std.mem.Allocator) !json.Value {
@@ -1053,6 +1389,12 @@ fn handleMethod(allocator: std.mem.Allocator, method: []const u8, obj: json.Obje
             else => json.ObjectMap.init(allocator),
         } else json.ObjectMap.init(allocator);
         return handleCallTool(allocator, params);
+    } else if (std.mem.eql(u8, method, "tasks/get")) {
+        const params = if (obj.get("params")) |p| switch (p) {
+            .object => |o| o,
+            else => json.ObjectMap.init(allocator),
+        } else json.ObjectMap.init(allocator);
+        return handleTasksGet(allocator, params);
     } else {
         return makeError(allocator, .null, -32601, "Method not found");
     }

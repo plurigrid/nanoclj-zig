@@ -252,18 +252,31 @@ pub fn transpileDefn(
     @memcpy(src_buf[pos..][0..footer.len], footer);
     pos += footer.len;
 
-    // Write file
-    std.fs.cwd().makeDir(registry.gen_dir) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
+    // Write file — use C stdlib for 0.16 compat (std.fs.cwd() removed)
+    {
+        var dir_buf: [256]u8 = undefined;
+        const dir_z = std.fmt.bufPrintZ(&dir_buf, "{s}", .{registry.gen_dir}) catch return error.NotTranspilable;
+        _ = std.c.mkdir(dir_z, 0o755);
+    }
 
     var path_buf: [256]u8 = undefined;
     const gen_path = std.fmt.bufPrint(&path_buf, "{s}/ncz_{s}.zig", .{ registry.gen_dir, fn_name }) catch return error.NotTranspilable;
 
-    const file = try std.fs.cwd().createFile(gen_path, .{});
-    defer file.close();
-    try file.writeAll(src_buf[0..pos]);
+    // Write via POSIX open/write/close
+    {
+        var path_z_buf: [256]u8 = undefined;
+        const path_z = std.fmt.bufPrintZ(&path_z_buf, "{s}", .{gen_path}) catch return error.NotTranspilable;
+        const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, @as(std.c.mode_t, 0o644));
+        if (fd < 0) return error.NotTranspilable;
+        defer _ = std.c.close(fd);
+        const data = src_buf[0..pos];
+        var written: usize = 0;
+        while (written < data.len) {
+            const rc = std.c.write(fd, data.ptr + written, data.len - written);
+            if (rc <= 0) return error.NotTranspilable;
+            written += @intCast(rc);
+        }
+    }
 
     // Register
     const func = IncrFunc{

@@ -426,6 +426,29 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         return evalBounded(expanded, env, gc, res);
     }
 
+    // Keyword as function: (:key m) — check before builtin sentinel so (:name m) does map lookup, not (name m)
+    if (func_d.value.isKeyword() and items.len >= 2 and items.len <= 3) {
+        var args_buf2: [2]Value = undefined;
+        var ac: usize = 0;
+        for (items[1..]) |arg| {
+            if (ac >= 2) break;
+            const d = evalBounded(arg, env, gc, res);
+            if (!d.isValue()) return d;
+            args_buf2[ac] = d.value;
+            ac += 1;
+        }
+        if (ac >= 1 and args_buf2[0].isObj()) {
+            const map_obj = args_buf2[0].asObj();
+            if (map_obj.kind == .map) {
+                for (map_obj.data.map.keys.items, map_obj.data.map.vals.items) |k, v| {
+                    if (transitivity.structuralEq(k, func_d.value, gc)) return .{ .value = v };
+                }
+                if (ac == 2) return .{ .value = args_buf2[1] };
+                return .{ .value = Value.makeNil() };
+            }
+        }
+    }
+
     const core = @import("core.zig");
     if (core.isBuiltinSentinel(func_d.value, gc)) |bname| {
         if (core.lookupBuiltin(bname)) |builtin| {
@@ -444,7 +467,7 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         args_buf[args_count] = d.value;
         args_count += 1;
     }
-    return applyBounded(func_d.value, args_buf[0..args_count], env, gc, res);
+    return applyAny(func_d.value, args_buf[0..args_count], env, gc, res);
 }
 
 fn evalBoundedBuiltin(
@@ -818,6 +841,22 @@ fn evalBoundedPeval(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain 
 fn applyAny(func: Value, args: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     // Try as object first
     if (func.isObj()) return applyBounded(func, args, env, gc, res);
+    // Keyword as function: (:key m) => map lookup, (:key m default)
+    if (func.isKeyword()) {
+        if (args.len >= 1 and args.len <= 2) {
+            if (args[0].isObj()) {
+                const map_obj = args[0].asObj();
+                if (map_obj.kind == .map) {
+                    for (map_obj.data.map.keys.items, map_obj.data.map.vals.items) |k, v| {
+                        if (transitivity.structuralEq(k, func, gc)) return .{ .value = v };
+                    }
+                    // Not found: return default or nil
+                    if (args.len == 2) return .{ .value = args[1] };
+                    return .{ .value = Value.makeNil() };
+                }
+            }
+        }
+    }
     // Builtin sentinel
     const core = @import("core.zig");
     if (core.isBuiltinSentinel(func, gc)) |bname| {

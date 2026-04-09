@@ -1276,6 +1276,12 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
                 return builtin(@constCast(args), gc, caller_env, &unmetered_res) catch return error.EvalFailed;
             }
         }
+        // Keyword as function: (:key m) => (get m :key), (:key m default) => (get m :key default)
+        if (args.len >= 1 and args.len <= 2) {
+            const result = mapGet(args[0], func, gc);
+            if (!result.isNil() or args.len == 1) return result;
+            return args[1]; // default value
+        }
         return error.NotAFunction;
     }
     if (!func.isObj()) return error.NotAFunction;

@@ -816,71 +816,128 @@ pub fn isBuiltinSentinel(val: Value, gc: *GC) ?[]const u8 {
     return null;
 }
 
-// Arithmetic
-fn add(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
-    var sum_i: i48 = 0;
-    var sum_f: f64 = 0;
-    var is_float = false;
-    for (args) |a| {
-        if (a.isInt()) {
-            sum_i += a.asInt();
-            sum_f += @floatFromInt(a.asInt());
-        } else {
-            is_float = true;
-            sum_f += a.asFloat();
-        }
+// Arithmetic helpers for rational promotion
+fn asRational(v: Value) ?value.Rational {
+    if (v.isInt()) return value.Rational.init(v.asInt(), 1);
+    if (v.isObj()) {
+        const obj = v.asObj();
+        if (obj.kind == .rational) return obj.data.rational;
     }
-    return if (is_float) Value.makeFloat(sum_f) else Value.makeInt(sum_i);
+    return null;
 }
 
-fn sub(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+fn makeRationalResult(r: value.Rational, gc: *GC) !Value {
+    if (r.denominator == 1) return Value.makeInt(@intCast(r.numerator));
+    const obj = try gc.allocObj(.rational);
+    obj.data = .{ .rational = r };
+    return Value.makeObj(obj);
+}
+
+fn ratAdd(a: value.Rational, b: value.Rational) value.Rational {
+    // a/b + c/d = (ad + bc) / bd
+    return value.Rational.init(a.numerator * b.denominator + b.numerator * a.denominator, a.denominator * b.denominator);
+}
+
+fn ratSub(a: value.Rational, b: value.Rational) value.Rational {
+    return value.Rational.init(a.numerator * b.denominator - b.numerator * a.denominator, a.denominator * b.denominator);
+}
+
+fn ratMul(a: value.Rational, b: value.Rational) value.Rational {
+    return value.Rational.init(a.numerator * b.numerator, a.denominator * b.denominator);
+}
+
+// Arithmetic
+fn add(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    // Check if any arg is rational or float
+    var has_float = false;
+    var has_rational = false;
+    for (args) |a| {
+        if (a.isFloat()) { has_float = true; break; }
+        if (a.isObj() and a.asObj().kind == .rational) has_rational = true;
+    }
+    if (has_float) {
+        var sum: f64 = 0;
+        for (args) |a| sum += a.asNumber() orelse 0;
+        return Value.makeFloat(sum);
+    }
+    if (has_rational) {
+        var sum = value.Rational.init(0, 1);
+        for (args) |a| {
+            if (asRational(a)) |r| { sum = ratAdd(sum, r); }
+        }
+        return makeRationalResult(sum, gc);
+    }
+    var sum: i48 = 0;
+    for (args) |a| sum += a.asInt();
+    return Value.makeInt(sum);
+}
+
+fn sub(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len == 0) return error.ArityError;
     if (args.len == 1) {
+        if (asRational(args[0])) |r| return makeRationalResult(value.Rational.init(-r.numerator, r.denominator), gc);
         if (args[0].isInt()) return Value.makeInt(-args[0].asInt());
         return Value.makeFloat(-args[0].asFloat());
     }
-    var is_float = false;
-    var result_i = if (args[0].isInt()) args[0].asInt() else blk: {
-        is_float = true;
-        break :blk @as(i48, 0);
-    };
-    var result_f: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
-    for (args[1..]) |a| {
-        if (a.isInt()) {
-            result_i -= a.asInt();
-            result_f -= @floatFromInt(a.asInt());
-        } else {
-            is_float = true;
-            result_f -= a.asFloat();
-        }
-    }
-    return if (is_float) Value.makeFloat(result_f) else Value.makeInt(result_i);
-}
-
-fn mul(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
-    var prod_i: i48 = 1;
-    var prod_f: f64 = 1;
-    var is_float = false;
+    var has_float = false;
+    var has_rational = false;
     for (args) |a| {
-        if (a.isInt()) {
-            prod_i *= a.asInt();
-            prod_f *= @floatFromInt(a.asInt());
-        } else {
-            is_float = true;
-            prod_f *= a.asFloat();
-        }
+        if (a.isFloat()) { has_float = true; break; }
+        if (a.isObj() and a.asObj().kind == .rational) has_rational = true;
     }
-    return if (is_float) Value.makeFloat(prod_f) else Value.makeInt(prod_i);
+    if (has_float) {
+        var result: f64 = args[0].asNumber() orelse 0;
+        for (args[1..]) |a| result -= a.asNumber() orelse 0;
+        return Value.makeFloat(result);
+    }
+    if (has_rational) {
+        var result = asRational(args[0]) orelse value.Rational.init(0, 1);
+        for (args[1..]) |a| {
+            if (asRational(a)) |r| { result = ratSub(result, r); }
+        }
+        return makeRationalResult(result, gc);
+    }
+    var result: i48 = args[0].asInt();
+    for (args[1..]) |a| result -= a.asInt();
+    return Value.makeInt(result);
 }
 
-fn div_fn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+fn mul(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    var has_float = false;
+    var has_rational = false;
+    for (args) |a| {
+        if (a.isFloat()) { has_float = true; break; }
+        if (a.isObj() and a.asObj().kind == .rational) has_rational = true;
+    }
+    if (has_float) {
+        var prod: f64 = 1;
+        for (args) |a| prod *= a.asNumber() orelse 1;
+        return Value.makeFloat(prod);
+    }
+    if (has_rational) {
+        var prod = value.Rational.init(1, 1);
+        for (args) |a| {
+            if (asRational(a)) |r| { prod = ratMul(prod, r); }
+        }
+        return makeRationalResult(prod, gc);
+    }
+    var prod: i48 = 1;
+    for (args) |a| prod *= a.asInt();
+    return Value.makeInt(prod);
+}
+
+fn div_fn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
-    // Integer division when both args are ints and evenly divisible
+    // Integer division: exact when evenly divisible, rational otherwise
     if (args[0].isInt() and args[1].isInt()) {
         const b = args[1].asInt();
         if (b == 0) return error.DivisionByZero;
         const a = args[0].asInt();
         if (@rem(a, b) == 0) return Value.makeInt(@divTrunc(a, b));
+        // Return exact rational
+        const rat_obj = try gc.allocObj(.rational);
+        rat_obj.data = .{ .rational = value.Rational.init(a, b) };
+        return Value.makeObj(rat_obj);
     }
     const a_f: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
     const b_f: f64 = if (args[1].isInt()) @floatFromInt(args[1].asInt()) else args[1].asFloat();
