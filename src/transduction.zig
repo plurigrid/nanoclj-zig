@@ -80,10 +80,13 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         if (env.getById(sym_id)) |v| return Domain.pure(v);
         // Fallback: string-keyed lookup (for bindings set via string API)
         const name = gc.getString(sym_id);
-        return if (env.get(name)) |v|
-            Domain.pure(v)
-        else
-            Domain.fail(.unbound_symbol);
+        if (env.get(name)) |v| return Domain.pure(v);
+        // Namespace-qualified fallback: clojure.string/upper-case → upper-case
+        if (std.mem.indexOfScalar(u8, name, '/')) |slash| {
+            const local = name[slash + 1 ..];
+            if (env.get(local)) |v| return Domain.pure(v);
+        }
+        return Domain.fail(.unbound_symbol);
     }
 
     const obj = val.asObj();
@@ -413,6 +416,13 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
         if (core.lookupBuiltin(name)) |builtin| {
             return evalBoundedBuiltin(builtin, items[1..], env, gc, res);
         }
+        // Namespace-qualified: clojure.string/upper-case → upper-case
+        if (std.mem.indexOfScalar(u8, name, '/')) |slash| {
+            const local = name[slash + 1 ..];
+            if (core.lookupBuiltin(local)) |builtin| {
+                return evalBoundedBuiltin(builtin, items[1..], env, gc, res);
+            }
+        }
     }
 
     const func_d = evalBounded(items[0], env, gc, res);
@@ -588,6 +598,75 @@ fn evalBoundedDefmacro(items: []Value, env: *Env, gc: *GC, res: *Resources) Doma
     return Domain.pure(val);
 }
 
+/// Bind a pattern (symbol, vector, or map) to a value in the given env.
+/// Supports: symbol binding, sequential destructuring [a b c], map destructuring {:keys [x y]}.
+fn bindDestructured(pattern: Value, val: Value, env: *Env, gc: *GC) !void {
+    if (pattern.isSymbol()) {
+        const sym_id = pattern.asSymbolId();
+        const name = gc.getString(sym_id);
+        try env.set(name, val);
+        env.setById(sym_id, val) catch {};
+        return;
+    }
+    if (pattern.isObj()) {
+        const pobj = pattern.asObj();
+        // Sequential destructuring: [a b c]
+        if (pobj.kind == .vector) {
+            const pat_items = pobj.data.vector.items.items;
+            const val_items = if (val.isObj() and val.asObj().kind == .vector)
+                val.asObj().data.vector.items.items
+            else if (val.isObj() and val.asObj().kind == .list)
+                val.asObj().data.list.items.items
+            else
+                return; // can't destructure non-sequential
+            for (pat_items, 0..) |p, idx| {
+                // Handle & rest
+                if (p.isSymbol() and std.mem.eql(u8, gc.getString(p.asSymbolId()), "&")) {
+                    if (idx + 1 < pat_items.len) {
+                        // Bind rest as a list
+                        const rest_obj = gc.allocObj(.list) catch return;
+                        for (val_items[idx..]) |v| {
+                            rest_obj.data.list.items.append(gc.allocator, v) catch return;
+                        }
+                        try bindDestructured(pat_items[idx + 1], Value.makeObj(rest_obj), env, gc);
+                    }
+                    return;
+                }
+                const v = if (idx < val_items.len) val_items[idx] else Value.makeNil();
+                try bindDestructured(p, v, env, gc);
+            }
+            return;
+        }
+        // Map destructuring: {:keys [x y]}
+        if (pobj.kind == .map) {
+            const pkeys = pobj.data.map.keys.items;
+            const pvals = pobj.data.map.vals.items;
+            for (pkeys, pvals) |pk, pv| {
+                if (pk.isKeyword() and std.mem.eql(u8, gc.getString(pk.asKeywordId()), "keys")) {
+                    // {:keys [x y]} — pv is a vector of symbols
+                    if (pv.isObj() and pv.asObj().kind == .vector) {
+                        for (pv.asObj().data.vector.items.items) |sym| {
+                            if (!sym.isSymbol()) continue;
+                            const sname = gc.getString(sym.asSymbolId());
+                            // Look up :sname in val map
+                            const kw_id = gc.internString(sname) catch continue;
+                            const kw = Value.makeKeyword(kw_id);
+                            var found = Value.makeNil();
+                            if (val.isObj() and val.asObj().kind == .map) {
+                                for (val.asObj().data.map.keys.items, val.asObj().data.map.vals.items) |mk, mv| {
+                                    if (transitivity.structuralEq(mk, kw, gc)) { found = mv; break; }
+                                }
+                            }
+                            try bindDestructured(sym, found, env, gc);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+    }
+}
+
 fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     if (items.len < 3) return Domain.fail(.arity_error);
     if (!items[1].isObj()) return Domain.fail(.type_error);
@@ -684,13 +763,9 @@ fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
         // Fallback: sequential (0-1 bindings or >32)
         var i: usize = 0;
         while (i < bindings.len) : (i += 2) {
-            if (!bindings[i].isSymbol()) return Domain.fail(.type_error);
-            const sym_id = bindings[i].asSymbolId();
-            const name = gc.getString(sym_id);
             const d = evalBounded(bindings[i + 1], child, gc, res);
             if (!d.isValue()) return d;
-            child.set(name, d.value) catch return Domain.fail(.type_error);
-            child.setById(sym_id, d.value) catch {};
+            bindDestructured(bindings[i], d.value, child, gc) catch return Domain.fail(.type_error);
         }
     }
 

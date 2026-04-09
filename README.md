@@ -195,6 +195,8 @@ The interaction net engine provides optimal sharing — repeated evaluation of t
 
 The `sector` build target produces a freestanding x86 binary that boots on raw hardware (or QEMU) to a Clojure REPL. No OS required.
 
+Experimental picture-language support lives in the monoidal diagram kernel: `diagram-id`, `diagram-box`, `diagram-spider`, `diagram-seq`, `diagram-tensor`, and related analyzers. See **[docs/PICTURE-LANGUAGES.md](docs/PICTURE-LANGUAGES.md)**.
+
 ## Realizability topos
 
 nanoclj-zig is building toward an **effective topos** — a universe where "true" means "has a computable witness."
