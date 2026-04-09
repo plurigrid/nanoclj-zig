@@ -70,7 +70,7 @@ pub fn ensureAllocatorPub(gc: *GC) void {
 // ============================================================================
 
 /// (inet-new) → net-id
-pub fn inetNewFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn inetNewFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const alloc = ensureAllocator(gc);
     const slot = findFreeSlot() orelse return error.Overflow;
     nets[slot] = Net.init(alloc);
@@ -119,7 +119,7 @@ fn parseKind(gc: *GC, val: Value) ?CellKind {
 
 /// (inet-cell net-id :gamma arity) → cell-index
 /// (inet-cell net-id :gamma arity payload) → cell-index
-pub fn inetCellFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn inetCellFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.InvalidArgument;
     const net = try getNet(args);
     const kind = parseKind(gc, args[1]) orelse return error.InvalidArgument;
@@ -133,7 +133,7 @@ pub fn inetCellFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (inet-wire net-id cell-a port-a cell-b port-b) → nil
-pub fn inetWireFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn inetWireFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 5) return error.InvalidArgument;
     const net = try getNet(args);
     if (!args[1].isInt() or !args[2].isInt() or !args[3].isInt() or !args[4].isInt())
@@ -150,7 +150,7 @@ pub fn inetWireFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (inet-reduce net-id) → steps taken
-pub fn inetReduceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn inetReduceFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     const net = try getNet(args);
     var res = Resources.initDefault();
     const steps = try net.reduceAll(&res);
@@ -158,13 +158,13 @@ pub fn inetReduceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (inet-live net-id) → live cell count
-pub fn inetLiveFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn inetLiveFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     const net = try getNet(args);
     return Value.makeInt(@intCast(net.liveCells()));
 }
 
 /// (inet-pairs net-id) → active pair count
-pub fn inetPairsFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn inetPairsFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     const net = try getNet(args);
     var pairs = net.findActivePairs();
     defer pairs.deinit(net.allocator);
@@ -172,7 +172,7 @@ pub fn inetPairsFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (inet-trit net-id) → GF(3) trit sum mod 3
-pub fn inetTritFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn inetTritFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     const net = try getNet(args);
     return Value.makeInt(@intCast(net.tritSumMod3()));
 }
@@ -182,7 +182,7 @@ pub fn inetTritFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 /// Each tree node → γ cell (arity = number of transclusions).
 /// Each transclusion edge → wire from parent's aux port to child's principal.
 /// Hub nodes (high out-degree) become natural fan-out points.
-pub fn inetFromForestFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn inetFromForestFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const tree_vfs = @import("tree_vfs.zig");
     const alloc = ensureAllocator(gc);
     const slot = findFreeSlot() orelse return error.Overflow;
@@ -221,7 +221,7 @@ pub fn inetFromForestFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (inet-dot net-id) → DOT graph string
 /// Outputs a Graphviz DOT representation of the net.
-pub fn inetDotFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn inetDotFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const net = try getNet(args);
     var buf = compat.emptyList(u8);
 
@@ -280,30 +280,32 @@ test "inet builtins: create and reduce" {
     defer env.deinit();
     defer deinitNets();
 
+    var resources = Resources.initDefault();
+
     // (inet-new)
-    const net_id = try inetNewFn(&.{}, &gc, &env);
+    const net_id = try inetNewFn(&.{}, &gc, &env, &resources);
     try std.testing.expect(net_id.isInt());
 
     // (inet-cell net :epsilon 0)
     const ek = try gc.internString("epsilon");
     var cell_args = [_]Value{ net_id, Value.makeKeyword(ek), Value.makeInt(0) };
-    const e1 = try inetCellFn(&cell_args, &gc, &env);
-    const e2 = try inetCellFn(&cell_args, &gc, &env);
+    const e1 = try inetCellFn(&cell_args, &gc, &env, &resources);
+    const e2 = try inetCellFn(&cell_args, &gc, &env, &resources);
 
     // (inet-wire net 0 0 1 0) — connect principals
     var wire_args = [_]Value{ net_id, e1, Value.makeInt(0), e2, Value.makeInt(0) };
-    _ = try inetWireFn(&wire_args, &gc, &env);
+    _ = try inetWireFn(&wire_args, &gc, &env, &resources);
 
     // (inet-pairs net) → 1
     var net_args = [_]Value{net_id};
-    const pairs = try inetPairsFn(&net_args, &gc, &env);
+    const pairs = try inetPairsFn(&net_args, &gc, &env, &resources);
     try std.testing.expectEqual(@as(i48, 1), pairs.asInt());
 
     // (inet-reduce net) → 1 step
-    const steps = try inetReduceFn(&net_args, &gc, &env);
+    const steps = try inetReduceFn(&net_args, &gc, &env, &resources);
     try std.testing.expectEqual(@as(i48, 1), steps.asInt());
 
     // (inet-live net) → 0
-    const live = try inetLiveFn(&net_args, &gc, &env);
+    const live = try inetLiveFn(&net_args, &gc, &env, &resources);
     try std.testing.expectEqual(@as(i48, 0), live.asInt());
 }

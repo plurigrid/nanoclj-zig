@@ -3,6 +3,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const Reader = @import("reader.zig").Reader;
 const printer = @import("printer.zig");
 const core = @import("core.zig");
@@ -13,6 +14,8 @@ const holy = @import("holy.zig");
 const bc = @import("bytecode.zig");
 const Compiler = @import("compiler.zig").Compiler;
 const disasm = @import("disasm.zig");
+const profile = @import("profile.zig");
+const incr = @import("incr.zig");
 
 fn nanoNow() i128 {
     var ts: std.c.timespec = undefined;
@@ -356,31 +359,42 @@ fn loadMacroPrelude(env: *Env, gc: *GC) void {
         \\  (list 'let* bindings
         \\    (cons 'when (cons (first bindings) body))))
         ,
-        // run*: (run* [q] goal...) → run-goal with fresh q
-        \\(defmacro run* [vars & goals]
-        \\  (let* [q (first vars)]
-        \\    (list 'let* [q '(lvar)]
-        \\      (list 'run-goal 0 q (cons 'conj-goal goals)))))
-        ,
-        // run: (run n [q] goal...) → limited results
-        \\(defmacro run [n vars & goals]
-        \\  (let* [q (first vars)]
-        \\    (list 'let* [q '(lvar)]
-        \\      (list 'run-goal n q (cons 'conj-goal goals)))))
-        ,
-        // fresh: (fresh [a b] goal...) → introduce fresh lvars and conjoin goals
-        \\(defmacro fresh [vars & goals]
-        \\  (if (zero? (count vars))
-        \\    (cons 'conj-goal goals)
-        \\    (list 'let* [(first vars) '(lvar)]
-        \\      (cons 'fresh (cons (vec (rest vars)) goals)))))
-        ,
     };
 
     for (macros) |src| {
         var reader = Reader.init(src, gc);
         const form = reader.readForm() catch continue;
         _ = eval_mod.eval(form, env, gc) catch {};
+    }
+
+    // kanren macros — only when kanren is enabled
+    if (profile.enable_kanren) {
+        const kanren_macros = [_][]const u8{
+            // run*: (run* [q] goal...) → run-goal with fresh q
+            \\(defmacro run* [vars & goals]
+            \\  (let* [q (first vars)]
+            \\    (list 'let* [q '(lvar)]
+            \\      (list 'run-goal 0 q (cons 'conj-goal goals)))))
+            ,
+            // run: (run n [q] goal...) → limited results
+            \\(defmacro run [n vars & goals]
+            \\  (let* [q (first vars)]
+            \\    (list 'let* [q '(lvar)]
+            \\      (list 'run-goal n q (cons 'conj-goal goals)))))
+            ,
+            // fresh: (fresh [a b] goal...) → introduce fresh lvars and conjoin goals
+            \\(defmacro fresh [vars & goals]
+            \\  (if (zero? (count vars))
+            \\    (cons 'conj-goal goals)
+            \\    (list 'let* [(first vars) '(lvar)]
+            \\      (cons 'fresh (cons (vec (rest vars)) goals)))))
+            ,
+        };
+        for (kanren_macros) |src| {
+            var reader = Reader.init(src, gc);
+            const form = reader.readForm() catch continue;
+            _ = eval_mod.eval(form, env, gc) catch {};
+        }
     }
 }
 
@@ -401,13 +415,14 @@ pub fn main() !void {
     defer core.deinitCore();
     const tree_vfs = @import("tree_vfs.zig");
     defer tree_vfs.deinitForest();
-    const inet_builtins = @import("inet_builtins.zig");
-    defer inet_builtins.deinitNets();
+    defer if (profile.enable_inet) @import("inet_builtins.zig").deinitNets();
 
     // First Futamura projection: PE constant bindings through inet
-    const peval = @import("peval.zig");
-    const pe_count = peval.pevalEnv(&env, &gc);
-    _ = pe_count;
+    if (profile.enable_peval) {
+        const peval_mod = @import("peval.zig");
+        const pe_count = peval_mod.pevalEnv(&env, &gc);
+        _ = pe_count;
+    }
 
     const stdout = compat.stdoutFile();
     const stdin_file = compat.stdinFile();
@@ -416,7 +431,14 @@ pub fn main() !void {
     // Detect terminal width (fallback 80)
     const width: u32 = 80;
 
-    compat.fileWriteAll(stdout, "\x1b[1mnanoclj-zig v0.1.0\x1b[0m\n");
+    compat.fileWriteAll(stdout, "\x1b[1mnanoclj-zig v0.1.0\x1b[0m");
+    if (std.mem.eql(u8, profile.profileName(), "full")) {
+        compat.fileWriteAll(stdout, "\n");
+    } else {
+        var pbuf: [64]u8 = undefined;
+        const pmsg = std.fmt.bufPrint(&pbuf, " [profile: {s}]\n", .{profile.profileName()}) catch " [profile: ?]\n";
+        compat.fileWriteAll(stdout, pmsg);
+    }
     color_strip.renderTritWheel(stdout, width) catch {};
     compat.fileWriteAll(stdout, "\n");
 
@@ -447,6 +469,10 @@ pub fn main() !void {
     // ── Bytecode VM (persistent across REPL) ──────────────────────
     var vm = bc.VM.init(&gc, 100_000_000);
     defer vm.deinit();
+
+    // ── Incremental compilation registry (green tier) ────────────
+    var incr_registry = incr.IncrRegistry.init(allocator);
+    defer incr_registry.deinit();
 
     // ── Bytecode prelude: core higher-order functions ────────────
     // ── Macro prelude: standard Clojure macros ────────────────────
@@ -617,6 +643,14 @@ pub fn main() !void {
             continue;
         }
 
+        // Incremental compilation: (incr ...) and (incr-list)
+        if (std.mem.startsWith(u8, line, "(incr")) {
+            const result = incr.handleIncrCommand(line, &gc, &incr_registry);
+            compat.fileWriteAll(stdout, result);
+            compat.fileWriteAll(stdout, "\n");
+            continue;
+        }
+
         // Bytecode eval: (bc <expr>)
         if (std.mem.startsWith(u8, line, "(bc ") and line[line.len - 1] == ')') {
             const inner = line[4 .. line.len - 1];
@@ -709,6 +743,7 @@ test {
     _ = @import("avalon_api_example.zig");
     _ = @import("gorj_mcp.zig");
     _ = @import("disasm.zig");
+    _ = @import("incr.zig");
     _ = @import("simd_str.zig");
     _ = @import("namespace.zig");
     _ = @import("colorspace.zig");

@@ -8,6 +8,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const substrate = @import("substrate.zig");
 
 // ============================================================================
@@ -150,34 +151,34 @@ pub fn verifyBeckChevalley(f_seed: u64, g_seed: u64, p: ChromaticPredicate) bool
 // BUILTIN FUNCTIONS
 // ============================================================================
 
-pub fn heytingAndFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn heytingAndFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const a: u64 = @bitCast(@as(i64, args[0].asInt()));
     const b: u64 = @bitCast(@as(i64, args[1].asInt()));
     return Value.makeInt(@bitCast(@as(u48, @truncate(a & b))));
 }
 
-pub fn heytingOrFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn heytingOrFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const a: u64 = @bitCast(@as(i64, args[0].asInt()));
     const b: u64 = @bitCast(@as(i64, args[1].asInt()));
     return Value.makeInt(@bitCast(@as(u48, @truncate(a | b))));
 }
 
-pub fn heytingNotFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn heytingNotFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const a: u64 = @bitCast(@as(i64, args[0].asInt()));
     return Value.makeInt(@bitCast(@as(u48, @truncate(~a))));
 }
 
-pub fn heytingImpliesFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn heytingImpliesFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const a: u64 = @bitCast(@as(i64, args[0].asInt()));
     const b: u64 = @bitCast(@as(i64, args[1].asInt()));
     return Value.makeInt(@bitCast(@as(u48, @truncate(~a | b))));
 }
 
-pub fn beckChevalleyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn beckChevalleyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 4) return error.ArityError;
     for (args) |arg| {
         if (!arg.isInt()) return error.ArityError;

@@ -8,6 +8,7 @@ const eval_mod = @import("eval.zig");
 const printer = @import("printer.zig");
 const reader_mod = @import("reader.zig");
 const semantics = @import("semantics.zig");
+const Resources = @import("transitivity.zig").Resources;
 
 // ─── SplitMix64 ───────────────────────────────────────────────────────
 pub const GOLDEN: u64 = 0x9e3779b97f4a7c15;
@@ -331,7 +332,7 @@ fn hexColor(buf: *[7]u8, c: Color) void {
 // ─── Builtin implementations ────────────────────────────────────────
 
 // color-at (seed index) -> map
-pub fn colorAtFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn colorAtFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt()) return error.TypeError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
@@ -361,13 +362,13 @@ pub fn colorAtFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 // color-seed () -> 1069
-pub fn colorSeedFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn colorSeedFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     return Value.makeInt(@intCast(CANONICAL_SEED));
 }
 
 // colors (n) -> vector of n color maps
-pub fn colorsFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn colorsFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const raw = args[0].asInt();
     if (raw < 0) return error.InvalidArgs;
@@ -375,21 +376,21 @@ pub fn colorsFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     const vec = try gc.allocObj(.vector);
     for (0..n) |i| {
         var a = [_]Value{ Value.makeInt(@intCast(CANONICAL_SEED)), Value.makeInt(@intCast(i)) };
-        const color_map = try colorAtFn(&a, gc, env);
+        const color_map = try colorAtFn(&a, gc, env, res);
         try vec.data.vector.items.append(gc.allocator, color_map);
     }
     return Value.makeObj(vec);
 }
 
 // hue-to-trit (hue) -> -1, 0, or 1
-pub fn hueToTritFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn hueToTritFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const hue: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
     return Value.makeInt(@intCast(@as(i48, hueToTrit(hue))));
 }
 
 // mix64 (n) -> SplitMix64 mix
-pub fn mix64Fn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn mix64Fn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const n: u64 = @bitCast(@as(i64, args[0].asInt()));
     const result = mix64(n);
@@ -398,7 +399,7 @@ pub fn mix64Fn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 // xor-fingerprint (trits-vector) -> XOR fingerprint
-pub fn xorFingerprintFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn xorFingerprintFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isObj()) return error.ArityError;
     const obj = args[0].asObj();
     const items = switch (obj.kind) {
@@ -417,24 +418,24 @@ pub fn xorFingerprintFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 // ─── GF(3) builtins ──────────────────────────────────────────────────
 
-pub fn gf3AddFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn gf3AddFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     return Value.makeInt(toGF3(args[0].asInt() + args[1].asInt()));
 }
 
-pub fn gf3MulFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn gf3MulFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     return Value.makeInt(toGF3(args[0].asInt() * args[1].asInt()));
 }
 
-pub fn gf3ConservedFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn gf3ConservedFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3 or !args[0].isInt() or !args[1].isInt() or !args[2].isInt())
         return error.ArityError;
     const sum = args[0].asInt() + args[1].asInt() + args[2].asInt();
     return Value.makeBool(toGF3(sum) == 0);
 }
 
-pub fn tritBalanceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn tritBalanceFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isObj()) return error.ArityError;
     const obj = args[0].asObj();
     const items = switch (obj.kind) {
@@ -452,12 +453,12 @@ pub fn tritBalanceFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 // ─── BCI builtins ────────────────────────────────────────────────────
 
-pub fn bciChannelsFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn bciChannelsFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     return Value.makeInt(BCI_CHANNELS);
 }
 
-pub fn bciReadFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn bciReadFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     const channels = syntheticBciRead();
     const vec = try gc.allocObj(.vector);
@@ -467,7 +468,7 @@ pub fn bciReadFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(vec);
 }
 
-pub fn bciTritFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn bciTritFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     const channels = syntheticBciRead();
     // classify by dominant band: sum first 3 vs middle 2 vs last 3
@@ -482,7 +483,7 @@ pub fn bciTritFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
     return Value.makeInt(0);
 }
 
-pub fn bciEntropyFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn bciEntropyFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     var channels = syntheticBciRead();
     return Value.makeFloat(shannonEntropy(&channels));
@@ -506,7 +507,7 @@ fn nreplThreadFn(ctx: NreplCtx) void {
     return;
 }
 
-pub fn nreplStartFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn nreplStartFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const raw_port = args[0].asInt();
     if (raw_port < 1 or raw_port > 65535) return error.InvalidArgs;
@@ -530,7 +531,7 @@ pub fn nreplStartFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 
 // ─── Substrate traversal ─────────────────────────────────────────────
 
-pub fn substrateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn substrateFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     const obj = try gc.allocObj(.map);
     const kw = struct {
@@ -550,17 +551,18 @@ pub fn substrateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     // :bci-connected false
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "bci-connected"));
     try obj.data.map.vals.append(gc.allocator, Value.makeBool(false));
-    // :nrepl-port nil or int
+    // :nrepl-port — delegated to nrepl.zig
     try obj.data.map.keys.append(gc.allocator, try kw(gc, "nrepl-port"));
-    if (nrepl_thread != null) {
-        try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(nrepl_port)));
+    const nrepl_mod = @import("nrepl.zig");
+    if (nrepl_mod.global_server) |srv| {
+        try obj.data.map.vals.append(gc.allocator, Value.makeInt(@intCast(srv.port)));
     } else {
         try obj.data.map.vals.append(gc.allocator, Value.makeNil());
     }
     return Value.makeObj(obj);
 }
 
-pub fn traverseFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn traverseFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const out = compat.stdoutFile();
     compat.fileWriteAll(out, "traversing to ");

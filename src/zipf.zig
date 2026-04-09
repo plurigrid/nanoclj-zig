@@ -17,6 +17,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const substrate = @import("substrate.zig");
 
 // ============================================================================
@@ -73,7 +74,7 @@ fn addKV(obj: *value.Obj, gc: *GC, key: []const u8, val: Value) !void {
 }
 
 /// (zipf-rank rank s) → 1/rank^s
-pub fn zipfRankFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn zipfRankFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.InvalidArgs;
     const rank_f = args[0].asNumber() orelse return error.InvalidArgs;
     const s = args[1].asNumber() orelse return error.InvalidArgs;
@@ -82,7 +83,7 @@ pub fn zipfRankFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (zipf-pmf rank s n) → probability mass at rank
-pub fn zipfPmfFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn zipfPmfFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.InvalidArgs;
     const rank_f = args[0].asNumber() orelse return error.InvalidArgs;
     const s = args[1].asNumber() orelse return error.InvalidArgs;
@@ -93,7 +94,7 @@ pub fn zipfPmfFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (zipf-harmonic n s) → generalized harmonic number
-pub fn zipfHarmonicFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn zipfHarmonicFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.InvalidArgs;
     const n_f = args[0].asNumber() orelse return error.InvalidArgs;
     const s = args[1].asNumber() orelse return error.InvalidArgs;
@@ -102,7 +103,7 @@ pub fn zipfHarmonicFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 /// (zipf-top-share top n s) → fraction of total in top ranks
-pub fn zipfTopShareFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn zipfTopShareFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.InvalidArgs;
     const top_f = args[0].asNumber() orelse return error.InvalidArgs;
     const n_f = args[1].asNumber() orelse return error.InvalidArgs;
@@ -114,7 +115,7 @@ pub fn zipfTopShareFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 /// (zipf-sample seed n s k) → vector of k samples from Zipf(n,s)
 /// Uses inverse-CDF with splitmix RNG
-pub fn zipfSampleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn zipfSampleFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 4) return error.InvalidArgs;
     const seed_f = args[0].asNumber() orelse return error.InvalidArgs;
     const n_f = args[1].asNumber() orelse return error.InvalidArgs;
@@ -152,7 +153,7 @@ pub fn zipfSampleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (zipf-taper n s) → vector of maps [{:rank 1 :freq f :cumulative c} ...]
 /// Shows the full taper curve
-pub fn zipfTaperFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn zipfTaperFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.InvalidArgs;
     const n_f = args[0].asNumber() orelse return error.InvalidArgs;
     const s = args[1].asNumber() orelse return error.InvalidArgs;
@@ -182,7 +183,7 @@ pub fn zipfTaperFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (zipf-mandelbrot rank s q) → (rank + q)^(-s) generalization
 /// Zipf-Mandelbrot law: f(rank) = 1/(rank + q)^s
-pub fn zipfMandelbrotFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn zipfMandelbrotFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.InvalidArgs;
     const rank_f = args[0].asNumber() orelse return error.InvalidArgs;
     const s = args[1].asNumber() orelse return error.InvalidArgs;

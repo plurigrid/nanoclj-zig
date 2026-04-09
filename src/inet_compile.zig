@@ -21,6 +21,7 @@ const Obj = value.Obj;
 const ObjKind = value.ObjKind;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const inet = @import("inet.zig");
 const Net = inet.Net;
 const Port = inet.Port;
@@ -228,7 +229,7 @@ fn compileLambda(net: *Net, items: []Value, gc: *GC, scope: *Scope) CompileError
 // BUILTIN: (inet-compile net-id quoted-expr) → root-cell-index
 // ============================================================================
 
-pub fn inetCompileFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn inetCompileFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.InvalidArgument;
     if (!args[0].isInt()) return error.InvalidArgument;
 
@@ -280,7 +281,7 @@ pub fn readback(net: *const Net, cell_idx: u16, gc: *GC) !Value {
 }
 
 /// (inet-readback net-id cell-idx) → Value
-pub fn inetReadbackFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn inetReadbackFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.InvalidArgument;
     const ib = @import("inet_builtins.zig");
     const net = try ib.getNetPub(args[0]);
@@ -293,7 +294,7 @@ pub fn inetReadbackFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (inet-eval quoted-expr) → Value
 /// The full pipeline: compile → reduce → readback in one call.
-pub fn inetEvalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn inetEvalFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.InvalidArgument;
 
     // Create a fresh net
@@ -449,7 +450,8 @@ test "inet-eval end-to-end" {
 
     // (inet-eval '42) → 42
     var args = [_]Value{Value.makeInt(42)};
-    const result = try inetEvalFn(&args, &gc, &env);
+    var resources = Resources.initDefault();
+    const result = try inetEvalFn(&args, &gc, &env, &resources);
     try std.testing.expect(result.isInt());
     try std.testing.expectEqual(@as(i48, 42), result.asInt());
 }

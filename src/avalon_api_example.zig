@@ -5,6 +5,7 @@ const Obj = value.Obj;
 const ObjKind = value.ObjKind;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 
 fn kw(gc: *GC, name: []const u8) !Value {
     return Value.makeKeyword(try gc.internString(name));
@@ -76,14 +77,14 @@ fn buildAvalonSpec(gc: *GC) !Value {
 
 /// (avalon-api-spec) -> map
 /// Encodes a compact spec from https://api-avalon.avionsoftware.com/
-pub fn avalonApiSpecFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn avalonApiSpecFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     return buildAvalonSpec(gc);
 }
 
 /// (avalon-api-example) -> map
 /// Returns a minimal nanoclj-oriented request flow using the Avalon spec.
-pub fn avalonApiExampleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn avalonApiExampleFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
 
     const root = try gc.allocObj(.map);
@@ -131,7 +132,8 @@ test "avalon-api-spec: returns map with auth and operations" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
-    const spec_val = try avalonApiSpecFn(&.{}, &gc, &env);
+    var resources = Resources.initDefault();
+    const spec_val = try avalonApiSpecFn(&.{}, &gc, &env, &resources);
     try std.testing.expect(spec_val.isObj());
     const spec_obj = spec_val.asObj();
     try std.testing.expectEqual(ObjKind.map, spec_obj.kind);
@@ -152,7 +154,8 @@ test "avalon-api-example: includes 2-step flow" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
-    const ex_val = try avalonApiExampleFn(&.{}, &gc, &env);
+    var resources = Resources.initDefault();
+    const ex_val = try avalonApiExampleFn(&.{}, &gc, &env, &resources);
     try std.testing.expect(ex_val.isObj());
     const ex_obj = ex_val.asObj();
     try std.testing.expectEqual(ObjKind.map, ex_obj.kind);

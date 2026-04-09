@@ -15,6 +15,7 @@ const std = @import("std");
 const Value = @import("value.zig").Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 
 // ============================================================================
 // 1. EQUALITY — How do we know two things are the same?
@@ -560,7 +561,7 @@ pub fn setWorld(w: World) void {
 // ============================================================================
 
 /// (set-world! :standard) or (set-world! :constructivist) etc.
-pub fn setWorldFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn setWorldFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isKeyword()) return error.TypeError;
     const name = gc.getString(args[0].asKeywordId());
@@ -577,7 +578,7 @@ pub fn setWorldFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (current-world) — returns keyword naming active world
-pub fn currentWorldFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn currentWorldFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     const w = &current_world;
     const name = if (std.meta.eql(w.*, World.standard))
@@ -594,27 +595,27 @@ pub fn currentWorldFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (plural-equal? a b) — compare using current world's equality mode
-pub fn pluralEqualFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn pluralEqualFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return Value.makeBool(pluralEqual(args[0], args[1], current_world.equality, gc));
 }
 
 /// (plural-compare a b) — compare using current world's ordering
-pub fn pluralCompareFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn pluralCompareFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const result = pluralCompare(args[0], args[1], current_world.order);
     return Value.makeInt(@intFromEnum(result));
 }
 
 /// (trit v) — evaluate truthiness using current world's logic
-pub fn tritFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn tritFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const t = pluralTruth(args[0], current_world.truth);
     return Value.makeInt(@intFromEnum(t));
 }
 
 /// (plural-hash v) — hash using current world's hash mode
-pub fn pluralHashFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn pluralHashFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeInt(@intCast(pluralHash(args[0], current_world.hash, gc)));
 }

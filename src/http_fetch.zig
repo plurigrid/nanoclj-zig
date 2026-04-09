@@ -11,6 +11,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 
 const MAX_RESPONSE_BYTES = 1024 * 1024; // 1 MiB
 
@@ -59,7 +60,7 @@ fn isSafeUrl(url: []const u8) bool {
     return true;
 }
 
-pub fn httpFetchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn httpFetchFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or args.len > 3) return error.ArityError;
 
     // Arg 0: URL (string)
@@ -119,9 +120,11 @@ test "http-fetch: returns map with status and body keys" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
+
     // Calling with non-string should return TypeError
     var args = [_]Value{Value.makeInt(42)};
-    const result = httpFetchFn(&args, &gc, &env);
+    const result = httpFetchFn(&args, &gc, &env, &resources);
     try std.testing.expectError(error.TypeError, result);
 }
 
@@ -131,8 +134,10 @@ test "http-fetch: arity check" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
+
     // No args
     var args = [_]Value{};
-    const result = httpFetchFn(args[0..0], &gc, &env);
+    const result = httpFetchFn(args[0..0], &gc, &env, &resources);
     try std.testing.expectError(error.ArityError, result);
 }

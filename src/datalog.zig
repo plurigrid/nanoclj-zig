@@ -333,23 +333,15 @@ pub const Engine = struct {
                 }
                 continue;
             }
-            // Find first positive body atom
-            var first_pos: ?u8 = null;
+            // Try each positive body atom against delta (standard semi-naive)
             for (0..rule.body_len) |b| {
-                if (!rule.body[b].negated) {
-                    first_pos = @intCast(b);
-                    break;
-                }
-            }
-            if (first_pos == null) continue; // all-negated body: unusual
-
-            const fp = first_pos.?;
-            // Try delta facts against first positive atom
-            for (0..delta.len) |di| {
-                const sub = Substitution.empty();
-                if (matchAtom(&rule.body[fp], &delta.facts[di], &sub)) |ext_sub| {
-                    // Now evaluate remaining body atoms against ALL facts
-                    self.evalBodySkipping(rule, fp, &ext_sub, all_facts, &new_facts);
+                if (rule.body[b].negated) continue;
+                const bp: u8 = @intCast(b);
+                for (0..delta.len) |di| {
+                    const sub = Substitution.empty();
+                    if (matchAtom(&rule.body[bp], &delta.facts[di], &sub)) |ext_sub| {
+                        self.evalBodySkipping(rule, bp, &ext_sub, all_facts, &new_facts);
+                    }
                 }
             }
         }
@@ -573,10 +565,15 @@ pub const Engine = struct {
             const head_str = std.mem.trim(u8, line[0..sep], " \t");
             const body_str = std.mem.trim(u8, line[sep + 2 ..], " \t");
             var rule = Rule{ .head = self.parseAtom(head_str, false) };
-            // Split body by ","
+            // Split body by "," respecting parentheses
             var bstart: usize = 0;
+            var paren_depth: usize = 0;
             for (0..body_str.len) |i| {
-                if (body_str[i] == ',' or i == body_str.len - 1) {
+                if (body_str[i] == '(') paren_depth += 1;
+                if (body_str[i] == ')') {
+                    if (paren_depth > 0) paren_depth -= 1;
+                }
+                if ((body_str[i] == ',' and paren_depth == 0) or i == body_str.len - 1) {
                     const end = if (body_str[i] == ',') i else i + 1;
                     const atom_str = std.mem.trim(u8, body_str[bstart..end], " \t");
                     if (atom_str.len > 0 and rule.body_len < MAX_BODY) {

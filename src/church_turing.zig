@@ -187,7 +187,7 @@ pub fn observeInet(expr: []const u8, gc: *GC, _: *Env) Observation {
 /// (ill-posed expr) → {:tree-walk {...} :bytecode-vm {...} :inet {...}
 ///                      :extensionally-equal? true
 ///                      :intensionally-equal? false}
-pub fn illPosedFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn illPosedFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const expr = gc.getString(args[0].asStringId());
@@ -427,7 +427,7 @@ fn searchForValueInet(expr: []const u8, target: i48, gc: *GC, env: *Env) Decidab
 /// (decidable? n "even") → {:answer true/false :level :decidable ...}
 /// (decidable? n "prime") → {:answer true/false :level :decidable ...}
 /// The characteristic function always halts. All substrates agree.
-pub fn decidableFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn decidableFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     if (!args[1].isString()) return error.TypeError;
@@ -467,7 +467,7 @@ pub fn decidableFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// Runs expr through tree-walk AND inet. If expr produces target, returns
 /// {:answer true}. If fuel exhausts, tree-walk says "don't know" but inet
 /// says "trit imbalanced" — additional structural evidence.
-pub fn semiDecideFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn semiDecideFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     if (!args[1].isInt()) return error.TypeError;
@@ -521,7 +521,7 @@ pub fn semiDecideFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 ///
 /// The undecidable level: runs expr and reports how each substrate FAILS.
 /// The point is not whether it halts — it's that the failure modes differ.
-pub fn haltingWitnessFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn haltingWitnessFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -598,7 +598,7 @@ pub fn haltingWitnessFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 ///
 /// Hickey/Fogus epochal time: each epoch is an immutable value,
 /// the recording session is the identity, perception is the readback.
-pub fn epochalWitnessFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn epochalWitnessFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 4) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
 
@@ -643,7 +643,7 @@ pub fn epochalWitnessFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// These are the building blocks of decidable predicates.
-pub fn primitiveRecursiveFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn primitiveRecursiveFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const op = gc.getString(args[0].asStringId());
@@ -815,9 +815,11 @@ test "decidability: primitive recursive zero, succ, proj" {
     var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
 
+    var res = Resources.initDefault();
+
     // Z() = 0
     var zero_args = [_]Value{Value.makeString(try gc.internString("zero"))};
-    const z = try primitiveRecursiveFn(&zero_args, &gc, &env);
+    const z = try primitiveRecursiveFn(&zero_args, &gc, &env, &res);
     try std.testing.expectEqual(@as(i48, 0), z.asInt());
 
     // S(5) = 6
@@ -825,7 +827,7 @@ test "decidability: primitive recursive zero, succ, proj" {
         Value.makeString(try gc.internString("succ")),
         Value.makeInt(5),
     };
-    const s = try primitiveRecursiveFn(&succ_args, &gc, &env);
+    const s = try primitiveRecursiveFn(&succ_args, &gc, &env, &res);
     try std.testing.expectEqual(@as(i48, 6), s.asInt());
 
     // π_1(10, 20, 30) = 20
@@ -836,7 +838,7 @@ test "decidability: primitive recursive zero, succ, proj" {
         Value.makeInt(20),
         Value.makeInt(30),
     };
-    const p = try primitiveRecursiveFn(&proj_args, &gc, &env);
+    const p = try primitiveRecursiveFn(&proj_args, &gc, &env, &res);
     try std.testing.expectEqual(@as(i48, 20), p.asInt());
 }
 
@@ -846,12 +848,14 @@ test "decidability: primitive recursive addition via primrec" {
     var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
 
+    var res = Resources.initDefault();
+
     // add(3, 7) = 10 via primitive recursion schema
     var args = [_]Value{
         Value.makeString(try gc.internString("primrec")),
         Value.makeInt(3),
         Value.makeInt(7),
     };
-    const r = try primitiveRecursiveFn(&args, &gc, &env);
+    const r = try primitiveRecursiveFn(&args, &gc, &env, &res);
     try std.testing.expectEqual(@as(i48, 10), r.asInt());
 }

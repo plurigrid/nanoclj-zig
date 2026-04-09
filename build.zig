@@ -1,5 +1,26 @@
 const std = @import("std");
 
+const Profile = enum {
+    full,
+    embed_min,
+    embed_safe,
+};
+
+fn addBuildOptions(b: *std.Build, _: std.Build.ResolvedTarget, _: std.builtin.OptimizeMode, profile: Profile) *std.Build.Module {
+    const options = b.addOptions();
+    options.addOption(bool, "embed_min", profile == .embed_min);
+    options.addOption(bool, "embed_safe", profile == .embed_safe);
+    options.addOption(bool, "enable_fuel", profile != .embed_min);
+    options.addOption(bool, "enable_depth_limits", profile == .embed_safe);
+    options.addOption(bool, "enable_allocation_budget", profile == .embed_safe);
+    options.addOption(bool, "enable_mcp", profile == .full);
+    options.addOption(bool, "enable_nrepl", profile == .full);
+    options.addOption(bool, "enable_kanren", profile == .full);
+    options.addOption(bool, "enable_inet", profile == .full);
+    options.addOption(bool, "enable_peval", profile == .full);
+    return options.createModule();
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -11,6 +32,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const full_build_options = addBuildOptions(b, target, optimize, .full);
+
     // nanoclj REPL
     const exe = b.addExecutable(.{
         .name = "nanoclj",
@@ -20,6 +43,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
+                .{ .name = "build_options", .module = full_build_options },
             },
         }),
     });
@@ -39,6 +63,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
             },
         }),
@@ -59,6 +84,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
             },
         }),
@@ -96,6 +122,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
             },
         }),
@@ -138,20 +165,68 @@ pub fn build(b: *std.Build) void {
         .os_tag = .freestanding,
         .abi = .none,
     });
+    const wasm_build_options = addBuildOptions(b, wasm_target, .ReleaseSmall, .embed_safe);
     const wasm_exe = b.addExecutable(.{
-        .name = "nanoclj.wasm",
+        .name = "nanoclj",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/wasm_main.zig"),
             .target = wasm_target,
             .optimize = .ReleaseSmall,
             .strip = true,
+            .imports = &.{
+                .{ .name = "build_options", .module = wasm_build_options },
+            },
         }),
     });
-    // Export eval entry point for JS host
+    // Export eval entry point for JS host; no _start entry point
     wasm_exe.root_module.export_symbol_names = &.{ "nanoclj_init", "nanoclj_eval", "nanoclj_alloc", "nanoclj_free" };
+    wasm_exe.entry = .disabled;
     b.installArtifact(wasm_exe);
+    const wasm_install = b.addInstallArtifact(wasm_exe, .{});
     const wasm_step = b.step("wasm", "Build nanoclj WebAssembly module");
-    wasm_step.dependOn(&wasm_exe.step);
+    wasm_step.dependOn(&wasm_install.step);
+
+    // Embedded profiles: same REPL entry point today, but with explicit build flags
+    // so the runtime can progressively shed features in source-level gates.
+    const embed_min_options = addBuildOptions(b, target, .ReleaseSmall, .embed_min);
+    const embed_min_exe = b.addExecutable(.{
+        .name = "nanoclj-embed-min",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = .ReleaseSmall,
+            .imports = &.{
+                .{ .name = "syrup", .module = syrup_mod },
+                .{ .name = "build_options", .module = embed_min_options },
+            },
+        }),
+    });
+    b.installArtifact(embed_min_exe);
+    const embed_min_run = b.addRunArtifact(embed_min_exe);
+    embed_min_run.step.dependOn(b.getInstallStep());
+    if (b.args) |args| embed_min_run.addArgs(args);
+    const embed_min_step = b.step("embed-min", "Build/run the minimal embedded profile");
+    embed_min_step.dependOn(&embed_min_run.step);
+
+    const embed_safe_options = addBuildOptions(b, target, .ReleaseSmall, .embed_safe);
+    const embed_safe_exe = b.addExecutable(.{
+        .name = "nanoclj-embed-safe",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = .ReleaseSmall,
+            .imports = &.{
+                .{ .name = "syrup", .module = syrup_mod },
+                .{ .name = "build_options", .module = embed_safe_options },
+            },
+        }),
+    });
+    b.installArtifact(embed_safe_exe);
+    const embed_safe_run = b.addRunArtifact(embed_safe_exe);
+    embed_safe_run.step.dependOn(b.getInstallStep());
+    if (b.args) |args| embed_safe_run.addArgs(args);
+    const embed_safe_step = b.step("embed-safe", "Build/run the bounded embedded profile");
+    embed_safe_step.dependOn(&embed_safe_run.step);
 
     // Tests
     const unit_tests = b.addTest(.{
@@ -161,6 +236,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
+                .{ .name = "build_options", .module = full_build_options },
             },
         }),
     });

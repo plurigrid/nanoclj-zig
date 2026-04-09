@@ -290,7 +290,7 @@ pub const Schema = struct {
 /// (judge expr) → map with categorical analysis
 /// Returns: {:domain <val> :quantity <q> :quality <q> :relation <r>
 ///           :fuel <n> :trit <n> :conserved <bool> :antinomy <a|nil>}
-pub fn judgeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn judgeFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     const eval_mod = @import("eval.zig");
     var res = Resources.initDefault();
@@ -362,7 +362,7 @@ pub fn judgeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 }
 
 /// (categories) → list of all category names
-pub fn categoriesFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn categoriesFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.list);
     const alloc = gc.allocator;
     const names = [_][]const u8{
@@ -379,7 +379,7 @@ pub fn categoriesFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (antinomy n) → keyword describing nth antinomy
-pub fn antinomyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn antinomyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isInt()) return error.TypeError;
     const n = args[0].asInt();
     const name = switch (n) {
@@ -395,7 +395,7 @@ pub fn antinomyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// (phenomenon val) → the value as it appears (identity — we never see noumena)
 /// This is not a no-op philosophically: it marks the boundary.
 /// "Thoughts without content are empty, intuitions without concepts are blind" (A51/B75)
-pub fn phenomenonFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn phenomenonFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.ArityError;
     // The phenomenon IS the value. The noumenon is the bits we can't introspect.
     // This function's existence marks the transcendental boundary.
@@ -405,7 +405,7 @@ pub fn phenomenonFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 /// (noumenon val) → nil (we cannot access things-in-themselves)
 /// "We can have no knowledge of any object as thing in itself,
 /// but only insofar as it is an object of sensible intuition" (Bxxvi)
-pub fn noumenonFn(_: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn noumenonFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     return Value.makeNil(); // always nil — the noumenon is inaccessible
 }
 

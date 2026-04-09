@@ -237,7 +237,7 @@ fn denoteFnStar(items: []Value, env: *Env, gc: *GC, _: *Resources) Domain {
 }
 
 fn denoteBuiltin(
-    builtin: *const fn ([]Value, *GC, *Env) anyerror!Value,
+    builtin: *const fn ([]Value, *GC, *Env, *Resources) anyerror!Value,
     raw_args: []Value,
     env: *Env,
     gc: *GC,
@@ -252,7 +252,7 @@ fn denoteBuiltin(
         args_buf[args_count] = d.value;
         args_count += 1;
     }
-    const result = builtin(args_buf[0..args_count], gc, env) catch
+    const result = builtin(args_buf[0..args_count], gc, env, res) catch
         return Domain.fail(.type_error);
     return Domain.pure(result);
 }

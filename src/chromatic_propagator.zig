@@ -8,6 +8,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const substrate = @import("substrate.zig");
 const gay_skills = @import("gay_skills.zig");
 
@@ -170,7 +171,7 @@ fn getOrCreateEnv(seed: u64) *ChromaticEnv {
     return &envs[15];
 }
 
-pub fn chromaticEnvFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn chromaticEnvFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const ce = getOrCreateEnv(seed);
@@ -181,7 +182,7 @@ pub fn chromaticEnvFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn chromaticDefineFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn chromaticDefineFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const name_hash: u64 = @bitCast(@as(i64, args[1].asInt()));
@@ -196,7 +197,7 @@ pub fn chromaticDefineFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn chromaticTellFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn chromaticTellFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3 or !args[0].isInt() or !args[1].isInt() or !args[2].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const name_hash: u64 = @bitCast(@as(i64, args[1].asInt()));
@@ -213,7 +214,7 @@ pub fn chromaticTellFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn chromaticConservationFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn chromaticConservationFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const ce = getOrCreateEnv(seed);

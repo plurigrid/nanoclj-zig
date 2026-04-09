@@ -48,6 +48,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const semantics = @import("semantics.zig");
 const substrate = @import("substrate.zig");
 
@@ -190,7 +191,7 @@ pub const CellState = enum {
 // ============================================================================
 
 // Skill 9: tropical-add
-pub fn tropicalAddFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn tropicalAddFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const a: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
     const b: f64 = if (args[1].isInt()) @floatFromInt(args[1].asInt()) else args[1].asFloat();
@@ -198,7 +199,7 @@ pub fn tropicalAddFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 // Skill 10: tropical-mul
-pub fn tropicalMulFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn tropicalMulFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const a: f64 = if (args[0].isInt()) @floatFromInt(args[0].asInt()) else args[0].asFloat();
     const b: f64 = if (args[1].isInt()) @floatFromInt(args[1].asInt()) else args[1].asFloat();
@@ -206,7 +207,7 @@ pub fn tropicalMulFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 // Skill 11: world-create (seed) → {:seed N :step 0 :trit 0 :conserved true}
-pub fn worldCreateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn worldCreateFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len > 1) return error.ArityError;
     const seed: u64 = if (args.len == 1 and args[0].isInt())
         @bitCast(@as(i64, args[0].asInt()))
@@ -216,7 +217,7 @@ pub fn worldCreateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 // Skill 12: world-step (world) → {:seed N :step N+1 :trit T :conserved B :color "#RRGGBB"}
-pub fn worldStepFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn worldStepFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isObj()) return error.ArityError;
     const obj = args[0].asObj();
     if (obj.kind != .map) return error.TypeError;
@@ -271,7 +272,7 @@ fn worldToMap(w: World, gc: *GC) !Value {
 
 // Skill 13: propagate — merge two values in the partial information lattice
 // nothing ⊔ v = v, v ⊔ nothing = v, v ⊔ v = v, v ⊔ w = contradiction
-pub fn propagateFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn propagateFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const a = args[0];
     const b = args[1];
@@ -289,7 +290,7 @@ pub fn propagateFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 pub const xorFingerprintFn = substrate.xorFingerprintFn;
 
 // Skill 15: shannon-entropy of a numeric vector
-pub fn entropyFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn entropyFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isObj()) return error.ArityError;
     const obj = args[0].asObj();
     const items = switch (obj.kind) {
@@ -315,7 +316,7 @@ pub fn entropyFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 }
 
 // Skill 16: depth-color — return the color assigned to current eval depth
-pub fn depthColorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn depthColorFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len > 1) return error.ArityError;
     const depth: u32 = if (args.len == 1 and args[0].isInt())
         @intCast(args[0].asInt())
@@ -349,13 +350,13 @@ pub fn depthColorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 // Skill 17: bisim? — check if two values are bisimulation-equivalent
 // Uses structural equality as the ground-truth bisimulation relation
-pub fn bisimCheckFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn bisimCheckFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     return Value.makeBool(semantics.structuralEq(args[0], args[1], gc));
 }
 
 // Skill 3: color-hex (r g b) → "#RRGGBB"
-pub fn colorHexFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn colorHexFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[0].isInt() or !args[1].isInt() or !args[2].isInt()) return error.TypeError;
     const r: u8 = @intCast(@as(i48, @max(0, @min(255, args[0].asInt()))));
@@ -372,7 +373,7 @@ pub fn colorHexFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 // Skill 4: color-trit (hex-string) → -1/0/+1 based on hue
-pub fn colorTritFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn colorTritFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     // Accept either a hex string "#RRGGBB" or 3 ints
     if (args[0].isString()) {

@@ -35,7 +35,7 @@ const inet_builtins = @import("inet_builtins.zig");
 /// graph = {:nodes [v1 v2 ...] :edges [[v1 v2] [v2 v3] ...]}
 /// Returns a net-id where each γ cell holds a bag (vector of nodes),
 /// wired in a tree structure. Uses greedy elimination ordering.
-pub fn decomposeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn decomposeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isObj()) return error.InvalidArgs;
     const graph_obj = args[0].asObj();
     if (graph_obj.kind != .map) return error.InvalidArgs;
@@ -171,7 +171,7 @@ fn valEql(a: Value, b: Value, gc: *GC) bool {
 // ============================================================================
 
 /// (decomp-bags net-id) → vector of bag vectors
-pub fn decompBagsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn decompBagsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.InvalidArgs;
     const net = try inet_builtins.getNetPub(args[0]);
     const result = try gc.allocObj(.vector);
@@ -187,7 +187,7 @@ pub fn decompBagsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (decomp-width net-id) → integer (treewidth)
-pub fn decompWidthFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn decompWidthFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.InvalidArgs;
     const net = try inet_builtins.getNetPub(args[0]);
     var max_size: i48 = 0;
@@ -210,7 +210,7 @@ pub fn decompWidthFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
 
 /// (decomp-glue net-id) → reduced payload or nil
 /// Runs full inet reduction, returns the payload of the last surviving γ cell.
-pub fn decompGlueFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn decompGlueFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.InvalidArgs;
     const net = try inet_builtins.getNetPub(args[0]);
     var res = Resources.init(.{ .max_fuel = 10000 });
@@ -231,7 +231,7 @@ pub fn decompGlueFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (decomp-map f net-id) → new net-id with transformed payloads
-pub fn decompMapFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn decompMapFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.InvalidArgs;
     const f = args[0];
     const src_net = try inet_builtins.getNetPub(args[1]);
@@ -269,7 +269,7 @@ pub fn decompMapFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 /// Checks bottom-up: for each bag, compute local sections via stalk,
 /// then check gluing compatibility with parent. If root has any
 /// surviving section, return true.
-pub fn decompDecideFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn decompDecideFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.InvalidArgs;
     if (!args[0].isObj()) return error.InvalidArgs;
     const sheaf_obj = args[0].asObj();
@@ -366,7 +366,7 @@ fn bagIntersection(a: Value, b: Value, gc: *GC) !Value {
 // ============================================================================
 
 /// (decomp-skeleton net-id) → new net-id with nil payloads
-pub fn decompSkeletonFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn decompSkeletonFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.InvalidArgs;
     const src_net = try inet_builtins.getNetPub(args[0]);
     const slot = inet_builtins.findFreeSlotPub() orelse return error.Overflow;
@@ -388,7 +388,7 @@ pub fn decompSkeletonFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (sheaf stalk-fn glue-fn) → {:stalk f :glue g}
-pub fn sheafFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn sheafFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.InvalidArgs;
     const obj = try gc.allocObj(.map);
     const m = &obj.data.map;
@@ -404,7 +404,7 @@ pub fn sheafFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 // ============================================================================
 
 /// (section sheaf open-set) → result of (stalk open-set)
-pub fn sectionFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn sectionFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.InvalidArgs;
     if (!args[0].isObj()) return error.InvalidArgs;
     const sheaf_obj = args[0].asObj();
@@ -425,7 +425,7 @@ pub fn sectionFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 // ============================================================================
 
 /// (restrict section subset) → filtered section (keeps elements in subset)
-pub fn restrictFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn restrictFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.InvalidArgs;
     if (!args[0].isObj() or !args[1].isObj()) return error.InvalidArgs;
     const sec = args[0].asObj();
@@ -453,7 +453,7 @@ pub fn restrictFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// covering = vector of open sets
 /// Attempts to merge all local sections; returns merged vector if
 /// glue is satisfied pairwise, nil otherwise.
-pub fn extendSectionFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn extendSectionFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 3) return error.InvalidArgs;
     if (!args[0].isObj() or !args[1].isObj() or !args[2].isObj()) return error.InvalidArgs;
 
@@ -530,7 +530,7 @@ pub fn extendSectionFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
 // ============================================================================
 
 /// (decomp-adhesions net-id) → vector of {:bags [i j] :shared [nodes...]}
-pub fn decompAdhesionsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn decompAdhesionsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.InvalidArgs;
     const net = try inet_builtins.getNetPub(args[0]);
     const result = try gc.allocObj(.vector);
@@ -571,7 +571,7 @@ pub fn decompAdhesionsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 ///   value > 0 → +1 (PLUS/generator)
 ///   value = 0 →  0 (ERGODIC/coordinator)
 ///   value < 0 → -1 (MINUS/validator)
-pub fn tritTrajectoryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn tritTrajectoryFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isObj()) return error.InvalidArgs;
     const vec = args[0].asObj();
     if (vec.kind != .vector) return error.InvalidArgs;
@@ -603,7 +603,7 @@ pub fn tritTrajectoryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// (decomp-gf3 net-id) → {:trit-sum N :conserved? bool :cell-trits [...]}
 /// GF(3) balance of a decomposition net. The inet trit sum must be 0.
 /// Bridges to passport.gay: a valid decomposition = valid trit trajectory.
-pub fn decompGf3Fn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn decompGf3Fn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.InvalidArgs;
     const net = try inet_builtins.getNetPub(args[0]);
 
@@ -688,26 +688,27 @@ test "decompose triangle graph" {
     var env = @import("env.zig").Env.init(alloc, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     var dargs = [_]Value{Value.makeObj(graph)};
-    const net_id = try decomposeFn(&dargs, &gc, &env);
+    const net_id = try decomposeFn(&dargs, &gc, &env, &resources);
     try std.testing.expect(net_id.isInt());
 
     // Check bags
     var bargs = [_]Value{net_id};
-    const bags = try decompBagsFn(&bargs, &gc, &env);
+    const bags = try decompBagsFn(&bargs, &gc, &env, &resources);
     try std.testing.expect(bags.isObj());
     try std.testing.expect(bags.asObj().kind == .vector);
     const bag_count = bags.asObj().data.vector.items.items.len;
     try std.testing.expect(bag_count >= 1);
 
     // Check treewidth
-    const tw = try decompWidthFn(&bargs, &gc, &env);
+    const tw = try decompWidthFn(&bargs, &gc, &env, &resources);
     try std.testing.expect(tw.isInt());
     // Triangle graph: treewidth = 2 (K3 requires all 3 nodes in one bag)
     try std.testing.expect(tw.asInt() >= 1);
 
     // Check adhesions
-    const adh = try decompAdhesionsFn(&bargs, &gc, &env);
+    const adh = try decompAdhesionsFn(&bargs, &gc, &env, &resources);
     try std.testing.expect(adh.isObj());
 
     // Clean up
@@ -722,10 +723,12 @@ test "sheaf section and restrict" {
     var env = @import("env.zig").Env.init(alloc, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
+
     // Build sheaf with identity stalk (no glue)
     const stalk = Value.makeNil(); // We can't easily test with eval, so test structure
     var sargs = [_]Value{ stalk, Value.makeNil() };
-    const sh = try sheafFn(&sargs, &gc, &env);
+    const sh = try sheafFn(&sargs, &gc, &env, &resources);
     try std.testing.expect(sh.isObj());
     try std.testing.expect(sh.asObj().kind == .map);
     try std.testing.expect(sh.asObj().data.map.keys.items.len == 2);
@@ -742,7 +745,7 @@ test "sheaf section and restrict" {
     try subset_vec.data.vector.items.append(alloc, Value.makeInt(4));
 
     var rargs = [_]Value{ Value.makeObj(section_vec), Value.makeObj(subset_vec) };
-    const restricted = try restrictFn(&rargs, &gc, &env);
+    const restricted = try restrictFn(&rargs, &gc, &env, &resources);
     try std.testing.expect(restricted.isObj());
     try std.testing.expect(restricted.asObj().kind == .vector);
     try std.testing.expectEqual(@as(usize, 2), restricted.asObj().data.vector.items.items.len);
@@ -785,8 +788,9 @@ test "extend-section without glue merges and deduplicates" {
     try covering.data.vector.items.append(alloc, Value.makeObj(c1));
     try covering.data.vector.items.append(alloc, Value.makeObj(c2));
 
+    var resources = Resources.initDefault();
     var eargs = [_]Value{ Value.makeObj(sh), Value.makeObj(secs), Value.makeObj(covering) };
-    const merged = try extendSectionFn(&eargs, &gc, &env);
+    const merged = try extendSectionFn(&eargs, &gc, &env, &resources);
     try std.testing.expect(merged.isObj());
     try std.testing.expect(merged.asObj().kind == .vector);
     // [1 2 3] — deduplicated merge

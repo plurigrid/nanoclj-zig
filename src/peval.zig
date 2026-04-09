@@ -188,7 +188,7 @@ pub fn pevalPrelude(path: []const u8, env: *Env, gc: *GC) !struct { evaluated: u
 }
 
 /// Builtin: (peval expr) — partially evaluate through inet
-pub fn pevalFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn pevalFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1) return error.InvalidArgument;
     return pevalExpr(args[0], gc, env) orelse args[0];
 }

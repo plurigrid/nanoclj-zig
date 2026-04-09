@@ -83,6 +83,7 @@ pub const Reader = struct {
                 self.pos -= 1;
                 break :blk self.readWrapped("unquote");
             },
+            '\\' => self.readCharLiteral(),
             '^' => self.readMeta(),
             '#' => self.readDispatch(),
             '"' => self.readString(),
@@ -423,6 +424,37 @@ pub const Reader = struct {
             self.pos += 1;
         }
         return error.UnexpectedEOF;
+    }
+
+    fn readCharLiteral(self: *Reader) ReadError!Value {
+        self.pos += 1; // skip backslash
+        if (self.pos >= self.src.len) return error.UnexpectedEOF;
+        const start = self.pos;
+        // Check for named characters (space, newline, tab, etc.)
+        if (std.ascii.isAlphabetic(self.src[self.pos])) {
+            while (self.pos < self.src.len and std.ascii.isAlphabetic(self.src[self.pos])) self.pos += 1;
+            const name = self.src[start..self.pos];
+            if (name.len == 1) {
+                // Single alpha char: \a, \b, etc.
+                const id = self.gc.internString(name) catch return error.OutOfMemory;
+                return Value.makeString(id);
+            }
+            const ch: u8 = if (std.mem.eql(u8, name, "space")) ' '
+                else if (std.mem.eql(u8, name, "newline")) '\n'
+                else if (std.mem.eql(u8, name, "tab")) '\t'
+                else if (std.mem.eql(u8, name, "return")) '\r'
+                else if (std.mem.eql(u8, name, "backspace")) 8
+                else if (std.mem.eql(u8, name, "formfeed")) 12
+                else return error.UnexpectedChar;
+            const buf = [_]u8{ch};
+            const id = self.gc.internString(&buf) catch return error.OutOfMemory;
+            return Value.makeString(id);
+        }
+        // Single non-alpha char: \(, \), \[, \], \{, \}, etc.
+        const buf = [_]u8{self.src[self.pos]};
+        self.pos += 1;
+        const id = self.gc.internString(&buf) catch return error.OutOfMemory;
+        return Value.makeString(id);
     }
 
     fn readKeyword(self: *Reader) ReadError!Value {

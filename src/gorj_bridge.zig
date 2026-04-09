@@ -242,15 +242,17 @@ test "gorj-bridge: encode/decode roundtrip — no hex, raw Syrup bytes" {
     var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
+
     // Encode integer → raw Syrup bytes (not hex)
     const val = Value.makeInt(42);
     var encode_args = [_]Value{val};
-    const syrup_val = try gorjEncodeFn(&encode_args, &gc, &env);
+    const syrup_val = try gorjEncodeFn(&encode_args, &gc, &env, &resources);
     try std.testing.expect(syrup_val.isString());
 
     // Decode raw bytes back — zero conversion overhead
     var decode_args = [_]Value{syrup_val};
-    const decoded = try gorjDecodeFn(&decode_args, &gc, &env);
+    const decoded = try gorjDecodeFn(&decode_args, &gc, &env, &resources);
     try std.testing.expect(decoded.isInt());
     try std.testing.expectEqual(@as(i48, 42), decoded.asInt());
 }
@@ -261,12 +263,14 @@ test "gorj-bridge: encode/decode roundtrip for string — raw Syrup" {
     var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
+
     const val = Value.makeString(try gc.internString("hello gorj"));
     var encode_args = [_]Value{val};
-    const syrup_val = try gorjEncodeFn(&encode_args, &gc, &env);
+    const syrup_val = try gorjEncodeFn(&encode_args, &gc, &env, &resources);
 
     var decode_args = [_]Value{syrup_val};
-    const decoded = try gorjDecodeFn(&decode_args, &gc, &env);
+    const decoded = try gorjDecodeFn(&decode_args, &gc, &env, &resources);
     try std.testing.expect(decoded.isString());
     try std.testing.expectEqualStrings("hello gorj", gc.getString(decoded.asStringId()));
 }
@@ -282,8 +286,9 @@ test "gorj-bridge: gorj-pipe returns 3-element vector [result vid trit]" {
     root_seed = 0;
     trit_accumulator = 0;
 
+    var resources = Resources.initDefault();
     var args = [_]Value{Value.makeString(try gc.internString("42"))};
-    const result = try gorjPipeFn(&args, &gc, &env);
+    const result = try gorjPipeFn(&args, &gc, &env, &resources);
     try std.testing.expect(result.isObj());
     const items = result.asObj().data.vector.items.items;
     try std.testing.expectEqual(@as(usize, 3), items.len);
@@ -309,12 +314,14 @@ test "gorj-bridge: version counter increments across pipe calls" {
     root_seed = 0;
     trit_accumulator = 0;
 
+    var resources = Resources.initDefault();
+
     var args1 = [_]Value{Value.makeString(try gc.internString("1"))};
-    const r1 = try gorjPipeFn(&args1, &gc, &env);
+    const r1 = try gorjPipeFn(&args1, &gc, &env, &resources);
     const vid1 = r1.asObj().data.vector.items.items[1].asInt();
 
     var args2 = [_]Value{Value.makeString(try gc.internString("2"))};
-    const r2 = try gorjPipeFn(&args2, &gc, &env);
+    const r2 = try gorjPipeFn(&args2, &gc, &env, &resources);
     const vid2 = r2.asObj().data.vector.items.items[1].asInt();
 
     // Different expressions → different version IDs
@@ -329,8 +336,9 @@ test "gorj-bridge: gorj-tools returns 29 names" {
     var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     var args = [_]Value{};
-    const result = try gorjToolsFn(&args, &gc, &env);
+    const result = try gorjToolsFn(&args, &gc, &env, &resources);
     try std.testing.expect(result.isObj());
     try std.testing.expectEqual(@as(usize, 29), result.asObj().data.vector.items.items.len);
     try std.testing.expectEqualStrings("repl_eval", gc.getString(result.asObj().data.vector.items.items[0].asStringId()));
@@ -344,7 +352,8 @@ test "gorj-bridge: gorj-version nil before first eval" {
 
     invocation_index = 0;
     root_seed = 0;
+    var resources = Resources.initDefault();
     var args = [_]Value{};
-    const result = try gorjVersionFn(&args, &gc, &env);
+    const result = try gorjVersionFn(&args, &gc, &env, &resources);
     try std.testing.expect(result.isNil());
 }

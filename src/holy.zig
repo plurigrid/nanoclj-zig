@@ -3,6 +3,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const Reader = @import("reader.zig").Reader;
 const eval_mod = @import("eval.zig");
 const printer = @import("printer.zig");
@@ -261,7 +262,7 @@ pub fn renderAlloc(ctx: *const Context, mini: MiniValue, allocator: std.mem.Allo
     return try allocator.dupe(u8, buf.items);
 }
 
-pub fn holyEvalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn holyEvalFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -297,7 +298,7 @@ fn evalAllNanoclj(src: []const u8, env: *Env, gc: *GC) anyerror!Value {
     return last;
 }
 
-pub fn holyConvergeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn holyConvergeFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -320,7 +321,7 @@ pub fn holyConvergeFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn holyConvergeTraceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn holyConvergeTraceFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -366,8 +367,8 @@ pub fn holyConvergeTraceFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
     return Value.makeObj(vec);
 }
 
-pub fn holyConvergeSummaryFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
-    const trace_val = try holyConvergeTraceFn(args, gc, env);
+pub fn holyConvergeSummaryFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+    const trace_val = try holyConvergeTraceFn(args, gc, env, undefined);
     if (!trace_val.isObj() or trace_val.asObj().kind != .vector) return error.EvalFailed;
 
     const steps = trace_val.asObj().data.vector.items.items;
@@ -447,9 +448,10 @@ test "holyzig builtin evaluates string source" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     const src_id = try gc.internString("(+ 9 (* 2 3))");
     var args = [_]Value{Value.makeString(src_id)};
-    const out = try holyEvalFn(&args, &gc, &env);
+    const out = try holyEvalFn(&args, &gc, &env, &resources);
     try std.testing.expect(out.isString());
     try std.testing.expectEqualStrings("15", gc.getString(out.asStringId()));
 }
@@ -460,9 +462,10 @@ test "holyzig builtin supports sequential forms" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     const src_id = try gc.internString("(def answer 42) (+ answer 8)");
     var args = [_]Value{Value.makeString(src_id)};
-    const out = try holyEvalFn(&args, &gc, &env);
+    const out = try holyEvalFn(&args, &gc, &env, &resources);
     try std.testing.expect(out.isString());
     try std.testing.expectEqualStrings("50", gc.getString(out.asStringId()));
 }
@@ -473,9 +476,10 @@ test "holyzig convergence agrees with nanoclj on defs and symbols" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     const src_id = try gc.internString("(def answer 42) answer");
     var args = [_]Value{Value.makeString(src_id)};
-    const out = try holyConvergeFn(&args, &gc, &env);
+    const out = try holyConvergeFn(&args, &gc, &env, &resources);
     try std.testing.expect(out.isObj());
     try std.testing.expect(out.asObj().kind == .map);
 }
@@ -486,9 +490,10 @@ test "holyzig convergence trace returns one entry per top-level form" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     const src_id = try gc.internString("(def answer 42) answer");
     var args = [_]Value{Value.makeString(src_id)};
-    const out = try holyConvergeTraceFn(&args, &gc, &env);
+    const out = try holyConvergeTraceFn(&args, &gc, &env, &resources);
     try std.testing.expect(out.isObj());
     try std.testing.expect(out.asObj().kind == .vector);
     try std.testing.expectEqual(@as(usize, 2), out.asObj().data.vector.items.items.len);
@@ -500,9 +505,10 @@ test "holyzig convergence summary counts converged steps" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     const src_id = try gc.internString("(def answer 42) answer");
     var args = [_]Value{Value.makeString(src_id)};
-    const out = try holyConvergeSummaryFn(&args, &gc, &env);
+    const out = try holyConvergeSummaryFn(&args, &gc, &env, &resources);
     try std.testing.expect(out.isObj());
     try std.testing.expect(out.asObj().kind == .map);
 }

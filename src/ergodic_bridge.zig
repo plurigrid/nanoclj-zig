@@ -9,6 +9,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const substrate = @import("substrate.zig");
 const gay_skills = @import("gay_skills.zig");
 
@@ -204,7 +205,7 @@ pub const ErgodicMeasure = struct {
 // BUILTIN FUNCTIONS
 // ============================================================================
 
-pub fn wallClockBridgeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn wallClockBridgeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const sc = try extractSeedCount(args);
     const bridge = WallClockBridge.create(sc.seed, sc.count);
     const obj = try gc.allocObj(.map);
@@ -217,7 +218,7 @@ pub fn wallClockBridgeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn colorBandwidthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn colorBandwidthFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const sc = try extractSeedCount(args);
     const bw = ColorBandwidth.measure(sc.seed, sc.count);
     const obj = try gc.allocObj(.map);
@@ -229,7 +230,7 @@ pub fn colorBandwidthFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn ergodicMeasureFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn ergodicMeasureFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const sc = try extractSeedCount(args);
     const em = ErgodicMeasure.measure(sc.seed, sc.count);
     const obj = try gc.allocObj(.map);
@@ -240,7 +241,7 @@ pub fn ergodicMeasureFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn detectObstructionsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn detectObstructionsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const sc = try extractSeedCount(args);
     const bridge = WallClockBridge.create(sc.seed, sc.count);
     const bw = ColorBandwidth.measure(sc.seed, sc.count);

@@ -426,7 +426,7 @@ pub const VM = struct {
                         // builtins need GC and Env — use a dummy env for now
                         var dummy_env = @import("env.zig").Env.init(self.gc.allocator, null);
                         defer dummy_env.deinit();
-                        self.reg(a).* = builtin.func(args_buf[0..b], self.gc, &dummy_env) catch return error.TypeError;
+                        self.reg(a).* = builtin.func(args_buf[0..b], self.gc, &dummy_env, undefined) catch return error.TypeError;
                     } else if (func_obj.kind == .bc_closure) {
                         const callee = &func_obj.data.bc_closure;
                         if (b != callee.def.arity) return error.ArityError;
@@ -465,7 +465,7 @@ pub const VM = struct {
                         }
                         var dummy_env2 = @import("env.zig").Env.init(self.gc.allocator, null);
                         defer dummy_env2.deinit();
-                        const result = builtin.func(args_buf2[0..b], self.gc, &dummy_env2) catch return error.TypeError;
+                        const result = builtin.func(args_buf2[0..b], self.gc, &dummy_env2, undefined) catch return error.TypeError;
                         const ret_dest = self.currentFrame().ret_dest;
                         self.frame_count -= 1;
                         if (self.frame_count == 0) return result;

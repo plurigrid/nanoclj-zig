@@ -4,8 +4,8 @@
 //! (spi/census)          → {3 N, 2 N, 1 N, 0 N} count per Chomsky level
 //! (spi/match engine s)  → {:matched bool :consumed N :trit T}
 //! (spi/escalate s rule) → {:result ... :level N :provider "name"}
-//! (spi/manifest)        → comparative table vs Janet/Shen/Racket/Guile/Clojure
-//! (spi/dominates? them) → true iff we have >= engines at every Chomsky level
+//! (spi/manifest)        → actual engine census from the live registry
+//! (spi/dominates? them) → always false (no verified external data)
 
 const std = @import("std");
 const spi = @import("spi.zig");
@@ -79,57 +79,27 @@ pub fn builtinEscalate(gc: *GC, input: []const u8, rule: []const u8) Value {
     return gc.makeVector(&items);
 }
 
-/// (spi/manifest) → the compile-time comparative manifest as a readable structure
+/// (spi/manifest) → actual engine census from the live registry
+/// Returns a single vector: ["nanoclj-zig" regexp-count peg-count csg-count logic-count total]
+/// All counts are dynamic — queried from the registry, not hardcoded.
 pub fn builtinManifest(gc: *GC) Value {
-    // Return names and engine counts for comparison
-    const entries = [_]struct { name: []const u8, re: u8, peg: u8, logic: u8, size: u16 }{
-        .{ .name = "nanoclj-zig", .re = 3, .peg = 3, .logic = 2, .size = 3 },
-        .{ .name = "Janet", .re = 0, .peg = 1, .logic = 0, .size = 1 },
-        .{ .name = "Shen", .re = 0, .peg = 0, .logic = 1, .size = 5 },
-        .{ .name = "Racket", .re = 1, .peg = 1, .logic = 2, .size = 200 },
-        .{ .name = "Guile", .re = 1, .peg = 1, .logic = 1, .size = 30 },
-        .{ .name = "Clojure", .re = 1, .peg = 1, .logic = 1, .size = 400 },
+    const reg = ensureRegistry();
+    const census = reg.census();
+    const items = [_]Value{
+        gc.internString("nanoclj-zig"),
+        Value.makeInt(@intCast(census[3])), // regexp (Chomsky 3)
+        Value.makeInt(@intCast(census[2])), // PEG/CFG (Chomsky 2)
+        Value.makeInt(@intCast(census[1])), // CSG (Chomsky 1)
+        Value.makeInt(@intCast(census[0])), // logic/RE (Chomsky 0)
+        Value.makeInt(@intCast(reg.total())),
     };
-
-    var results: [6]Value = undefined;
-    for (entries, 0..) |e, i| {
-        const items = [_]Value{
-            gc.internString(e.name),
-            Value.makeInt(e.re),
-            Value.makeInt(e.peg),
-            Value.makeInt(e.logic),
-            Value.makeInt(e.size),
-        };
-        results[i] = gc.makeVector(&items);
-    }
-    return gc.makeList(&results);
+    return gc.makeVector(&items);
 }
 
-/// (spi/dominates? "Janet") → true iff nanoclj-zig >= at every axis
+/// (spi/dominates? "Janet") → always false.
+/// Cross-language dominance claims require verified external data we don't have.
 pub fn builtinDominates(gc: *GC, name: []const u8) Value {
     _ = gc;
-    const dominated = if (std.mem.eql(u8, name, "Janet"))
-        spi.Manifest.us.regexp_engines >= spi.Manifest.janet.regexp_engines and
-            spi.Manifest.us.peg_engines >= spi.Manifest.janet.peg_engines and
-            spi.Manifest.us.logic_engines >= spi.Manifest.janet.logic_engines
-    else if (std.mem.eql(u8, name, "Shen"))
-        spi.Manifest.us.regexp_engines >= spi.Manifest.shen.regexp_engines and
-            spi.Manifest.us.peg_engines >= spi.Manifest.shen.peg_engines and
-            spi.Manifest.us.logic_engines >= spi.Manifest.shen.logic_engines
-    else if (std.mem.eql(u8, name, "Racket"))
-        spi.Manifest.us.regexp_engines >= spi.Manifest.racket.regexp_engines and
-            spi.Manifest.us.peg_engines >= spi.Manifest.racket.peg_engines and
-            spi.Manifest.us.logic_engines >= spi.Manifest.racket.logic_engines
-    else if (std.mem.eql(u8, name, "Guile"))
-        spi.Manifest.us.regexp_engines >= spi.Manifest.guile.regexp_engines and
-            spi.Manifest.us.peg_engines >= spi.Manifest.guile.peg_engines and
-            spi.Manifest.us.logic_engines >= spi.Manifest.guile.logic_engines
-    else if (std.mem.eql(u8, name, "Clojure"))
-        spi.Manifest.us.regexp_engines >= spi.Manifest.clojure.regexp_engines and
-            spi.Manifest.us.peg_engines >= spi.Manifest.clojure.peg_engines and
-            spi.Manifest.us.logic_engines >= spi.Manifest.clojure.logic_engines
-    else
-        false;
-
-    return Value.makeBool(dominated);
+    _ = name;
+    return Value.makeBool(false);
 }

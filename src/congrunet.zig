@@ -11,6 +11,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 
 fn kw(gc: *GC, s: []const u8) !Value {
     return Value.makeKeyword(try gc.internString(s));
@@ -271,7 +272,7 @@ fn traceSource(src: []const u8, allocator: std.mem.Allocator) ![]TraceEntry {
     return try allocator.dupe(TraceEntry, entries.items);
 }
 
-pub fn congrunetSummaryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn congrunetSummaryFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -294,7 +295,7 @@ pub fn congrunetSummaryFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn congrunetTraceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn congrunetTraceFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -316,7 +317,7 @@ pub fn congrunetTraceFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(vec);
 }
 
-pub fn congrunetPresheafFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn congrunetPresheafFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
 
@@ -378,9 +379,10 @@ test "congrunet builtin returns map" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     const src_id = try gc.internString("(def answer 42)\n(+ answer 8)");
     var args = [_]Value{Value.makeString(src_id)};
-    const out = try congrunetSummaryFn(&args, &gc, &env);
+    const out = try congrunetSummaryFn(&args, &gc, &env, &resources);
     try std.testing.expect(out.isObj());
     try std.testing.expect(out.asObj().kind == .map);
 }
@@ -391,9 +393,10 @@ test "congrunet trace returns one node per top-level form" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     const src_id = try gc.internString("(def answer 42)\n(+ answer 8)");
     var args = [_]Value{Value.makeString(src_id)};
-    const out = try congrunetTraceFn(&args, &gc, &env);
+    const out = try congrunetTraceFn(&args, &gc, &env, &resources);
     try std.testing.expect(out.isObj());
     try std.testing.expect(out.asObj().kind == .vector);
     try std.testing.expectEqual(@as(usize, 2), out.asObj().data.vector.items.items.len);
@@ -405,9 +408,10 @@ test "congrunet presheaf returns bags and adhesions" {
     var env = Env.init(gc.allocator, null);
     defer env.deinit();
 
+    var resources = Resources.initDefault();
     const src_id = try gc.internString("(def answer 42)\n(+ answer 8)");
     var args = [_]Value{Value.makeString(src_id)};
-    const out = try congrunetPresheafFn(&args, &gc, &env);
+    const out = try congrunetPresheafFn(&args, &gc, &env, &resources);
     try std.testing.expect(out.isObj());
     try std.testing.expect(out.asObj().kind == .map);
 }

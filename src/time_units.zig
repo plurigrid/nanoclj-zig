@@ -15,6 +15,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const transitivity = @import("transitivity.zig");
 
 // ============================================================================
@@ -163,7 +164,7 @@ fn unitToMap(unit: TimeUnit, gc: *GC) !Value {
 // ============================================================================
 
 /// (time-units) → list of maps, one per unit
-pub fn timeUnitsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn timeUnitsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     const result = try gc.allocObj(.list);
     for (catalog) |unit| {
@@ -173,7 +174,7 @@ pub fn timeUnitsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (time-unit name) → map for a single unit, or nil
-pub fn timeUnitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn timeUnitFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const needle = try resolveString(args[0], gc);
     const unit = findUnit(needle) orelse return Value.makeNil();
@@ -181,7 +182,7 @@ pub fn timeUnitFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (convert-time from-name to-name count) → float seconds, or nil
-pub fn convertTimeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn convertTimeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const from_name = try resolveString(args[0], gc);
     const to_name = try resolveString(args[1], gc);
@@ -192,7 +193,7 @@ pub fn convertTimeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (nice-ratios) → list of maps {:from :to :ratio :label}
-pub fn niceRatiosFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn niceRatiosFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     const result = try gc.allocObj(.list);
     for (notable_ratios) |r| {
@@ -231,19 +232,19 @@ pub fn niceRatiosFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (trice-per-sec) → 423360000
-pub fn tricePerSecFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn tricePerSecFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     return Value.makeInt(@intCast(TRICE));
 }
 
 /// (glimpses-per-sec) → 141120000
-pub fn glimpsesPerSecFn(args: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn glimpsesPerSecFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     return Value.makeInt(@intCast(GLIMPSE));
 }
 
 /// (time-tower) → {:time-ref 14112000 :glimpse 141120000 :trice 423360000 :trit-tick 2116800000 :flick 705600000}
-pub fn timeTowerFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn timeTowerFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 0) return error.ArityError;
     const m = try gc.allocObj(.map);
     const pairs = [_]struct { k: []const u8, v: u64 }{
@@ -429,14 +430,14 @@ pub fn nreplPortSpread(base_path: []const u8, n: usize, out: []u16) void {
 }
 
 /// Clojure builtin: (nrepl-port-for path) → port number
-pub fn nreplPortForFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn nreplPortForFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const path = try resolveString(args[0], gc);
     return Value.makeInt(@intCast(nreplPortFromPath(path)));
 }
 
 /// Clojure builtin: (nrepl-color port) → {:r :g :b}
-pub fn nreplColorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn nreplColorFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const port: u16 = @intCast(@max(@as(i48, 0), args[0].asInt()));
     const c = nreplColor(port);
@@ -454,7 +455,7 @@ pub fn nreplColorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// Clojure builtin: (nrepl-spread path n) → vector of n deconflicted ports
-pub fn nreplSpreadFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn nreplSpreadFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const path = try resolveString(args[0], gc);
     if (!args[1].isInt()) return error.TypeError;
@@ -469,7 +470,7 @@ pub fn nreplSpreadFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// Clojure builtin: (hyperreal-time unit-name) → {:standard :infinitesimal :infinite}
-pub fn hyperrealTimeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn hyperrealTimeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const needle = try resolveString(args[0], gc);
     const unit = findUnit(needle) orelse return Value.makeNil();
@@ -488,7 +489,7 @@ pub fn hyperrealTimeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// Clojure builtin: (surreal-birthday unit-name) → {:birthday :sign :real}
-pub fn surrealBirthdayFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn surrealBirthdayFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const needle = try resolveString(args[0], gc);
     const unit = findUnit(needle) orelse return Value.makeNil();

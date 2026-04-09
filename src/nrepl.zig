@@ -29,7 +29,8 @@ const bencode = @import("bencode.zig");
 const substrate = @import("substrate.zig");
 const time_units = @import("time_units.zig");
 const transitivity = @import("transitivity.zig");
-const behavior_lattice = @import("behavior_lattice.zig");
+const plural = @import("plural.zig");
+const colorspace = @import("colorspace.zig");
 
 // ============================================================================
 // C SOCKET CONSTANTS (macOS/Darwin)
@@ -58,6 +59,8 @@ pub const Session = struct {
     eval_count: u64 = 0,
     /// Color identity (deterministic from session ID)
     color: substrate.Color,
+    /// OKLAB color — perceptual identity, zero-copy stamped onto eval results
+    oklab: colorspace.Color = .{},
     /// Cancel flag — checked in eval fuel loop
     cancelled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     /// *1, *2, *3 history
@@ -80,6 +83,8 @@ pub const Session = struct {
             .gc = GC.init(allocator),
             .color = substrate.colorAt(substrate.CANONICAL_SEED, hash % 65536),
         };
+        // Derive OKLAB from substrate RGB — zero-copy color identity
+        session.oklab = colorspace.Color.fromSRGB(session.color.r, session.color.g, session.color.b);
         // Mark as child env
         session.env.is_root = false;
         return session;
@@ -412,7 +417,7 @@ fn opClose(server: *Server, session_id: ?[]const u8, msg_id: []const u8) !bencod
 fn opDescribe(server: *Server, msg_id: []const u8) !bencode.BValue {
     const a = server.allocator;
     const empty = try bencode.makeDict(a, &.{});
-    const vs_jvm = behavior_lattice.morphism(.nanoclj_zig_current, .jvm);
+    const vs_jvm = plural.morphism(.nanoclj_zig_current, .jvm);
     return try bencode.makeDict(a, &.{
         .{ "aux", try bencode.makeDict(a, &.{
             .{ "behavior-vs-jvm", bencode.makeStr(vs_jvm.kind.label()) },
@@ -587,6 +592,20 @@ fn opEval(server: *Server, msg: bencode.BValue, session_id: ?[]const u8, msg_id:
     session.accumulateTrit(result);
     session.pushHistory(result);
 
+    // Zero-copy color stamp: attach session OKLAB as metadata on Obj results.
+    // Non-Obj values (int, bool, nil, float) carry color via the response envelope.
+    if (result.isObj()) {
+        const obj = result.asObj();
+        if (obj.meta == null) {
+            // Allocate a color Obj and set as metadata — single allocation, no copy
+            const color_obj = session.gc.allocObj(.color) catch null;
+            if (color_obj) |co| {
+                co.data.color = session.oklab;
+                obj.meta = co;
+            }
+        }
+    }
+
     // Print result
     const val_str = printer.prStr(result, &session.gc, true) catch "?";
 
@@ -606,6 +625,7 @@ fn opEval(server: *Server, msg: bencode.BValue, session_id: ?[]const u8, msg_id:
         .{ "x-color-b", bencode.makeInt(@intCast(session.color.b)) },
         .{ "x-color-g", bencode.makeInt(@intCast(session.color.g)) },
         .{ "x-color-r", bencode.makeInt(@intCast(session.color.r)) },
+        .{ "x-color-stamped", bencode.makeStr(if (result.isObj()) "true" else "false") },
         .{ "x-elapsed-trit-ticks", bencode.makeInt(@intCast(elapsed_ticks)) },
         .{ "x-eval-count", bencode.makeInt(@intCast(session.eval_count)) },
         .{ "x-trit-balance", bencode.makeInt(@intCast(session.trit_balance)) },
@@ -761,8 +781,8 @@ pub fn nreplStartFn(args: []value.Value, gc: *GC, env: *Env, _: *Resources) anye
         color_g = first.*.color.g;
         color_b = first.*.color.b;
     }
-    const msg = std.fmt.bufPrint(&buf, "nREPL server started on port {d} (color #{x:0>2}{x:0>2}{x:0>2})\n", .{
-        port, color_r, color_g, color_b,
+    const msg = std.fmt.bufPrint(&buf, "nREPL server started on port {d} on host 127.0.0.1 - nrepl://127.0.0.1:{d}\n", .{
+        port, port,
     }) catch "nREPL started\n";
     compat.stdoutWrite(msg);
 

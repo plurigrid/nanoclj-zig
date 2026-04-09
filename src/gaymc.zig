@@ -8,6 +8,7 @@ const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
 const substrate = @import("substrate.zig");
+const Resources = @import("transitivity.zig").Resources;
 
 // ============================================================================
 // HELPERS
@@ -164,7 +165,7 @@ pub fn attemptSwap(r1: *Replica, r2: *Replica, rng_val: u64) bool {
 // BUILTIN FUNCTIONS
 // ============================================================================
 
-pub fn mcContextFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn mcContextFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or args.len > 2 or !args[0].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const worker_id: u64 = if (args.len == 2 and args[1].isInt())
@@ -180,7 +181,7 @@ pub fn mcContextFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn mcSweepFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn mcSweepFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     var ctx = MCContext.init(seed, 0);
@@ -192,7 +193,7 @@ pub fn mcSweepFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn mcMetropolisFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn mcMetropolisFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = gc;
     if (args.len != 3) return error.ArityError;
     const delta_e: f64 = if (args[0].isFloat()) args[0].asFloat() else if (args[0].isInt()) @as(f64, @floatFromInt(args[0].asInt())) else return error.TypeError;
@@ -201,7 +202,7 @@ pub fn mcMetropolisFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeBool(metropolis(delta_e, beta_v, rng));
 }
 
-pub fn mcLadderFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn mcLadderFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const t_min: f64 = if (args[0].isFloat()) args[0].asFloat() else if (args[0].isInt()) @as(f64, @floatFromInt(args[0].asInt())) else return error.TypeError;
     const t_max: f64 = if (args[1].isFloat()) args[1].asFloat() else if (args[1].isInt()) @as(f64, @floatFromInt(args[1].asInt())) else return error.TypeError;
@@ -214,7 +215,7 @@ pub fn mcLadderFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(vec);
 }
 
-pub fn mcReplicaFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn mcReplicaFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const seed: u64 = if (args[0].isInt()) @bitCast(@as(i64, args[0].asInt())) else return error.TypeError;
     const beta_v: f64 = if (args[1].isFloat()) args[1].asFloat() else if (args[1].isInt()) @as(f64, @floatFromInt(args[1].asInt())) else return error.TypeError;

@@ -21,6 +21,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const compat = @import("compat.zig");
 
 /// Global lvar counter for fresh variable generation
@@ -174,20 +175,20 @@ pub fn unify(u: Value, v: Value, subst: *const value.Obj, gc: *GC) !?Value {
 // ============================================================================
 
 /// (lvar) → fresh logic variable :_N
-pub fn lvarFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn lvarFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     return makeLogicVar(gc);
 }
 
 /// (lvar? x) → true if x is a logic variable
-pub fn lvarP(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn lvarP(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(isLvar(args[0], gc));
 }
 
 /// (unify a b subst) → new subst or nil
 /// subst is a vector [lvar val lvar val ...]
-pub fn unifyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn unifyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[2].isObj() or args[2].asObj().kind != .vector) return error.TypeError;
     const result = try unify(args[0], args[1], args[2].asObj(), gc);
@@ -195,7 +196,7 @@ pub fn unifyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (walk* val subst) → deep-walked value
-pub fn walkStarFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn walkStarFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[1].isObj() or args[1].asObj().kind != .vector) return error.TypeError;
     return walkDeep(args[0], args[1].asObj(), gc);
@@ -204,7 +205,7 @@ pub fn walkStarFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// (== a b) → goal function: takes subst, returns stream (list of substs)
 /// In street-fighting style: == is the fundamental constraint.
 /// Returns a function that closes over a and b.
-pub fn eqGoalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn eqGoalFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     // Store the goal as a vector [:== a b] — recognized by run*
     const goal = try gc.allocObj(.vector);
@@ -217,7 +218,7 @@ pub fn eqGoalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (conde [goal ...] [goal ...] ...) → disjunction goal
 /// Represented as [:conde [goals1] [goals2] ...]
-pub fn condeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn condeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const goal = try gc.allocObj(.vector);
     const tag = Value.makeKeyword(try gc.internString("conde"));
     try goal.data.vector.items.append(gc.allocator, tag);
@@ -229,7 +230,7 @@ pub fn condeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (fresh-goal n body-goal) → [:fresh n body-goal]
 /// n = number of fresh vars to introduce
-pub fn freshGoalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn freshGoalFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const goal = try gc.allocObj(.vector);
     const tag = Value.makeKeyword(try gc.internString("fresh"));
@@ -783,7 +784,7 @@ fn executeGoal(goal: Value, subst: Value, gc: *GC) !Value {
 }
 
 /// (conj-goal g1 g2 ...) → [:conj g1 g2 ...]
-pub fn conjGoalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn conjGoalFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const goal = try gc.allocObj(.vector);
     const tag = Value.makeKeyword(try gc.internString("conj"));
     try goal.data.vector.items.append(gc.allocator, tag);
@@ -793,7 +794,7 @@ pub fn conjGoalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (run-goal n query-var goal) → list of up to n results
 /// n = max results (0 = all), query-var = lvar to extract, goal = goal tree
-pub fn runGoalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn runGoalFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[0].isInt()) return error.TypeError;
     const max_results: usize = @intCast(@max(@as(i48, 0), args[0].asInt()));
@@ -822,7 +823,7 @@ pub fn runGoalFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// The fundamental list relation. appendo and membero reduce to this.
 /// Street fighting: instead of "cons builds a list", we say
 /// "h, t, and l are related such that l = h:t". Run it any direction.
-pub fn consoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn consoFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const h = args[0];
     const t = args[1];
@@ -846,7 +847,7 @@ pub fn consoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 ///   (appendo () s out) :- (== s out)
 ///   (appendo (h . t) s out) :- (fresh [res] (== out (h . res)) (appendo t s res))
 /// Represented as [:appendo l s out] and expanded lazily in executeGoal.
-pub fn appendoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn appendoFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const goal = try gc.allocObj(.vector);
     const tag = Value.makeKeyword(try gc.internString("appendo"));
@@ -859,7 +860,7 @@ pub fn appendoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 
 /// (membero x l) → goal: x is a member of l
 /// (membero x (h . t)) :- (== x h) OR (membero x t)
-pub fn memberoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn memberoFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     const goal = try gc.allocObj(.vector);
     const tag = Value.makeKeyword(try gc.internString("membero"));
@@ -881,7 +882,7 @@ pub fn memberoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 ///
 /// Forward: (evalo '[:app [:lambda :x [:var :x]] [:quote 42]] q '()) → q=42
 /// Backward: (evalo q 42 '()) → synthesize programs producing 42
-pub fn evaloFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn evaloFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const goal = try gc.allocObj(.vector);
     const tag = Value.makeKeyword(try gc.internString("evalo"));
@@ -893,7 +894,7 @@ pub fn evaloFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (lookupo name env val) → goal: name maps to val in env (assoc list)
-pub fn lookupoFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn lookupoFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     const goal = try gc.allocObj(.vector);
     const tag = Value.makeKeyword(try gc.internString("lookupo"));
@@ -988,8 +989,9 @@ test "run-goal: simple ==, query" {
     try goal.data.vector.items.append(gc.allocator, x);
     try goal.data.vector.items.append(gc.allocator, Value.makeInt(42));
 
+    var resources = Resources.initDefault();
     var args = [_]Value{ Value.makeInt(0), x, Value.makeObj(goal) };
-    const result = try runGoalFn(&args, &gc, undefined);
+    const result = try runGoalFn(&args, &gc, undefined, &resources);
     try std.testing.expect(result.isObj());
     const items = result.asObj().data.list.items.items;
     try std.testing.expectEqual(@as(usize, 1), items.len);
@@ -1023,8 +1025,9 @@ test "run-goal: conde disjunction" {
     try goal.data.vector.items.append(gc.allocator, conde_tag);
     for (clauses) |c| try goal.data.vector.items.append(gc.allocator, c);
 
+    var resources = Resources.initDefault();
     var args = [_]Value{ Value.makeInt(0), x, Value.makeObj(goal) };
-    const result = try runGoalFn(&args, &gc, undefined);
+    const result = try runGoalFn(&args, &gc, undefined, &resources);
     const items = result.asObj().data.list.items.items;
     try std.testing.expectEqual(@as(usize, 3), items.len);
     try std.testing.expectEqual(@as(i48, 1), items[0].asInt());

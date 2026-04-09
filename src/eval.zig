@@ -6,6 +6,21 @@ const ObjKind = value.ObjKind;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
 const Resources = @import("transitivity.zig").Resources;
+const pluralism = @import("pluralism.zig");
+
+/// Plural-aware truthiness: dispatches through pluralTruth when
+/// the current world's truth mode is non-classical.
+/// For classical mode, this is equivalent to Value.isTruthy().
+/// For intuitionistic mode, 0 and negative numbers become falsy.
+/// For paraconsistent mode, nil and 0 yield Trit.both which is
+/// treated as truthy (dialetheia: both-true-and-false counts as true).
+inline fn pluralIsTruthy(v: Value) bool {
+    const world = pluralism.getWorld();
+    if (world.truth == .classical) return v.isTruthy();
+    const trit = pluralism.pluralTruth(v, world.truth);
+    // .true_ and .both are truthy; only .false_ is falsy
+    return trit != .false_;
+}
 
 /// Unmetered resources for the legacy eval path.
 /// Builtins still tick, but fuel is effectively infinite.
@@ -514,7 +529,7 @@ fn evalBlend(items: []Value, _: *Env, gc: *GC) EvalError!Value {
 fn evalIf(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     if (items.len < 3 or items.len > 4) return error.ArityError;
     const cond = try eval(items[1], env, gc);
-    if (cond.isTruthy()) {
+    if (pluralIsTruthy(cond)) {
         return eval(items[2], env, gc);
     } else if (items.len == 4) {
         return eval(items[3], env, gc);
@@ -1087,7 +1102,7 @@ fn evalWhenLet(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     if (binds.len < 2 or !binds[0].isSymbol()) return error.ArityError;
     const sym_name = gc.getString(binds[0].asSymbolId());
     const val = try eval(binds[1], env, gc);
-    if (!val.isTruthy()) return Value.makeNil();
+    if (!pluralIsTruthy(val)) return Value.makeNil();
     env.set(sym_name, val) catch return error.OutOfMemory;
     var result = Value.makeNil();
     for (items[2..]) |body| result = try eval(body, env, gc);
@@ -1102,7 +1117,7 @@ fn evalIfLet(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     if (binds.len < 2 or !binds[0].isSymbol()) return error.ArityError;
     const sym_name = gc.getString(binds[0].asSymbolId());
     const val = try eval(binds[1], env, gc);
-    if (val.isTruthy()) {
+    if (pluralIsTruthy(val)) {
         env.set(sym_name, val) catch return error.OutOfMemory;
         return eval(items[2], env, gc);
     }
@@ -1113,7 +1128,7 @@ fn evalIfLet(items: []Value, env: *Env, gc: *GC) EvalError!Value {
 fn evalWhenNot(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     if (items.len < 3) return error.ArityError;
     const test_val = try eval(items[1], env, gc);
-    if (test_val.isTruthy()) return Value.makeNil();
+    if (pluralIsTruthy(test_val)) return Value.makeNil();
     var result = Value.makeNil();
     for (items[2..]) |body| result = try eval(body, env, gc);
     return result;
@@ -1123,7 +1138,7 @@ fn evalWhenNot(items: []Value, env: *Env, gc: *GC) EvalError!Value {
 fn evalIfNot(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     if (items.len < 3) return error.ArityError;
     const cond_val = try eval(items[1], env, gc);
-    if (!cond_val.isTruthy()) return eval(items[2], env, gc);
+    if (!pluralIsTruthy(cond_val)) return eval(items[2], env, gc);
     return if (items.len > 3) eval(items[3], env, gc) else Value.makeNil();
 }
 
@@ -1134,7 +1149,7 @@ fn evalCondThread(items: []Value, env: *Env, gc: *GC, first: bool) EvalError!Val
     var i: usize = 2;
     while (i + 1 < items.len) : (i += 2) {
         const test_val = try eval(items[i], env, gc);
-        if (test_val.isTruthy()) {
+        if (pluralIsTruthy(test_val)) {
             const form = items[i + 1];
             if (form.isObj() and form.asObj().kind == .list) {
                 const parts = form.asObj().data.list.items.items;
@@ -1169,7 +1184,7 @@ fn evalCondp(items: []Value, env: *Env, gc: *GC) EvalError!Value {
         const test_val = try eval(items[i], env, gc);
         var test_args = [_]Value{ test_val, expr };
         const result = try apply(pred, &test_args, env, gc);
-        if (result.isTruthy()) return eval(items[i + 1], env, gc);
+        if (pluralIsTruthy(result)) return eval(items[i + 1], env, gc);
     }
     // Odd trailing form = default
     if (i < items.len) return eval(items[i], env, gc);
@@ -1366,7 +1381,7 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
             }
             if (std.mem.eql(u8, marker, "__complement__")) {
                 const r = try apply(bound[1], args, caller_env, gc);
-                return Value.makeBool(!r.isTruthy());
+                return Value.makeBool(!pluralIsTruthy(r));
             }
             if (std.mem.eql(u8, marker, "__constantly__")) {
                 return bound[1];

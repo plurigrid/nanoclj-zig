@@ -72,6 +72,63 @@ pub const Color = struct {
     pub fn eql(self: Color, other: Color) bool {
         return self.L == other.L and self.a == other.a and self.b == other.b and self.alpha == other.alpha;
     }
+
+    /// Convert sRGB [0,255] to OKLAB. Zero-copy bridge from substrate.Color.
+    pub fn fromSRGB(r: u8, g: u8, b: u8) Color {
+        // sRGB → linear
+        const rl = srgbToLinear(@as(f32, @floatFromInt(r)) / 255.0);
+        const gl = srgbToLinear(@as(f32, @floatFromInt(g)) / 255.0);
+        const bl = srgbToLinear(@as(f32, @floatFromInt(b)) / 255.0);
+        // Linear RGB → LMS (via Oklab M1 matrix)
+        const l_ = 0.4122214708 * rl + 0.5363325363 * gl + 0.0514459929 * bl;
+        const m_ = 0.2119034982 * rl + 0.6806995451 * gl + 0.1073969566 * bl;
+        const s_ = 0.0883024619 * rl + 0.2220049368 * gl + 0.6696926014 * bl;
+        // Cube root
+        const l_cr = std.math.cbrt(l_);
+        const m_cr = std.math.cbrt(m_);
+        const s_cr = std.math.cbrt(s_);
+        // LMS → Lab (via Oklab M2 matrix)
+        return .{
+            .L = 0.2104542553 * l_cr + 0.7936177850 * m_cr - 0.0040720468 * s_cr,
+            .a = 1.9779984951 * l_cr - 2.4285922050 * m_cr + 0.4505937099 * s_cr,
+            .b = 0.0259040371 * l_cr + 0.7827717662 * m_cr - 0.8086757660 * s_cr,
+            .alpha = 1.0,
+        };
+    }
+
+    fn srgbToLinear(v: f32) f32 {
+        return if (v <= 0.04045) v / 12.92 else std.math.pow(f32, (v + 0.055) / 1.055, 2.4);
+    }
+
+    /// Convert OKLAB back to sRGB [0,255].
+    pub fn toSRGB(self: Color) [3]u8 {
+        // Lab → LMS (inverse M2)
+        const l_cr = self.L + 0.3963377774 * self.a + 0.2158037573 * self.b;
+        const m_cr = self.L - 0.1055613458 * self.a - 0.0638541728 * self.b;
+        const s_cr = self.L - 0.0894841775 * self.a - 1.2914855480 * self.b;
+        // Cube
+        const l_ = l_cr * l_cr * l_cr;
+        const m_ = m_cr * m_cr * m_cr;
+        const s_ = s_cr * s_cr * s_cr;
+        // LMS → linear RGB (inverse M1)
+        const rl = 4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_;
+        const gl = -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_;
+        const bl = -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_;
+        return .{
+            linearToSrgb(rl),
+            linearToSrgb(gl),
+            linearToSrgb(bl),
+        };
+    }
+
+    fn linearToSrgb(v: f32) u8 {
+        const clamped = @max(0.0, @min(1.0, v));
+        const s = if (clamped <= 0.0031308)
+            clamped * 12.92
+        else
+            1.055 * std.math.pow(f32, clamped, 1.0 / 2.4) - 0.055;
+        return @intFromFloat(@round(s * 255.0));
+    }
 };
 
 /// Named color presets — the "color atlas".

@@ -61,7 +61,7 @@ pub const ObjData = union {
     atom: struct { val: Value },
     bc_closure: @import("bytecode.zig").Closure,
     builtin_ref: struct {
-        func: *const fn (args: []Value, gc: *@import("gc.zig").GC, env: *@import("env.zig").Env) anyerror!Value,
+        func: *const fn (args: []Value, gc: *@import("gc.zig").GC, env: *@import("env.zig").Env, res: *@import("transitivity.zig").Resources) anyerror!Value,
         name: []const u8,
     },
     lazy_seq: struct {

@@ -115,7 +115,7 @@ fn evalWithBuiltins(form: Value, env: *Env, gc: *GC) !Value {
                     const v = try evalWithBuiltins(arg, env, gc);
                     try args.append(gc.allocator, v);
                 }
-                return builtin(args.items, gc, env);
+                return builtin(args.items, gc, env, undefined);
             }
         }
     }

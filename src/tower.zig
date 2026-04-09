@@ -9,6 +9,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const substrate = @import("substrate.zig");
 
 // ============================================================================
@@ -106,7 +107,7 @@ fn layerTrit(fp: u64) i8 {
 // BUILTIN FUNCTIONS
 // ============================================================================
 
-pub fn towerRunFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn towerRunFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
 
@@ -128,7 +129,7 @@ pub fn towerRunFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn towerLayerFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn towerLayerFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const n_raw = args[1].asInt();
@@ -147,7 +148,7 @@ pub fn towerLayerFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn towerTritSumFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn towerTritSumFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = gc;
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));

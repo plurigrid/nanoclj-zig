@@ -646,14 +646,14 @@ pub fn formatTier2(name: []const u8, gc: *GC) !Value {
 
 /// (skill-register {:name "x" :description "y" :trit 0 :path "/..."})
 /// → cell-index (int)
-pub fn skillRegisterFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn skillRegisterFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     const idx = try registerSkill(args[0], gc);
     return Value.makeInt(@intCast(idx));
 }
 
 /// (skill-activate "name") → metadata map (tier 2 content)
-pub fn skillActivateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn skillActivateFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.ArityError;
     const name = gc.getString(args[0].asStringId());
     var res = Resources.init(.{ .max_fuel = 1000 }); // fuel budget
@@ -661,12 +661,12 @@ pub fn skillActivateFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (skill-list) → XML string of all tier 1 metadata
-pub fn skillListFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn skillListFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     return try formatTier1(gc);
 }
 
 /// (skill-load "name") → XML string of tier 2 activated skill
-pub fn skillLoadFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn skillLoadFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.ArityError;
     const name = gc.getString(args[0].asStringId());
     return try formatTier2(name, gc);
@@ -682,7 +682,7 @@ fn cFopen(path: []const u8, mode: [*c]const u8) ?*std.c.FILE {
 }
 
 /// (skill-parse-file "/path/to/SKILL.md") → metadata map
-pub fn skillParseFileFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn skillParseFileFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.ArityError;
     const path = gc.getString(args[0].asStringId());
     // Read file using C fopen/fread (Zig 0.16 compat, matches core.zig slurp)
@@ -700,7 +700,7 @@ pub fn skillParseFileFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (skill-net-stats) → {:cells N :live N :trit-sum N :skills N}
-pub fn skillNetStatsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn skillNetStatsFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const net = ensureNet(gc);
     const obj = try gc.allocObj(.map);
     const kw = struct {
@@ -755,7 +755,7 @@ fn contentHash(content: []const u8) u64 {
 
 /// (skill-watch "name" "/path/to/SKILL.md") → :changed or :unchanged
 /// Ersatz FSEvents: poll file, compare hash, update cell if changed.
-pub fn skillWatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn skillWatchFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isString() or !args[1].isString()) return error.ArityError;
     const name = gc.getString(args[0].asStringId());
@@ -820,7 +820,7 @@ pub fn skillWatchFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 /// (skill-watch-all dir) → {:changed [...] :unchanged [...] :new [...]}
 /// Scan a directory for SKILL.md files, watch each one.
 /// This is the full ersatz FSEvents loop: one call = one scan cycle.
-pub fn skillWatchAllFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
+pub fn skillWatchAllFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.ArityError;
     const dir_path = gc.getString(args[0].asStringId());
 
@@ -863,7 +863,7 @@ pub fn skillWatchAllFn(args: []Value, gc: *GC, env: *Env) anyerror!Value {
         const name_val = Value.makeString(try gc.internString(entry_name));
         const path_val = Value.makeString(try gc.internString(skill_path_buf[0..skill_path_len]));
         var watch_args = [_]Value{ name_val, path_val };
-        const result = try skillWatchFn(&watch_args, gc, env);
+        const result = try skillWatchFn(&watch_args, gc, env, undefined);
 
         if (result.isKeyword()) {
             const kw_str = gc.getString(result.asKeywordId());
@@ -903,7 +903,7 @@ fn listToVector(items: []Value, gc: *GC) !Value {
 }
 
 /// (skill-transclude "dbl-0001") → resolved .tree content with nested transclusions expanded
-pub fn skillTranscludeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn skillTranscludeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len < 1 or !args[0].isString()) return error.InvalidArgs;
     const id = gc.getString(args[0].asStringId());
     const content = resolveTree(id, gc.allocator) orelse return Value.makeNil();
@@ -914,7 +914,7 @@ pub fn skillTranscludeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (skill-cache-stats) → {:generation N :tree-entries N :expand-entries N :tier2-entries N :tier1-cached? bool}
-pub fn skillCacheStatsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn skillCacheStatsFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = try gc.allocObj(.map);
     const m = &obj.data.map;
     const kw = struct {
@@ -948,7 +948,7 @@ pub fn skillCacheStatsFn(_: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (skill-invalidate) → bumps generation, forces all caches stale
-pub fn skillInvalidateFn(_: []Value, _: *GC, _: *Env) anyerror!Value {
+pub fn skillInvalidateFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     invalidateCaches();
     return Value.makeInt(@intCast(cache_generation));
 }

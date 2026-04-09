@@ -9,6 +9,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 const substrate = @import("substrate.zig");
 
 // ============================================================================
@@ -185,7 +186,7 @@ pub fn fullSpiAudit(seed: u64) struct { runs: bool, birthday: bool, adhesion: bo
 // BUILTIN FUNCTIONS
 // ============================================================================
 
-pub fn spiAuditFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn spiAuditFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const audit = fullSpiAudit(seed);
@@ -198,7 +199,7 @@ pub fn spiAuditFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn runsTestFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn runsTestFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const count: u64 = @bitCast(@as(i64, args[1].asInt()));
@@ -209,7 +210,7 @@ pub fn runsTestFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn splitTreeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn splitTreeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const depth: u8 = @intCast(@as(u64, @bitCast(@as(i64, args[1].asInt()))) & 0xFF);

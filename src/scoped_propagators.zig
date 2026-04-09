@@ -10,6 +10,7 @@ const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
 const substrate = @import("substrate.zig");
+const Resources = @import("transitivity.zig").Resources;
 
 // ============================================================================
 // HELPERS
@@ -209,7 +210,7 @@ fn buildBalancedTree(acs: *AncestryACSet, n: u8) void {
 // BUILTIN FUNCTIONS
 // ============================================================================
 
-pub fn ancestryAcsetFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn ancestryAcsetFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const acs = AncestryACSet.init(seed);
@@ -221,7 +222,7 @@ pub fn ancestryAcsetFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn materializeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn materializeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const raw_n = args[1].asInt();
@@ -237,7 +238,7 @@ pub fn materializeFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
     return Value.makeObj(obj);
 }
 
-pub fn propagateStrategyFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn propagateStrategyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2 or !args[0].isInt() or !args[1].isInt()) return error.ArityError;
     const seed: u64 = @bitCast(@as(i64, args[0].asInt()));
     const strategy = args[1].asInt();

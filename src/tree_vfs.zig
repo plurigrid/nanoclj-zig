@@ -20,6 +20,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const GC = @import("gc.zig").GC;
 const Env = @import("env.zig").Env;
+const Resources = @import("transitivity.zig").Resources;
 
 /// Parsed tree entry
 const TreeEntry = struct {
@@ -275,7 +276,7 @@ pub fn getTranscludes(id: []const u8) ?[][]const u8 {
 // ============================================================================
 
 /// (tree-read "horse-0001") → string content
-pub fn treeReadFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeReadFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const id = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);
@@ -285,7 +286,7 @@ pub fn treeReadFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-title "horse-0001") → title string or nil
-pub fn treeTitleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeTitleFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const id = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);
@@ -296,7 +297,7 @@ pub fn treeTitleFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-transcluded "horse-0001") → list of IDs this tree transcludes
-pub fn treeTranscludedFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeTranscludedFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const id = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);
@@ -310,7 +311,7 @@ pub fn treeTranscludedFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-transcluders "xref-0001") → list of IDs that transclude this tree
-pub fn treeTranscludersFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeTranscludersFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const id = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);
@@ -325,7 +326,7 @@ pub fn treeTranscludersFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-ids) → list of all known tree IDs
-pub fn treeIdsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeIdsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const f = try loadForest(gc.allocator);
     const list_obj = try gc.allocObj(.list);
@@ -338,7 +339,7 @@ pub fn treeIdsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-isolated) → list of tree IDs with no incoming or outgoing edges
-pub fn treeIsolatedFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeIsolatedFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const f = try loadForest(gc.allocator);
     const list_obj = try gc.allocObj(.list);
@@ -355,7 +356,7 @@ pub fn treeIsolatedFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-chain "horse-0001") → longest transclusion chain as list of IDs (DFS)
-pub fn treeChainFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeChainFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const id = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);
@@ -406,7 +407,7 @@ fn longestChainDFS(
 }
 
 /// (tree-taxon "dct-0001") → taxon string (e.g. "doctrine") or nil
-pub fn treeTaxonFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeTaxonFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const id = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);
@@ -416,7 +417,7 @@ pub fn treeTaxonFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-author "bci-0001") → author string or nil
-pub fn treeAuthorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeAuthorFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const id = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);
@@ -426,7 +427,7 @@ pub fn treeAuthorFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-meta "dct-0001") → {:key1 "val1" :key2 "val2"} or nil
-pub fn treeMetaFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeMetaFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const id = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);
@@ -443,7 +444,7 @@ pub fn treeMetaFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-imports "horse-0001") → list of IDs this tree imports
-pub fn treeImportsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeImportsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const id = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);
@@ -457,7 +458,7 @@ pub fn treeImportsFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
 }
 
 /// (tree-by-taxon "doctrine") → list of tree IDs with that taxon
-pub fn treeByTaxonFn(args: []Value, gc: *GC, _: *Env) anyerror!Value {
+pub fn treeByTaxonFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const taxon = gc.getString(args[0].asStringId());
     const f = try loadForest(gc.allocator);

@@ -52,6 +52,9 @@ pub const Resources = struct {
     trit_balance: i8 = 0,
     /// Monotonic buddy event counter (propagator cell, only grows)
     buddy_events: u32 = 0,
+    /// Active truth mode for this execution context (defaults to classical).
+    /// Mirrors pluralism.current_world.truth but can be overridden per-Resources.
+    truth_mode: @import("pluralism.zig").TruthMode = .classical,
 
     pub fn init(limits: Limits) Resources {
         return .{
