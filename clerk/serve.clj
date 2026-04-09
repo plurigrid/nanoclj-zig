@@ -1,224 +1,118 @@
 #!/usr/bin/env bb
-;; clerk/serve.clj — Clerk-like rendering surface for nanoclj-zig
+;; clerk/serve.clj — Clerk-style HTTP bridge to a nanoclj nREPL.
 ;;
-;; Double-wrapped architecture:
-;;   Inner: nanoclj-zig nREPL (TCP/bencode, bounded eval, GF(3) metadata)
-;;   Outer: This script → HTTP + SSE → browser renders colored HTML
-;;
-;; Usage:
-;;   bb clerk/serve.clj              # connects to nREPL on .nrepl-port
-;;   bb clerk/serve.clj 7888         # explicit nREPL port
-;;   bb clerk/serve.clj 7888 8080    # explicit nREPL + HTTP port
+;; Usage:  bb clerk/serve.clj [nrepl-port] [http-port]
+;;         Defaults: nrepl-port=7888  http-port=8484
 
-(ns nanoclj.clerk
-  (:require [babashka.bencode :as bencode]
-            [clojure.java.io :as io]
-            [org.httpkit.server :as http])
-  (:import [java.net Socket]
-           [java.util UUID]))
+(require '[bencode.core :as b]
+         '[org.httpkit.server :as http]
+         '[cheshire.core :as json])
 
-;; ── nREPL client ────────────────────────────────────────────────
+(import '[java.net Socket]
+        '[java.io PushbackInputStream BufferedOutputStream])
 
-(defn connect-nrepl [port]
-  (let [sock (Socket. "127.0.0.1" (int port))
-        in   (io/input-stream sock)
-        out  (io/output-stream sock)]
-    {:socket sock :in in :out out}))
+(def nrepl-port (Integer/parseInt (or (first *command-line-args*) "7888")))
+(def http-port  (Integer/parseInt (or (second *command-line-args*) "8484")))
 
-(defn nrepl-send [{:keys [out]} msg]
-  (bencode/write-bencode out msg))
-
-(defn nrepl-recv [{:keys [in]}]
-  (try
-    (bencode/read-bencode in)
-    (catch Exception _ nil)))
+;; ── nREPL client ──────────────────────────────────────────────────────
 
 (defn nrepl-eval
-  "Eval code, collect all response messages until done."
-  [conn session-id code]
-  (let [msg-id (str (UUID/randomUUID))]
-    (nrepl-send conn {"op" "eval"
-                      "code" code
-                      "session" session-id
-                      "id" msg-id})
-    (loop [msgs []]
-      (if-let [resp (nrepl-recv conn)]
-        (let [msgs (conj msgs resp)
-              status (get resp "status")]
-          (if (and status (some #(= % "done") status))
-            msgs
-            (recur msgs)))
-        msgs))))
+  [code]
+  (let [sock (Socket. "localhost" nrepl-port)
+        in   (PushbackInputStream. (.getInputStream sock))
+        out  (BufferedOutputStream. (.getOutputStream sock))
+        id   (str (java.util.UUID/randomUUID))]
+    (try
+      (b/write-bencode out {"op" "eval" "code" code "id" id})
+      (.flush out)
+      (loop [acc {:value nil :out "" :err "" :status nil :extras {}}]
+        (let [resp (b/read-bencode in)]
+          (if (nil? resp)
+            acc
+            (let [resp-map (into {} (map (fn [[k v]]
+                                          [(if (bytes? k) (String. ^bytes k) (str k))
+                                           (if (bytes? v) (String. ^bytes v) v)])
+                                        resp))
+                  acc (cond-> acc
+                        (get resp-map "value")  (assoc :value (get resp-map "value"))
+                        (get resp-map "out")    (update :out str (get resp-map "out"))
+                        (get resp-map "err")    (update :err str (get resp-map "err"))
+                        (get resp-map "ex")     (assoc :error (get resp-map "ex")))]
+              (let [extras (reduce-kv (fn [m k v]
+                                        (if (.startsWith ^String k "x-")
+                                          (assoc m k (if (bytes? v) (String. ^bytes v) v))
+                                          m))
+                                      (:extras acc)
+                                      resp-map)
+                    acc (assoc acc :extras extras)
+                    status (get resp-map "status")]
+                (if (and status (some #(= "done" (if (bytes? %) (String. ^bytes %) (str %)))
+                                      (if (sequential? status) status [status])))
+                  (assoc acc :status "done")
+                  (recur acc)))))))
+      (finally
+        (.close sock)))))
 
-(defn nrepl-clone [conn]
-  (nrepl-send conn {"op" "clone" "id" (str (UUID/randomUUID))})
-  (let [resp (nrepl-recv conn)]
-    (get resp "new-session")))
+;; ── HTML page ─────────────────────────────────────────────────────────
 
-;; ── SSE broadcast ───────────────────────────────────────────────
-
-(def sse-clients (atom #{}))
-
-(defn broadcast-sse! [event data]
-  (let [msg (str "event: " event "\ndata: " data "\n\n")]
-    (doseq [ch @sse-clients]
-      (try (http/send! ch {:body msg} false)
-           (catch Exception _ (swap! sse-clients disj ch))))))
-
-;; ── Eval result → HTML ──────────────────────────────────────────
-
-(defn result-html
-  "Convert nREPL response messages to an HTML fragment."
-  [code msgs]
-  (let [value-msg  (first (filter #(get % "value") msgs))
-        done-msg   (first (filter #(some #{"done"} (get % "status")) msgs))
-        err-msg    (first (filter #(get % "err") msgs))
-        value      (get value-msg "value")
-        err        (get err-msg "err")
-        color-r    (get done-msg "x-color-r" 128)
-        color-g    (get done-msg "x-color-g" 128)
-        color-b    (get done-msg "x-color-b" 128)
-        trit       (get done-msg "x-trit-phase" 0)
-        fuel       (get done-msg "x-fuel-remaining" "?")
-        elapsed    (get done-msg "x-elapsed-trit-ticks" 0)
-        eval-count (get done-msg "x-eval-count" 0)
-        bounded?   (= "true" (get done-msg "x-bounded"))
-        tier       (cond
-                     (= trit 1)  "red"    ; AOT
-                     (= trit -1) "blue"   ; JIT
-                     :else        "purple") ; dispatch
-        border-color (str "rgb(" color-r "," color-g "," color-b ")")]
-    (str "<div class='cell' style='border-left: 4px solid " border-color "'>"
-         "<div class='cell-input'><pre><code>" (-> code (.replace "&" "&amp;") (.replace "<" "&lt;")) "</code></pre></div>"
-         (if err
-           (str "<div class='cell-error'><pre>" (-> err (.replace "&" "&amp;") (.replace "<" "&lt;")) "</pre></div>")
-           (str "<div class='cell-output'><pre><code>" (-> (or value "nil") (.replace "&" "&amp;") (.replace "<" "&lt;")) "</code></pre></div>"))
-         "<div class='cell-meta'>"
-         "<span class='tier tier-" tier "'>" tier "</span>"
-         "<span class='fuel'>fuel:" fuel "</span>"
-         "<span class='ticks'>" elapsed "tt</span>"
-         "<span class='eval-n'>#" eval-count "</span>"
-         (when bounded? "<span class='bounded'>bounded</span>")
-         "</div>"
-         "</div>")))
-
-;; ── HTML page ───────────────────────────────────────────────────
-
-(def page-html
+(def index-html
   "<!DOCTYPE html>
-<html>
-<head>
+<html><head>
 <meta charset='utf-8'>
-<title>nanoclj-zig · clerk</title>
+<title>nanoclj clerk</title>
 <style>
-  :root { --bg: #1a1a2e; --fg: #e0e0e0; --input-bg: #16213e; --mono: 'Berkeley Mono', 'JetBrains Mono', monospace; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: 14px; padding: 2rem; max-width: 900px; margin: 0 auto; }
-  h1 { font-size: 1.2em; color: #7f8fa6; margin-bottom: 1rem; }
-  h1 span { font-weight: normal; opacity: 0.5; }
-  #cells { display: flex; flex-direction: column; gap: 1rem; }
-  .cell { background: var(--input-bg); border-radius: 6px; padding: 1rem; }
-  .cell-input code { color: #dcdde1; }
-  .cell-output { margin-top: 0.5rem; }
-  .cell-output code { color: #4cd137; }
-  .cell-error pre { color: #e84118; }
-  .cell-meta { margin-top: 0.5rem; display: flex; gap: 0.75rem; font-size: 0.75em; opacity: 0.6; }
-  .tier { font-weight: bold; text-transform: uppercase; }
-  .tier-red { color: #e84118; }
-  .tier-blue { color: #0097e6; }
-  .tier-purple { color: #9c88ff; }
-  .bounded { color: #fbc531; }
-  #input-area { position: fixed; bottom: 0; left: 0; right: 0; background: #0f0f23; padding: 1rem 2rem; border-top: 1px solid #333; }
-  #input-area form { max-width: 900px; margin: 0 auto; display: flex; gap: 0.5rem; }
-  #code-input { flex: 1; background: var(--input-bg); color: var(--fg); border: 1px solid #444; border-radius: 4px; padding: 0.5rem; font-family: var(--mono); font-size: 14px; }
-  #code-input:focus { outline: none; border-color: #9c88ff; }
-  button { background: #9c88ff; color: #1a1a2e; border: none; border-radius: 4px; padding: 0.5rem 1rem; font-family: var(--mono); cursor: pointer; }
-  button:hover { background: #8c7ae6; }
-  .spacer { height: 4rem; }
+  body { font-family: 'Berkeley Mono', 'Iosevka', monospace; background: #0e0e12; color: #e0e0e0; margin: 2em; }
+  h1 { color: #b0f0b0; }
+  textarea { width: 100%; height: 6em; background: #1a1a22; color: #f8f8f8; border: 1px solid #444; padding: 0.5em; font-family: inherit; font-size: 1em; }
+  button { margin-top: 0.5em; padding: 0.4em 1.2em; background: #2a6a3a; color: #fff; border: none; cursor: pointer; font-size: 1em; }
+  button:hover { background: #3a8a4a; }
+  #result { white-space: pre-wrap; background: #12121a; padding: 1em; margin-top: 1em; border: 1px solid #333; min-height: 2em; }
+  .extras { color: #888; font-size: 0.85em; margin-top: 0.5em; }
 </style>
-</head>
-<body>
-<h1>nanoclj-zig <span>· clerk</span></h1>
-<div id='cells'></div>
-<div class='spacer'></div>
-<div id='input-area'>
-  <form id='eval-form'>
-    <input id='code-input' type='text' placeholder='(+ 1 2)' autocomplete='off' autofocus>
-    <button type='submit'>eval</button>
-  </form>
-</div>
+</head><body>
+<h1>nanoclj clerk</h1>
+<textarea id='code'>(+ 1 2)</textarea>
+<br><button onclick='evalCode()'>Eval</button>
+<div id='result'></div>
 <script>
-const cells = document.getElementById('cells');
-const form = document.getElementById('eval-form');
-const input = document.getElementById('code-input');
-
-// SSE for live results
-const es = new EventSource('/events');
-es.addEventListener('cell', e => {
-  cells.insertAdjacentHTML('beforeend', e.data);
-  window.scrollTo(0, document.body.scrollHeight);
-});
-
-// Eval via POST
-form.addEventListener('submit', async e => {
-  e.preventDefault();
-  const code = input.value.trim();
-  if (!code) return;
-  input.value = '';
-  await fetch('/eval', { method: 'POST', body: code });
-});
-
-// Ctrl+Enter in input
-input.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-    form.dispatchEvent(new Event('submit'));
+async function evalCode() {
+  const code = document.getElementById('code').value;
+  const res = await fetch('/eval', {method: 'POST', body: code});
+  const data = await res.json();
+  let out = '';
+  if (data.out) out += data.out;
+  if (data.value !== null) out += data.value;
+  if (data.error) out += '\\nERROR: ' + data.error;
+  if (data.err) out += '\\nSTDERR: ' + data.err;
+  if (data.extras && Object.keys(data.extras).length > 0) {
+    out += '\\n\\n' + JSON.stringify(data.extras, null, 2);
   }
-});
+  document.getElementById('result').textContent = out;
+}
+document.addEventListener('keydown', e => { if ((e.ctrlKey||e.metaKey) && e.key==='Enter') evalCode(); });
 </script>
-</body>
-</html>")
+</body></html>")
 
-;; ── HTTP server ─────────────────────────────────────────────────
+;; ── HTTP handler ──────────────────────────────────────────────────────
 
-(defn make-handler [nrepl-conn session-id]
-  (fn [req]
-    (case (:uri req)
-      "/" {:status 200
-          :headers {"Content-Type" "text/html; charset=utf-8"}
-          :body page-html}
+(defn handler [req]
+  (case [(:request-method req) (:uri req)]
+    [:get "/"]
+    {:status 200 :headers {"Content-Type" "text/html; charset=utf-8"} :body index-html}
 
-      "/events"
-      (http/with-channel req ch
-        (http/send! ch {:status 200
-                        :headers {"Content-Type" "text/event-stream"
-                                  "Cache-Control" "no-cache"
-                                  "Connection" "keep-alive"}}
-                    false)
-        (swap! sse-clients conj ch)
-        (http/on-close ch (fn [_] (swap! sse-clients disj ch))))
+    [:post "/eval"]
+    (let [body (slurp (:body req))
+          result (nrepl-eval body)]
+      {:status 200
+       :headers {"Content-Type" "application/json; charset=utf-8"}
+       :body (json/generate-string result)})
 
-      "/eval"
-      (let [code (slurp (:body req))
-            msgs (nrepl-eval nrepl-conn session-id code)
-            html (result-html code msgs)]
-        (broadcast-sse! "cell" html)
-        {:status 200 :body "ok"})
+    {:status 404 :body "not found"}))
 
-      {:status 404 :body "not found"})))
+;; ── Main ──────────────────────────────────────────────────────────────
 
-;; ── Main ────────────────────────────────────────────────────────
+(println (str "clerk bridge: nREPL localhost:" nrepl-port " -> HTTP localhost:" http-port))
+(http/run-server handler {:port http-port})
+(println (str "Serving at http://localhost:" http-port "/"))
 
-(defn -main [& args]
-  (let [nrepl-port (or (some-> (first args) parse-long)
-                       (some-> (io/file ".nrepl-port") slurp str/trim parse-long)
-                       7888)
-        http-port  (or (some-> (second args) parse-long) 8484)]
-    (println (str "Connecting to nanoclj-zig nREPL on port " nrepl-port "..."))
-    (let [conn       (connect-nrepl nrepl-port)
-          session-id (nrepl-clone conn)]
-      (println (str "Session: " session-id))
-      (println (str "Serving clerk at http://localhost:" http-port))
-      (http/run-server (make-handler conn session-id) {:port http-port})
-      @(promise)))) ; block forever
-
-(apply -main *command-line-args*)
+@(promise)
