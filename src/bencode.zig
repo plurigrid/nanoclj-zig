@@ -203,7 +203,7 @@ test "decode list" {
 }
 
 test "encode roundtrip" {
-    var buf = std.ArrayListUnmanaged(u8){};
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
     defer buf.deinit(std.testing.allocator);
 
     const original = "d2:idi42e2:op4:evale";

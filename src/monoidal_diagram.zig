@@ -34,8 +34,8 @@ const DiagramKind = enum {
 const Analysis = struct {
     kind: DiagramKind,
     normalized: Value,
-    dom: std.ArrayListUnmanaged(Value) = .{},
-    cod: std.ArrayListUnmanaged(Value) = .{},
+    dom: std.ArrayListUnmanaged(Value) = .empty,
+    cod: std.ArrayListUnmanaged(Value) = .empty,
     nodes: usize = 0,
     depth: usize = 0,
 
@@ -195,12 +195,12 @@ fn analyzeComposite(kind: DiagramKind, parts_val: Value, gc: *GC) anyerror!Analy
     const parts = seqItems(parts_val) orelse return error.TypeError;
     if (parts.len == 0) return error.InvalidDiagram;
 
-    var flat_parts: std.ArrayListUnmanaged(Value) = .{};
+    var flat_parts: std.ArrayListUnmanaged(Value) = .empty;
     defer flat_parts.deinit(gc.allocator);
 
-    var dom: std.ArrayListUnmanaged(Value) = .{};
+    var dom: std.ArrayListUnmanaged(Value) = .empty;
     errdefer dom.deinit(gc.allocator);
-    var cod: std.ArrayListUnmanaged(Value) = .{};
+    var cod: std.ArrayListUnmanaged(Value) = .empty;
     errdefer cod.deinit(gc.allocator);
 
     var total_nodes: usize = 0;
@@ -264,9 +264,9 @@ fn analyzeDiagram(diag: Value, gc: *GC) anyerror!Analysis {
         .id => {
             const wires_val = mapGetByKeyword(obj, gc, "wires") orelse return error.InvalidDiagram;
             const wires = seqItems(wires_val) orelse return error.TypeError;
-            var dom: std.ArrayListUnmanaged(Value) = .{};
+            var dom: std.ArrayListUnmanaged(Value) = .empty;
             errdefer dom.deinit(gc.allocator);
-            var cod: std.ArrayListUnmanaged(Value) = .{};
+            var cod: std.ArrayListUnmanaged(Value) = .empty;
             errdefer cod.deinit(gc.allocator);
             try copySeq(&dom, gc.allocator, wires);
             try copySeq(&cod, gc.allocator, wires);
@@ -285,9 +285,9 @@ fn analyzeDiagram(diag: Value, gc: *GC) anyerror!Analysis {
             const cod_val = mapGetByKeyword(obj, gc, "cod") orelse return error.InvalidDiagram;
             const dom_items = seqItems(dom_val) orelse return error.TypeError;
             const cod_items = seqItems(cod_val) orelse return error.TypeError;
-            var dom: std.ArrayListUnmanaged(Value) = .{};
+            var dom: std.ArrayListUnmanaged(Value) = .empty;
             errdefer dom.deinit(gc.allocator);
-            var cod: std.ArrayListUnmanaged(Value) = .{};
+            var cod: std.ArrayListUnmanaged(Value) = .empty;
             errdefer cod.deinit(gc.allocator);
             try copySeq(&dom, gc.allocator, dom_items);
             try copySeq(&cod, gc.allocator, cod_items);
@@ -309,9 +309,9 @@ fn analyzeDiagram(diag: Value, gc: *GC) anyerror!Analysis {
             const outs = outs_val.asInt();
             if (ins < 0 or outs < 0) return error.InvalidDiagram;
 
-            var dom: std.ArrayListUnmanaged(Value) = .{};
+            var dom: std.ArrayListUnmanaged(Value) = .empty;
             errdefer dom.deinit(gc.allocator);
-            var cod: std.ArrayListUnmanaged(Value) = .{};
+            var cod: std.ArrayListUnmanaged(Value) = .empty;
             errdefer cod.deinit(gc.allocator);
 
             var i: i48 = 0;
@@ -334,9 +334,9 @@ fn analyzeDiagram(diag: Value, gc: *GC) anyerror!Analysis {
             const left = seqItems(left_val) orelse return error.TypeError;
             const right = seqItems(right_val) orelse return error.TypeError;
 
-            var dom: std.ArrayListUnmanaged(Value) = .{};
+            var dom: std.ArrayListUnmanaged(Value) = .empty;
             errdefer dom.deinit(gc.allocator);
-            var cod: std.ArrayListUnmanaged(Value) = .{};
+            var cod: std.ArrayListUnmanaged(Value) = .empty;
             errdefer cod.deinit(gc.allocator);
             try copySeq(&dom, gc.allocator, left);
             try copySeq(&dom, gc.allocator, right);

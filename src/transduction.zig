@@ -193,6 +193,8 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
                 return Domain.pure(form_d.value);
             }
             if (std.mem.eql(u8, sname, "try")) return evalBoundedTry(items, env, gc, res);
+            if (std.mem.eql(u8, sname, "binding")) return evalBoundedBinding(items, env, gc, res);
+            if (std.mem.eql(u8, sname, "meter")) return evalBoundedMeter(items, env, gc, res);
             // ns/in-ns handled above with proper return values
             if (std.mem.eql(u8, sname, "comment")) return Domain.pure(Value.makeNil());
             // recur: set signal args for loop to catch
@@ -394,6 +396,7 @@ pub fn evalBounded(val: Value, env: *Env, gc: *GC, res: *Resources) Domain {
             if (std.mem.eql(u8, fname, "do")) return evalBoundedDo(items, env, gc, res);
             if (std.mem.eql(u8, fname, "fn*") or std.mem.eql(u8, fname, "fn")) return evalBoundedFnStar(items, env, gc, res);
             if (std.mem.eql(u8, fname, "defn")) return evalBoundedDefn(items, env, gc, res);
+            if (std.mem.eql(u8, fname, "binding")) return evalBoundedBinding(items, env, gc, res);
             if (std.mem.eql(u8, fname, "peval")) return evalBoundedPeval(items, env, gc, res);
         }
 
@@ -802,6 +805,103 @@ fn scanDeps(expr: Value, bind_ids: []const u48, gc: *GC) u32 {
     return mask;
 }
 
+/// (binding [*v* val ...] body...) — dynamic rebinding.
+/// Saves prior root values, sets new ones for the dynamic extent of body,
+/// then restores. Single-threaded save/restore suffices for REPL semantics.
+fn evalBoundedBinding(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+    if (items.len < 3) return Domain.fail(.arity_error);
+    if (!items[1].isObj()) return Domain.fail(.type_error);
+    const bindings_obj = items[1].asObj();
+    const bindings = switch (bindings_obj.kind) {
+        .vector => bindings_obj.data.vector.items.items,
+        .list => bindings_obj.data.list.items.items,
+        else => return Domain.fail(.type_error),
+    };
+    if (bindings.len % 2 != 0) return Domain.fail(.arity_error);
+
+    // Dynamic scope lives at root env.
+    var root: *Env = env;
+    while (root.parent) |p| root = p;
+
+    var names: [16][]const u8 = undefined;
+    var ids: [16]u48 = undefined;
+    var priors: [16]Value = undefined;
+    var had_prior: [16]bool = undefined;
+    var n: usize = 0;
+
+    while (n * 2 < bindings.len and n < names.len) : (n += 1) {
+        const nv = bindings[n * 2];
+        if (!nv.isSymbol()) return Domain.fail(.type_error);
+        const id = nv.asSymbolId();
+        const nm = gc.getString(id);
+        names[n] = nm;
+        ids[n] = id;
+        if (root.getById(id)) |v| {
+            priors[n] = v;
+            had_prior[n] = true;
+        } else if (root.bindings.get(nm)) |v| {
+            priors[n] = v;
+            had_prior[n] = true;
+        } else {
+            priors[n] = Value.makeNil();
+            had_prior[n] = false;
+        }
+        const d = evalBounded(bindings[n * 2 + 1], env, gc, res);
+        if (!d.isValue()) {
+            for (0..n) |i| {
+                if (had_prior[i]) {
+                    root.set(names[i], priors[i]) catch {};
+                    root.setById(ids[i], priors[i]) catch {};
+                } else {
+                    _ = root.bindings.remove(names[i]);
+                    _ = root.id_bindings.remove(ids[i]);
+                }
+            }
+            return d;
+        }
+        root.set(nm, d.value) catch return Domain.fail(.type_error);
+        root.setById(id, d.value) catch return Domain.fail(.type_error);
+    }
+    if (n * 2 < bindings.len) return Domain.fail(.arity_error);
+
+    var result = Domain.pure(Value.makeNil());
+    for (items[2..]) |form| {
+        result = evalBounded(form, env, gc, res);
+        if (!result.isValue()) break;
+    }
+
+    for (0..n) |i| {
+        if (had_prior[i]) {
+            root.set(names[i], priors[i]) catch {};
+            root.setById(ids[i], priors[i]) catch {};
+        } else {
+            _ = root.bindings.remove(names[i]);
+            _ = root.id_bindings.remove(ids[i]);
+        }
+    }
+    return result;
+}
+
+/// (meter expr) — evaluate expr and return [result fuel-used].
+/// Barton reflexivity: the expression's own resource cost is observable
+/// from within. On unmetered paths `fuel-used` will be 0.
+fn evalBoundedMeter(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+    if (items.len != 2) return Domain.fail(.arity_error);
+    const before = res.fuelRemaining();
+    const d = evalBounded(items[1], env, gc, res);
+    if (!d.isValue()) return d;
+    const after = res.fuelRemaining();
+    const used: u64 = if (before > after) before - after else 0;
+    const used_i: i48 = if (used > std.math.maxInt(i48))
+        std.math.maxInt(i48)
+    else
+        @intCast(used);
+    const out = gc.allocObj(.vector) catch return Domain.fail(.type_error);
+    out.data.vector.items.append(gc.allocator, d.value) catch return Domain.fail(.type_error);
+    out.data.vector.items.append(gc.allocator, Value.makeInt(used_i)) catch return Domain.fail(.type_error);
+    return Domain.pure(Value.makeObj(out));
+}
+
 fn evalBoundedIf(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     if (items.len < 3 or items.len > 4) return Domain.fail(.arity_error);
     const cond = evalBounded(items[1], env, gc, res);
@@ -906,7 +1006,16 @@ fn getItemsDomain(val: Value) ?[]Value {
     };
 }
 
-fn evalBoundedPeval(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
+const evalBoundedPeval = if (@import("builtin").cpu.arch == .wasm32 or @import("builtin").cpu.arch == .wasm64)
+    evalBoundedPevalWasm
+else
+    evalBoundedPevalNative;
+
+fn evalBoundedPevalWasm(_: []Value, _: *Env, _: *GC, _: *Resources) Domain {
+    return .{ .bottom = .fuel_exhausted };
+}
+
+fn evalBoundedPevalNative(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     const exprs = items[1..];
     const thread_peval = @import("thread_peval.zig");
     return thread_peval.threadPeval(@constCast(exprs), env, gc, res);

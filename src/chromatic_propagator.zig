@@ -62,7 +62,21 @@ pub const ChromaticCell = struct {
         }
     }
 
+    /// GF(3) trit of this cell's color: extracted from hue sector.
+    /// Red (0°±60°) = -1, Green (120°±60°) = 0, Blue (240°±60°) = +1.
+    pub fn trit(self: *const ChromaticCell) i8 {
+        // Approximate hue from RGB by max channel
+        const max_ch = @max(self.color.r, @max(self.color.g, self.color.b));
+        if (max_ch == self.color.r) return -1; // red-dominant → validator
+        if (max_ch == self.color.b) return 1; // blue-dominant → generator
+        return 0; // green-dominant → coordinator
+    }
+
+    /// GF(3) conservation: combine trits mod 3, not XOR.
+    /// XOR is GF(2); trit sum mod 3 is the correct conservation law.
     pub fn conservedCombine(c1: substrate.Color, c2: substrate.Color) substrate.Color {
+        // Preserve legacy XOR for backward compatibility in substrate.Color
+        // but see colorConservationCheck below for the correct GF(3) check.
         return .{
             .r = c1.r ^ c2.r,
             .g = c1.g ^ c2.g,
@@ -128,13 +142,16 @@ pub const ChromaticEnv = struct {
         return cell_prod.content != .contradiction;
     }
 
+    /// GF(3) conservation check: trit sum of all cells ≡ 0 (mod 3).
+    /// This is the correct invariant for the plastic constant / GF(27) tower.
+    /// The old XOR check (GF(2)) is preserved in conservedCombine for
+    /// backward compatibility but this is the authoritative conservation law.
     pub fn colorConservationCheck(self: *const ChromaticEnv) bool {
-        var combined = substrate.Color{ .r = 0, .g = 0, .b = 0 };
+        var trit_sum: i32 = 0;
         for (self.cells[0..self.cell_count]) |cell| {
-            combined = ChromaticCell.conservedCombine(combined, cell.color);
+            trit_sum += cell.trit();
         }
-        // Balanced = each channel is 0 after XOR (even number of set bits per channel)
-        return combined.r == 0 and combined.g == 0 and combined.b == 0;
+        return @mod(trit_sum, 3) == 0;
     }
 
     pub fn networkFingerprint(self: *const ChromaticEnv) u64 {

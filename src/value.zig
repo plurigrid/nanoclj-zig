@@ -41,6 +41,9 @@ pub const ObjKind = enum(u8) {
     rational, // exact rational number: numerator/denominator (always GCD-normalized, denominator > 0)
     color, // first-class OKLAB color value (L, a, b, alpha as 4×f32)
     channel, // CSP channel (core.async-style buffered/unbuffered)
+    agent, // Clojure agent: state + mailbox + validator + error handler
+    file_handle, // POSIX fd + open/closed state + path (for pread/pwrite/fsync)
+    bytes, // raw []u8 byte-vector (mutable, binary — orthogonal to interned strings)
 };
 
 pub const Obj = struct {
@@ -58,7 +61,7 @@ pub const ObjData = union {
     set: struct { items: std.ArrayListUnmanaged(Value) },
     function: FnData,
     macro_fn: FnData,
-    atom: struct { val: Value },
+    atom: struct { val: Value, validator: Value = Value.makeNil() },
     bc_closure: @import("bytecode.zig").Closure,
     builtin_ref: struct {
         func: *const fn (args: []Value, gc: *@import("gc.zig").GC, env: *@import("env.zig").Env, res: *@import("transitivity.zig").Resources) anyerror!Value,
@@ -79,6 +82,9 @@ pub const ObjData = union {
     rational: Rational,
     color: @import("colorspace.zig").Color,
     channel: @import("channel.zig").ChannelData,
+    agent: @import("agent.zig").AgentData,
+    file_handle: @import("diskio.zig").Handle,
+    bytes: @import("diskio.zig").Bytes,
 };
 
 /// Neanderthal-compatible dense f64 vector.
@@ -257,7 +263,7 @@ pub const Value = packed struct {
     }
 
     pub fn makeObj(ptr: *Obj) Value {
-        return fromTagPayload(.object, @truncate(@intFromPtr(ptr)));
+        return fromTagPayload(.object, @intCast(@intFromPtr(ptr)));
     }
 
     fn fromTagPayload(tag: Tag, payload: u48) Value {
@@ -323,7 +329,7 @@ pub const Value = packed struct {
     }
 
     pub fn asObj(self: Value) *Obj {
-        return @ptrFromInt(@as(usize, self.getPayload()));
+        return @ptrFromInt(@as(usize, @intCast(self.getPayload())));
     }
 
     /// Truthiness: nil and false are falsy, everything else truthy

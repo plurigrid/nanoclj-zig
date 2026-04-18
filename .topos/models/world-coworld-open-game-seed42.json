@@ -1,0 +1,79 @@
+{
+  "id": "world-coworld-open-game-seed42",
+  "seed": 42,
+  "substrate": "nanoclj-zig",
+  "status": "design-seed",
+  "closure": {
+    "type": "world-coworld",
+    "criterion": "Every forward play morphism has an explicit backward coworld morphism, and every ambient dependency is carried in context."
+  },
+  "engine": {
+    "primary_semantics": "inet-batch",
+    "companion_semantics": [
+      "thread-peval",
+      "kanren-search",
+      "propagator-fixpoint"
+    ],
+    "seeded_companion_index": 0,
+    "seeded_companion_choice": "thread-peval",
+    "agreement_required": true
+  },
+  "contextad": {
+    "ctx_shape": [
+      "market",
+      "chain",
+      "governance",
+      "agent",
+      "disclosure"
+    ],
+    "effect_classes": [
+      "readonly",
+      "local",
+      "contended"
+    ]
+  },
+  "ports": {
+    "forward": "X->Y",
+    "backward": "S->R",
+    "contexted_forward": "(C x X)->Y",
+    "contexted_backward": "(C x X x R x Y)->S"
+  },
+  "world": {
+    "role": "forward-play",
+    "equality": "homotopy",
+    "hash": "zobrist",
+    "truth": "intuitionistic",
+    "order": "preorder",
+    "collection": "persistent",
+    "eval_strategy": "speculative",
+    "numbers": "rational",
+    "logic": "linear",
+    "errors": "result",
+    "identity": "narrative"
+  },
+  "coworld": {
+    "role": "backward-coplay",
+    "equality": "functional",
+    "hash": "fnv1a",
+    "truth": "paraconsistent",
+    "order": "preorder",
+    "collection": "confluent",
+    "eval_strategy": "lazy",
+    "numbers": "rational",
+    "logic": "relevant",
+    "errors": "recovery",
+    "identity": "functional"
+  },
+  "benchmarks": {
+    "normalize_1k_nodes_ms": 10,
+    "normalize_10k_nodes_ms": 100,
+    "active_pair_rewrites_per_sec_per_core": 5000000,
+    "monte_carlo_10k_paths_365_ticks_ms": 2000,
+    "best_response_10k_agents_ms": 1000,
+    "nouns_fork_detection_ms": 50
+  },
+  "artifacts": {
+    "analysis": "world-coworld-contextad-open-games",
+    "diagram": "world-coworld-open-game-seed42"
+  }
+}

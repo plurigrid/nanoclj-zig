@@ -58,6 +58,28 @@ pub const Color = struct {
         return .{ self, self.analogous(120.0), self.analogous(240.0) };
     }
 
+    // Plastic constant ρ ≈ 1.3247 (root of x³ = x + 1, generates GF(27))
+    const PLASTIC_ANGLE: f32 = 205.1442;
+    const GOLDEN_ANGLE: f32 = 137.5078;
+
+    /// Plastic rotation: rotate by ρ²-derived angle in the a-b chroma plane.
+    /// Use for interaction-net / branching structures where depth × arity
+    /// needs 2D dispersion (golden = depth, plastic = branch slot).
+    pub fn plasticRotate(self: Color, depth: u32, branch: u8) Color {
+        const angle = @as(f32, @floatFromInt(depth)) * GOLDEN_ANGLE +
+            @as(f32, @floatFromInt(branch)) * PLASTIC_ANGLE;
+        return self.analogous(angle);
+    }
+
+    /// Generate n colors via plastic spiral (optimal for tree structures).
+    pub fn plasticSpiral(self: Color, n: usize, buf: []Color) []Color {
+        const count = @min(n, buf.len);
+        for (0..count) |i| {
+            buf[i] = self.analogous(@as(f32, @floatFromInt(i)) * PLASTIC_ANGLE);
+        }
+        return buf[0..count];
+    }
+
     /// Chroma (saturation magnitude in a-b plane).
     pub fn chroma(self: Color) f32 {
         return @sqrt(self.a * self.a + self.b * self.b);

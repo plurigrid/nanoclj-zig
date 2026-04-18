@@ -294,7 +294,7 @@ fn loadBcPrelude(gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM, env: *Env) v
 }
 
 /// Load standard Clojure macros into the tree-walk environment.
-fn loadMacroPrelude(env: *Env, gc: *GC) void {
+pub fn loadMacroPrelude(env: *Env, gc: *GC) void {
     const eval_mod = @import("eval.zig");
     const macros = [_][]const u8{
         // when: (when test body...)
@@ -358,6 +358,30 @@ fn loadMacroPrelude(env: *Env, gc: *GC) void {
         \\(defmacro when-let [bindings & body]
         \\  (list 'let* bindings
         \\    (cons 'when (cons (first bindings) body))))
+        ,
+        // amap: (amap arr idx ret expr)
+        //   ret ← fresh dense_f64 copy of arr; for each idx in 0..n-1, ret[idx] ← expr.
+        //   Returns (vec ret) so the result compares equal to a plain vector.
+        \\(defmacro amap [arr idx ret expr]
+        \\  (list 'let* (vector '__amap_arr__ arr
+        \\                      ret (list 'make-array (list 'count '__amap_arr__)))
+        \\    (list 'dotimes (vector idx (list 'count '__amap_arr__))
+        \\      (list 'aset ret idx (list 'nth '__amap_arr__ idx)))
+        \\    (list 'dotimes (vector idx (list 'count '__amap_arr__))
+        \\      (list 'aset ret idx expr))
+        \\    (list 'vec ret)))
+        ,
+        // areduce: (areduce arr elt acc init expr)
+        //   Fold over arr's elements, binding `elt` to each element and `acc`
+        //   to the running accumulator (starting at init). Atom-backed.
+        \\(defmacro areduce [arr elt acc init expr]
+        \\  (list 'let* (vector '__areduce_arr__ arr
+        \\                      '__areduce_acc__ (list 'atom init))
+        \\    (list 'dotimes (vector '__areduce_i__ (list 'count '__areduce_arr__))
+        \\      (list 'let* (vector elt (list 'nth '__areduce_arr__ '__areduce_i__)
+        \\                          acc (list 'deref '__areduce_acc__))
+        \\        (list 'reset! '__areduce_acc__ expr)))
+        \\    (list 'deref '__areduce_acc__)))
         ,
     };
 
@@ -473,6 +497,11 @@ pub fn main() !void {
     // ── Incremental compilation registry (green tier) ────────────
     var incr_registry = incr.IncrRegistry.init(allocator);
     defer incr_registry.deinit();
+
+    // ── Tier policy: hysteresis-based dynamic tier selection ─────
+    const tier_policy_mod = @import("tier_policy.zig");
+    var tier_policy = tier_policy_mod.TierPolicy.init(allocator);
+    defer tier_policy.deinit();
 
     // ── Bytecode prelude: core higher-order functions ────────────
     // ── Macro prelude: standard Clojure macros ────────────────────
@@ -643,6 +672,23 @@ pub fn main() !void {
             continue;
         }
 
+        // Tier policy introspection
+        if (std.mem.eql(u8, line, "(tier-policy)")) {
+            var tbuf: [256]u8 = undefined;
+            const count = tier_policy.profiles.count();
+            const msg = std.fmt.bufPrint(&tbuf, "tier-policy: {d} profiled expressions, thresholds: blue→red@{d} red→green@{d} demote@{d}", .{
+                count, tier_policy.promote_to_red, tier_policy.promote_to_green, tier_policy.demote_after_failures,
+            }) catch "tier-policy: ?";
+            compat.fileWriteAll(stdout, msg);
+            compat.fileWriteAll(stdout, "\n");
+            continue;
+        }
+        if (std.mem.eql(u8, line, "(tier-reset)")) {
+            tier_policy.reset();
+            compat.fileWriteAll(stdout, "tier-policy: reset\n");
+            continue;
+        }
+
         // Incremental compilation: (incr ...) and (incr-list)
         if (std.mem.startsWith(u8, line, "(incr")) {
             const result = incr.handleIncrCommand(line, &gc, &incr_registry);
@@ -710,14 +756,50 @@ pub fn main() !void {
             continue;
         }
 
-        const result = rep(line, &env, &gc) catch "Error: internal error";
+        // ── Tier-aware dispatch with hysteresis ─────────────────
+        const recommended = tier_policy.recommend(line, &gc, &env) catch tier_policy_mod.Tier.blue;
+        var actual_tier = recommended;
+        var result: []const u8 = "";
+        var tier_success = false;
+
+        // Try recommended tier, fall back on failure
+        if (actual_tier == .green) {
+            const green_result = incr.handleIncrCommand(line, &gc, &incr_registry);
+            if (!std.mem.startsWith(u8, green_result, "Error")) {
+                result = green_result;
+                tier_success = true;
+            } else {
+                actual_tier = .red; // fall through to red
+            }
+        }
+        if (actual_tier == .red and !tier_success) {
+            const bc_result = bcRep(line, &gc, allocator, &vm, &env);
+            if (!std.mem.startsWith(u8, bc_result, "Error")) {
+                result = bc_result;
+                tier_success = true;
+            } else {
+                actual_tier = .blue; // fall through to blue
+            }
+        }
+        if (!tier_success) {
+            actual_tier = .blue;
+            result = rep(line, &env, &gc) catch "Error: internal error";
+            tier_success = !std.mem.startsWith(u8, result, "Error");
+        }
+
+        // Record outcome for hysteresis learning
+        tier_policy.recordResult(line, actual_tier, tier_success, 0);
+
+        // Show tier badge when promoted above blue
+        if (actual_tier != .blue) {
+            var tier_buf: [32]u8 = undefined;
+            compat.fileWriteAll(stdout, tier_policy_mod.TierPolicy.formatStatus(actual_tier, &tier_buf));
+        }
+
         // Suppress nil output from comment-only lines
         if (!std.mem.eql(u8, result, "nil") or !isCommentOnly(line)) {
             compat.fileWriteAll(stdout, result);
             compat.fileWriteAll(stdout, "\n");
-        }
-        if (result.len > 0 and result[0] != 'E') {
-            allocator.free(result);
         }
     }
 }
@@ -754,10 +836,129 @@ test {
     _ = @import("datalog.zig");
     _ = @import("spi.zig");
     _ = @import("sector.zig");
+    _ = @import("flow.zig");
+    _ = @import("flow_value.zig");
     // sector_boot.zig: x86 real-mode only, skip on ARM/macOS
     _ = @import("regex.zig");
     _ = @import("pluralism.zig");
     _ = @import("holy.zig");
     _ = @import("congrunet.zig");
     _ = @import("decomp.zig");
+    _ = @import("tier_policy.zig");
+    _ = @import("refs_agents.zig");
+    _ = @import("eval.zig");
+}
+
+// ============================================================================
+// CLOJURE ARRAY API TESTS (amap / areduce / aset-char / aset-long)
+// ============================================================================
+
+fn evalSource(src: []const u8, env: *Env, gc: *GC) !Value {
+    const eval_mod = @import("eval.zig");
+    var reader = Reader.init(src, gc);
+    var last = Value.makeNil();
+    while (reader.pos < reader.src.len) {
+        const form = reader.readForm() catch break;
+        last = try eval_mod.eval(form, env, gc);
+    }
+    return last;
+}
+
+fn arrayApiTestEnv(env: *Env, gc: *GC) !void {
+    core.deinitCore();
+    try core.initCore(env, gc);
+    loadMacroPrelude(env, gc);
+}
+
+test "array api: make-array + aset-long + vec" {
+    const compat = @import("compat.zig");
+    var gpa = compat.makeDebugAllocator();
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var gc = GC.init(allocator);
+    defer gc.deinit();
+    var env = Env.init(allocator, null);
+    env.is_root = true;
+    defer env.deinit();
+    try arrayApiTestEnv(&env, &gc);
+    defer core.deinitCore();
+
+    const result = try evalSource(
+        \\(let* [a (make-array 3)]
+        \\  (dotimes [i 3] (aset-long a i (* i 2)))
+        \\  (vec a))
+    , &env, &gc);
+    try std.testing.expect(result.isObj());
+    try std.testing.expect(result.asObj().kind == .vector);
+    const items = result.asObj().data.vector.items.items;
+    try std.testing.expectEqual(@as(usize, 3), items.len);
+    try std.testing.expectEqual(@as(i48, 0), items[0].asInt());
+    try std.testing.expectEqual(@as(i48, 2), items[1].asInt());
+    try std.testing.expectEqual(@as(i48, 4), items[2].asInt());
+}
+
+test "array api: aset-char coerces code points" {
+    const compat = @import("compat.zig");
+    var gpa = compat.makeDebugAllocator();
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var gc = GC.init(allocator);
+    defer gc.deinit();
+    var env = Env.init(allocator, null);
+    env.is_root = true;
+    defer env.deinit();
+    try arrayApiTestEnv(&env, &gc);
+    defer core.deinitCore();
+
+    const result = try evalSource(
+        \\(let* [a (make-array 2)]
+        \\  (aset-char a 0 65)
+        \\  (aset-char a 1 90)
+        \\  (+ (aget a 0) (aget a 1)))
+    , &env, &gc);
+    try std.testing.expectEqual(@as(i48, 155), result.asInt());
+}
+
+test "array api: areduce folds elements" {
+    const compat = @import("compat.zig");
+    var gpa = compat.makeDebugAllocator();
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var gc = GC.init(allocator);
+    defer gc.deinit();
+    var env = Env.init(allocator, null);
+    env.is_root = true;
+    defer env.deinit();
+    try arrayApiTestEnv(&env, &gc);
+    defer core.deinitCore();
+
+    const result = try evalSource(
+        \\(areduce [1 2 3] i acc 0 (+ acc i))
+    , &env, &gc);
+    try std.testing.expectEqual(@as(i48, 6), result.asInt());
+}
+
+test "array api: amap doubles each element via aget" {
+    const compat = @import("compat.zig");
+    var gpa = compat.makeDebugAllocator();
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var gc = GC.init(allocator);
+    defer gc.deinit();
+    var env = Env.init(allocator, null);
+    env.is_root = true;
+    defer env.deinit();
+    try arrayApiTestEnv(&env, &gc);
+    defer core.deinitCore();
+
+    const result = try evalSource(
+        \\(amap [1 2 3] i ret (* 2 (aget ret i)))
+    , &env, &gc);
+    try std.testing.expect(result.isObj());
+    try std.testing.expect(result.asObj().kind == .vector);
+    const items = result.asObj().data.vector.items.items;
+    try std.testing.expectEqual(@as(usize, 3), items.len);
+    try std.testing.expectEqual(@as(i48, 2), items[0].asInt());
+    try std.testing.expectEqual(@as(i48, 4), items[1].asInt());
+    try std.testing.expectEqual(@as(i48, 6), items[2].asInt());
 }

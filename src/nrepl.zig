@@ -632,6 +632,8 @@ fn opEval(server: *Server, msg: bencode.BValue, session_id: ?[]const u8, msg_id:
         .{ "x-trit-phase", bencode.makeInt(@intCast(transitivity.tritPhase(session.eval_count))) },
         .{ "x-fuel-remaining", bencode.makeInt(@intCast(res.fuel)) },
         .{ "x-bounded", bencode.makeStr("true") },
+        .{ "x-tier", bencode.makeStr("blue") },
+        .{ "x-tier-trit", bencode.makeInt(-1) },
     }), a);
 }
 

@@ -94,6 +94,9 @@ pub const GC = struct {
                 .rational => .{ .rational = .{ .numerator = 0, .denominator = 1 } },
                 .color => .{ .color = .{} },
                 .channel => .{ .channel = .{} },
+                .agent => .{ .agent = .{} },
+                .file_handle => .{ .file_handle = .{ .fd = -1, .closed = true } },
+                .bytes => .{ .bytes = .{ .data = &.{}, .owned = false } },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -214,9 +217,22 @@ pub const GC = struct {
                     for (cur.data.channel.buf.items) |v| self.enqueueVal(v, &worklist);
                     for (cur.data.channel.pending_puts.items) |v| self.enqueueVal(v, &worklist);
                 },
+                .agent => {
+                    const a = &cur.data.agent;
+                    self.enqueueVal(a.state, &worklist);
+                    self.enqueueVal(a.validator, &worklist);
+                    self.enqueueVal(a.error_state, &worklist);
+                    self.enqueueVal(a.error_handler, &worklist);
+                    for (a.mailbox.items) |action| {
+                        self.enqueueVal(action.func, &worklist);
+                        for (action.args.items) |v| self.enqueueVal(v, &worklist);
+                    }
+                },
                 .trace => {
                     for (cur.data.trace.site_values.items) |v| self.enqueueVal(v, &worklist);
                 },
+                .file_handle => {}, // no Value refs; fd is plain
+                .bytes => {}, // raw []u8; no Value refs
             }
         }
     }
@@ -297,6 +313,18 @@ pub const GC = struct {
             .channel => {
                 obj.data.channel.buf.deinit(self.allocator);
                 obj.data.channel.pending_puts.deinit(self.allocator);
+            },
+            .agent => {
+                obj.data.agent.deinit(self.allocator);
+            },
+            .file_handle => {
+                obj.data.file_handle.close();
+                if (obj.data.file_handle.path.len > 0) {
+                    self.allocator.free(obj.data.file_handle.path);
+                }
+            },
+            .bytes => {
+                obj.data.bytes.deinit(self.allocator);
             },
         }
         self.allocator.destroy(obj);

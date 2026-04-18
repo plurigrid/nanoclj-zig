@@ -73,7 +73,7 @@ pub fn runsTest(seed: u64, count: u64) struct { pass: bool, stat: f64 } {
     // Generate SplitMix sequence and count runs
     var runs: u64 = 1;
     var prev = substrate.mix64(seed +% substrate.GOLDEN);
-    for (1..n) |i| {
+    for (1..@as(usize, @intCast(n))) |i| {
         const curr = substrate.mix64(seed +% @as(u64, i) *% substrate.GOLDEN);
         // New run whenever direction changes
         const prev_up = prev < curr;
@@ -103,7 +103,7 @@ pub fn birthdayTest(seed: u64, count: u64) struct { pass: bool, stat: f64 } {
 
     // Hash values into 360 bins (hue space)
     var bins = [_]u32{0} ** 360;
-    for (0..n) |i| {
+    for (0..@as(usize, @intCast(n))) |i| {
         const v = substrate.mix64(seed +% @as(u64, i) *% substrate.GOLDEN);
         const bin: usize = @intCast(v % 360);
         bins[bin] += 1;

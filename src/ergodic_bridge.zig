@@ -58,7 +58,7 @@ pub const WallClockBridge = struct {
         var g_hist = [_]u32{0} ** 256;
         var b_hist = [_]u32{0} ** 256;
 
-        for (0..n) |i| {
+        for (0..@as(usize, @intCast(n))) |i| {
             const c = substrate.colorAt(seed, @as(u64, i));
             // XOR-fold: order-independent fingerprint
             fingerprint ^= substrate.mix64(@as(u64, c.r) << 16 | @as(u64, c.g) << 8 | @as(u64, c.b));
@@ -131,7 +131,7 @@ pub const ColorBandwidth = struct {
         // Approximate: count unique 16-bit hashes
         var seen = [_]u8{0} ** 8192; // 65536 bits
 
-        for (0..n) |i| {
+        for (0..@as(usize, @intCast(n))) |i| {
             const c = substrate.colorAt(seed, @as(u64, i));
             r_hist[c.r] += 1;
             g_hist[c.g] += 1;
@@ -178,7 +178,7 @@ pub const ErgodicMeasure = struct {
         var mixing_time: u64 = n; // default: never reached
         const threshold: u64 = 324; // 90% of 360
 
-        for (0..n) |i| {
+        for (0..@as(usize, @intCast(n))) |i| {
             const c = substrate.colorAt(seed, @as(u64, i));
             const hue = gay_skills.rgbToHue(c.r, c.g, c.b);
             const bin: usize = @min(359, @as(usize, @intFromFloat(hue)));

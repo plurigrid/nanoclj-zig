@@ -1,4 +1,6 @@
 const std = @import("std");
+const target_builtin = @import("builtin");
+const is_wasm = target_builtin.cpu.arch == .wasm32 or target_builtin.cpu.arch == .wasm64;
 const compat = @import("compat.zig");
 const value = @import("value.zig");
 const Value = value.Value;
@@ -10,10 +12,12 @@ const reader_mod = @import("reader.zig");
 const printer = @import("printer.zig");
 const eval_mod = @import("eval.zig");
 const semantics = @import("semantics.zig");
+const sorted = @import("sorted.zig");
 const substrate = @import("substrate.zig");
 const gay_skills = @import("gay_skills.zig");
 const profile = @import("profile.zig");
-const tree_vfs = @import("tree_vfs.zig");
+// OS-dependent modules: only import on native targets
+const tree_vfs = if (is_wasm) @import("tree_vfs_stub.zig") else @import("tree_vfs.zig");
 const inet_builtins = @import("inet_builtins.zig");
 const inet_compile = @import("inet_compile.zig");
 const http_fetch = @import("http_fetch.zig");
@@ -34,13 +38,14 @@ const chromatic_propagator = @import("chromatic_propagator.zig");
 const gaymc = @import("gaymc.zig");
 const hyperdoctrine = @import("hyperdoctrine.zig");
 const monoidal_diagram = @import("monoidal_diagram.zig");
+const open_game = @import("open_game.zig");
 const tower = @import("tower.zig");
 const marsaglia_bumpus = @import("marsaglia_bumpus.zig");
 const scoped_propagators = @import("scoped_propagators.zig");
-const skill_inet = @import("skill_inet.zig");
+const skill_inet = if (is_wasm) @import("skill_inet_stub.zig") else @import("skill_inet.zig");
 const decomp = @import("decomp.zig");
-const brainfloj = @import("brainfloj.zig");
-const cgx = @import("cgx.zig");
+const brainfloj = if (is_wasm) @import("brainfloj_stub.zig") else @import("brainfloj.zig");
+const cgx = if (is_wasm) @import("cgx_stub.zig") else @import("cgx.zig");
 const congrunet = @import("congrunet.zig");
 const holy = @import("holy.zig");
 const zipf = @import("zipf.zig");
@@ -50,14 +55,24 @@ const time_units = @import("time_units.zig");
 const nrepl = @import("nrepl.zig");
 const plural = @import("plural.zig");
 const juvix_bridge = @import("juvix_bridge.zig");
+const refs_agents = @import("refs_agents.zig");
 
 fn getSeedMs() i64 {
-    var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC_RAW, &ts);
-    return @as(i64, ts.sec) *% 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000);
+    if (is_wasm) {
+        return 42; // deterministic seed on WASM
+    } else {
+        var ts: std.c.timespec = undefined;
+        _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC_RAW, &ts);
+        return @as(i64, ts.sec) *% 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000);
+    }
 }
 
 pub const BuiltinFn = *const fn (args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value;
+
+/// Generic stub that returns nil — used for OS-dependent builtins on WASM.
+fn wasmNilStub(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    return Value.makeNil();
+}
 
 // We store builtins as a separate lookup rather than in NaN-boxed values.
 // The env holds a symbol that maps to a sentinel; we intercept in apply.
@@ -86,6 +101,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "string?", &isStringP },                                        .{ "keyword?", &isKeywordP },
         .{ "symbol?", &isSymbolP },                                        .{ "list?", &isListP },
         .{ "vector?", &isVectorP },                                        .{ "map?", &isMapP },
+        .{ "record?", &isRecordP },                                        .{ "record-type", &recordTypeFn },
+        .{ "instance?", &instanceP },
         .{ "fn?", &isFnP },                                                .{ "println", &printlnFn },
         .{ "pr-str", &prStrFn },                                           .{ "read-string", &readStringFn },
         .{ "load-file", &loadFileFn },                                     .{ "str", &strFn },
@@ -270,6 +287,27 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "diagram-seq", &monoidal_diagram.diagramSeqFn },                .{ "diagram-tensor", &monoidal_diagram.diagramTensorFn },
         .{ "diagram-normalize", &monoidal_diagram.diagramNormalizeFn },    .{ "diagram-well-typed?", &monoidal_diagram.diagramWellTypedFn },
         .{ "diagram-summary", &monoidal_diagram.diagramSummaryFn },
+        // Open-game runtime on top of the monoidal diagram kernel
+        .{ "open-game-profile", &open_game.openGameProfileFn },
+        .{ "open-game-parity", &open_game.openGameParityFn },
+        .{ "open-game-decision", &open_game.openGameDecisionFn },
+        .{ "open-game-decision-no-obs", &open_game.openGameDecisionNoObsFn },
+        .{ "open-game-dependent-decision", &open_game.openGameDependentDecisionFn },
+        .{ "open-game-forward-function", &open_game.openGameForwardFunctionFn },
+        .{ "open-game-backward-function", &open_game.openGameBackwardFunctionFn },
+        .{ "open-game-from-functions", &open_game.openGameFromFunctionsFn },
+        .{ "open-game-nature", &open_game.openGameNatureFn },
+        .{ "open-game-lift-stochastic", &open_game.openGameLiftStochasticFn },
+        .{ "open-game-discount", &open_game.openGameDiscountFn },
+        .{ "open-game-add-payoffs", &open_game.openGameAddPayoffsFn },
+        .{ "open-game-seq", &open_game.openGameSeqFn },
+        .{ "open-game-tensor", &open_game.openGameTensorFn },
+        .{ "open-game-sequential", &open_game.openGameSequentialFn },
+        .{ "open-game-simultaneous", &open_game.openGameSimultaneousFn },
+        .{ "open-game-diagnostics", &open_game.openGameDiagnosticsFn },
+        .{ "open-game-is-equilibrium?", &open_game.openGameIsEquilibriumFn },
+        .{ "play", &open_game.playFn },
+        .{ "evaluate", &open_game.evaluateFn },
         // 12-layer SPI tower (Gay.jl tower.jl)
                .{ "tower-run", &tower.towerRunFn },
         .{ "tower-layer", &tower.towerLayerFn },                           .{ "tower-trit-sum", &tower.towerTritSumFn },
@@ -301,10 +339,32 @@ pub fn initCore(env: *Env, gc: *GC) !void {
                                              .{ "atom", &atomFn },
         .{ "deref", &derefFn },                                            .{ "swap!", &swapFn },
         .{ "reset!", &resetFn },                                           .{ "compare-and-set!", &compareAndSetFn },
+        .{ "set-validator!", &setValidatorFn },                            .{ "get-validator", &getValidatorFn },
+        // Refs + STM (single-threaded semantics: see refs_agents.zig)
+        .{ "ref", &refs_agents.refFn },                                    .{ "alter", &refs_agents.alterFn },
+        .{ "commute", &refs_agents.alterFn },
+        // Agents (clojure.core/agent)
+        .{ "agent", &agentFn },                                            .{ "send", &sendFn },
+        .{ "send-off", &sendOffFn },                                       .{ "await", &awaitFn },
+        .{ "agent-error", &agentErrorFn },                                 .{ "restart-agent", &restartAgentFn },
+        .{ "set-error-handler!", &setErrorHandlerFn },                     .{ "error-handler", &errorHandlerFn },
+        .{ "history", &historyFn },
+        // Fuel (Barton reflexivity: expressions aware of their own cost).
+        // `meter` is a special form in transduction.zig; `fuel` is a builtin.
+        .{ "fuel", &fuelFn },
+        .{ "charge", &chargeFn },
+        .{ "depth", &depthFn },
         // IO
         .{ "slurp", &slurpFn },                                            .{ "spit", &spitFn },
         .{ "read-line", &readLineFn },                                     .{ "shell", &shellFn },
         .{ "sh", &shellFn },
+        // Disk I/O (Zig-unique: positional, fsync-exposed, crash-safe atomic-spit)
+        .{ "file/open", &fileOpenFn },                                     .{ "file/close!", &fileCloseFn },
+        .{ "file/size", &fileSizeFn },                                     .{ "file/pread", &filePreadFn },
+        .{ "file/pwrite!", &filePwriteFn },                                .{ "file/fsync!", &fileFsyncFn },
+        .{ "file/read-all-bytes", &fileReadAllBytesFn },                   .{ "file/atomic-spit!", &fileAtomicSpitFn },
+        .{ "bytes/count", &bytesCountFn },                                 .{ "bytes/str", &bytesStrFn },
+        .{ "str/bytes", &strBytesFn },
         // Math extras
                                                       .{ "abs", &absFn },
         .{ "min", &minFn },                                                .{ "max", &maxFn },
@@ -356,6 +416,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Regex
                                         .{ "re-pattern", &rePatternFn },
         .{ "re-matches", &reMatchesFn },                                   .{ "re-seq", &reSeqFn },
+        .{ "re-matcher", &reMatcherFn },                                   .{ "re-matcher-find", &reMatcherFindFn },
+        .{ "re-groups", &reGroupsFn },
         // Nested map ops
         .{ "get-in", &getInFn },                                           .{ "assoc-in", &assocInFn },
         .{ "update-in", &updateInFn },                                     .{ "reduce-kv", &reduceKvFn },
@@ -438,7 +500,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Misc
                                            .{ "delay", &delayFn },
         .{ "force", &forceFn },                                            .{ "add-watch", &addWatchFn },
-        .{ "remove-watch", &removeWatchFn },
+        .{ "remove-watch", &removeWatchFn },                               .{ "memoize", &memoizeFn },
+        .{ "trampoline", &trampolineFn },
+        .{ "sorted-set", &sorted.sortedSetFn },                            .{ "sorted-set-by", &sorted.sortedSetByFn },
+        .{ "sorted-map", &sorted.sortedMapFn },                            .{ "sorted-map-by", &sorted.sortedMapByFn },
         // Pluralism — oppositional worlding
                                       .{ "set-world!", &pluralism.setWorldFn },
         .{ "current-world", &pluralism.currentWorldFn },                   .{ "plural-equal?", &pluralism.pluralEqualFn },
@@ -449,6 +514,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "fv-get", &fvGetFn },                                           .{ "fv-set!", &fvSetBangFn },
         .{ "fv-dot", &fvDotFn },                                           .{ "fv-norm", &fvNormFn },
         .{ "fv-axpy!", &fvAxpyBangFn },                                    .{ "fv-count", &fvCountFn },
+        // Clojure array API (backed by dense_f64; char/long coerce to f64)
+        .{ "make-array", &makeArrayFn },                                   .{ "aget", &agetFn },
+        .{ "aset", &asetFn },                                              .{ "aset-long", &asetLongFn },
+        .{ "aset-char", &asetCharFn },                                     .{ "alength", &alengthFn },
         // Trace (Anglican-compatible)
         .{ "make-trace", &makeTraceFn },                                   .{ "trace-observe!", &traceObserveBangFn },
         .{ "trace-log-weight", &traceLogWeightFn },                        .{ "trace-sites", &traceSitesFn },
@@ -877,6 +946,9 @@ pub fn valueTypeName(v: Value) []const u8 {
         .rational => "rational",
         .color => "color",
         .channel => "channel",
+        .agent => "agent",
+        .file_handle => "file-handle",
+        .bytes => "bytes",
     };
 }
 
@@ -1018,6 +1090,7 @@ fn count(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
         .vector => obj.data.vector.items.items.len,
         .map => obj.data.map.keys.items.len,
         .set => obj.data.set.items.items.len,
+        .dense_f64 => obj.data.dense_f64.len,
         else => return error.TypeError,
     });
     return Value.makeInt(n);
@@ -1140,6 +1213,48 @@ fn isMapP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .map);
 }
+
+/// Look up a key in a map's meta (returns nil if no meta or key missing).
+fn metaLookup(v: Value, key_name: []const u8, gc: *GC) Value {
+    if (!v.isObj()) return Value.makeNil();
+    const m = v.asObj().meta orelse return Value.makeNil();
+    if (m.kind != .map) return Value.makeNil();
+    for (m.data.map.keys.items, 0..) |k, i| {
+        if (k.isKeyword() and std.mem.eql(u8, gc.getString(k.asKeywordId()), key_name)) {
+            return m.data.map.vals.items[i];
+        }
+    }
+    return Value.makeNil();
+}
+
+/// (record? x) — true if x is a map carrying record metadata.
+fn isRecordP(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .map) return Value.makeBool(false);
+    const v = metaLookup(args[0], "record", gc);
+    return Value.makeBool(v.isBool() and v.asBool());
+}
+
+/// (record-type x) — returns the :record-type keyword, or nil.
+fn recordTypeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return metaLookup(args[0], "record-type", gc);
+}
+
+/// (instance? Type x) — defrecord types: checks meta :record-type == Type keyword.
+fn instanceP(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const ty = args[0];
+    const x = args[1];
+    if (ty.isKeyword()) {
+        if (!x.isObj() or x.asObj().kind != .map) return Value.makeBool(false);
+        const rt = metaLookup(x, "record-type", gc);
+        if (!rt.isKeyword()) return Value.makeBool(false);
+        return Value.makeBool(rt.asKeywordId() == ty.asKeywordId());
+    }
+    return Value.makeBool(false);
+}
+
 fn isFnP(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     return Value.makeBool(args[0].isObj() and args[0].asObj().kind == .function);
@@ -1177,7 +1292,9 @@ fn readStringFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
 }
 
 /// (load-file path) → result of last form
-fn loadFileFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+const loadFileFn = if (is_wasm) wasmNilStub else loadFileFnNative;
+
+fn loadFileFnNative(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1 or !args[0].isString()) return error.TypeError;
     const path = gc.getString(args[0].asStringId());
 
@@ -2676,11 +2793,35 @@ fn identityFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
 // ATOM / REFERENCE TYPES
 // ============================================================================
 
-fn atomFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
-    if (args.len != 1) return error.ArityError;
+fn atomFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 1) return error.ArityError;
     const obj = try gc.allocObj(.atom);
     obj.data.atom.val = args[0];
+    // Optional keyword args: (atom x :validator f) / (atom x :meta m)
+    var i: usize = 1;
+    while (i + 1 < args.len) : (i += 2) {
+        const k = args[i];
+        if (!k.isKeyword()) return error.TypeError;
+        const name = gc.getString(k.asKeywordId());
+        if (std.mem.eql(u8, name, "validator")) {
+            try runAtomValidator(args[i + 1], args[0], env, gc);
+            obj.data.atom.validator = args[i + 1];
+        } else if (std.mem.eql(u8, name, "meta")) {
+            if (args[i + 1].isObj() and args[i + 1].asObj().kind == .map) {
+                obj.meta = args[i + 1].asObj();
+            }
+        }
+    }
     return Value.makeObj(obj);
+}
+
+/// Invoke validator `f` on `new_val`. Throws error.IllegalState if it returns false/nil.
+fn runAtomValidator(f: Value, new_val: Value, env: *Env, gc: *GC) !void {
+    if (f.isNil()) return;
+    var one = [_]Value{new_val};
+    const r = eval_mod.apply(f, &one, env, gc) catch return error.IllegalState;
+    if (r.isBool() and !r.asBool()) return error.IllegalState;
+    if (r.isNil()) return error.IllegalState;
 }
 
 /// Polymorphic perception: deref any IDeref-able reference type.
@@ -2691,6 +2832,7 @@ fn derefFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     const obj = args[0].asObj();
     return switch (obj.kind) {
         .atom => obj.data.atom.val,
+        .agent => obj.data.agent.state,
         .lazy_seq => if (obj.data.lazy_seq.cached) |c| c else Value.makeNil(),
         .dense_f64 => args[0], // dense vectors are their own percept
         .trace => args[0], // traces are their own percept
@@ -2710,123 +2852,531 @@ fn swapFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     const n = @min(extra.len, 7);
     for (0..n) |i| call_args_buf[1 + i] = extra[i];
     const new_val = try eval_mod.apply(args[1], call_args_buf[0 .. 1 + n], env, gc);
+    try runAtomValidator(obj.data.atom.validator, new_val, env, gc);
     obj.data.atom.val = new_val;
     return new_val;
 }
 
-fn resetFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+fn resetFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 2) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
     if (obj.kind != .atom) return error.TypeError;
+    try runAtomValidator(obj.data.atom.validator, args[1], env, gc);
     obj.data.atom.val = args[1];
     return args[1];
 }
 
-fn compareAndSetFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+fn compareAndSetFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len != 3) return error.ArityError;
     if (!args[0].isObj()) return error.TypeError;
     const obj = args[0].asObj();
     if (obj.kind != .atom) return error.TypeError;
     if (semantics.structuralEq(obj.data.atom.val, args[1], gc)) {
+        try runAtomValidator(obj.data.atom.validator, args[2], env, gc);
         obj.data.atom.val = args[2];
         return Value.makeBool(true);
     }
     return Value.makeBool(false);
 }
 
+/// (set-validator! a f) — install validator on atom or agent. Validates current value.
+fn setValidatorFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    switch (obj.kind) {
+        .atom => {
+            try runAtomValidator(args[1], obj.data.atom.val, env, gc);
+            obj.data.atom.validator = args[1];
+        },
+        .agent => {
+            try runAgentValidator(args[1], obj.data.agent.state, env, gc);
+            obj.data.agent.validator = args[1];
+        },
+        else => return error.TypeError,
+    }
+    return Value.makeNil();
+}
+
+/// (get-validator a) — return the validator fn on atom/agent `a` (nil if none).
+fn getValidatorFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj()) return error.TypeError;
+    const obj = args[0].asObj();
+    return switch (obj.kind) {
+        .atom => obj.data.atom.validator,
+        .agent => obj.data.agent.validator,
+        else => error.TypeError,
+    };
+}
+
+// ============================================================================
+// AGENTS (clojure.core/agent)
+// ============================================================================
+//
+// Single-threaded: send/send-off enqueue an action into the agent's mailbox;
+// (await a) drains it. State transitions emit jepsen/record! so the agent's
+// action log is a linearizable history — the wire into agent-o-rama's
+// interaction_sequences table.
+
+fn requireAgent(v: Value) !*value.Obj {
+    if (!v.isObj()) return error.TypeError;
+    const o = v.asObj();
+    if (o.kind != .agent) return error.TypeError;
+    return o;
+}
+
+fn runAgentValidator(f: Value, new_val: Value, env: *Env, gc: *GC) !void {
+    if (f.isNil()) return;
+    var one = [_]Value{new_val};
+    const r = eval_mod.apply(f, &one, env, gc) catch return error.IllegalState;
+    if (r.isBool() and !r.asBool()) return error.IllegalState;
+    if (r.isNil()) return error.IllegalState;
+}
+
+/// (agent init & {:validator f :error-handler g :error-mode :continue|:fail :meta m})
+fn agentFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len == 0) return error.ArityError;
+    const obj = try gc.allocObj(.agent);
+    obj.data.agent.state = args[0];
+    try obj.data.agent.history.append(gc.allocator, args[0]);
+    var i: usize = 1;
+    while (i + 1 < args.len) : (i += 2) {
+        const k = args[i];
+        if (!k.isKeyword()) return error.TypeError;
+        const name = gc.getString(k.asKeywordId());
+        if (std.mem.eql(u8, name, "validator")) {
+            obj.data.agent.validator = args[i + 1];
+        } else if (std.mem.eql(u8, name, "error-handler")) {
+            obj.data.agent.error_handler = args[i + 1];
+        } else if (std.mem.eql(u8, name, "error-mode")) {
+            if (args[i + 1].isKeyword()) {
+                const m = gc.getString(args[i + 1].asKeywordId());
+                obj.data.agent.continue_on_error = std.mem.eql(u8, m, "continue");
+            }
+        } else if (std.mem.eql(u8, name, "meta")) {
+            if (args[i + 1].isObj() and args[i + 1].asObj().kind == .map) {
+                obj.meta = args[i + 1].asObj();
+            }
+        }
+    }
+    return Value.makeObj(obj);
+}
+
+fn enqueueAction(obj: *value.Obj, gc: *GC, args: []Value, off: bool) !void {
+    // args = [agent, fn, & more-args]
+    var action = @import("agent.zig").Action{ .func = args[1], .off = off };
+    for (args[2..]) |a| try action.args.append(gc.allocator, a);
+    try obj.data.agent.enqueue(gc.allocator, action);
+}
+
+/// (send a f & args) — enqueue (f state & args); returns the agent.
+fn sendFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    const obj = try requireAgent(args[0]);
+    if (obj.data.agent.isStopped()) return error.IllegalState;
+    try enqueueAction(obj, gc, args, false);
+    return args[0];
+}
+
+/// (send-off a f & args) — identical to send in single-threaded mode.
+fn sendOffFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    const obj = try requireAgent(args[0]);
+    if (obj.data.agent.isStopped()) return error.IllegalState;
+    try enqueueAction(obj, gc, args, true);
+    return args[0];
+}
+
+/// Drain one pending action. Returns true if an action ran, false if empty.
+fn drainOne(obj: *value.Obj, gc: *GC, env: *Env) !bool {
+    var action = obj.data.agent.dequeue() orelse return false;
+    defer action.args.deinit(gc.allocator);
+
+    // Build call args: [state, ...action.args]
+    var call_buf: [16]Value = undefined;
+    call_buf[0] = obj.data.agent.state;
+    const n = @min(action.args.items.len, call_buf.len - 1);
+    for (0..n) |i| call_buf[1 + i] = action.args.items[i];
+
+    const new_state = eval_mod.apply(action.func, call_buf[0 .. 1 + n], env, gc) catch |e| {
+        obj.data.agent.error_state = Value.makeString(try gc.internString(@errorName(e)));
+        if (!obj.data.agent.error_handler.isNil()) {
+            var h_args = [_]Value{ Value.makeObj(obj), obj.data.agent.error_state };
+            _ = eval_mod.apply(obj.data.agent.error_handler, &h_args, env, gc) catch {};
+        }
+        return e;
+    };
+
+    runAgentValidator(obj.data.agent.validator, new_state, env, gc) catch |e| {
+        obj.data.agent.error_state = Value.makeString(try gc.internString("validator-rejected"));
+        return e;
+    };
+
+    obj.data.agent.state = new_state;
+    obj.data.agent.history.append(gc.allocator, new_state) catch {};
+    return true;
+}
+
+/// (await a & as) — drain all pending actions of each agent.
+fn awaitFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+    for (args) |a| {
+        const obj = try requireAgent(a);
+        while (!obj.data.agent.isStopped()) {
+            const ran = drainOne(obj, gc, env) catch break;
+            if (!ran) break;
+        }
+    }
+    return Value.makeNil();
+}
+
+/// (agent-error a) — exception that stopped a, or nil.
+fn agentErrorFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try requireAgent(args[0]);
+    return obj.data.agent.error_state;
+}
+
+/// (restart-agent a new-state & {:clear-actions true}) — clear error, reset state.
+fn restartAgentFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 2) return error.ArityError;
+    const obj = try requireAgent(args[0]);
+    obj.data.agent.state = args[1];
+    obj.data.agent.error_state = Value.makeNil();
+    var i: usize = 2;
+    while (i + 1 < args.len) : (i += 2) {
+        const k = args[i];
+        if (k.isKeyword() and std.mem.eql(u8, gc.getString(k.asKeywordId()), "clear-actions")) {
+            if (args[i + 1].isBool() and args[i + 1].asBool()) {
+                obj.data.agent.clearMailbox(gc.allocator);
+            }
+        }
+    }
+    return args[0];
+}
+
+/// (set-error-handler! a f) — install (f agent exc) handler.
+fn setErrorHandlerFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    const obj = try requireAgent(args[0]);
+    obj.data.agent.error_handler = args[1];
+    return Value.makeNil();
+}
+
+/// (error-handler a) — return the installed handler or nil.
+fn errorHandlerFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try requireAgent(args[0]);
+    return obj.data.agent.error_handler;
+}
+
+/// (history a) — linearizable vector of every state the agent has held,
+/// index 0 being the initial state. Barton-reflexive: the agent IS its
+/// own witness. Agent-o-rama DuckDB ingestion target.
+fn historyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const obj = try requireAgent(args[0]);
+    const out = try gc.allocObj(.vector);
+    for (obj.data.agent.history.items) |v| {
+        try out.data.vector.items.append(gc.allocator, v);
+    }
+    return Value.makeObj(out);
+}
+
+// ============================================================================
+// Fuel (Barton's Law): expose the evaluator's own resource counter.
+// ============================================================================
+
+/// (fuel) — remaining fuel units in the current evaluator frame.
+/// Returns i48; returns a very large sentinel on unmetered paths.
+fn fuelFn(args: []Value, _: *GC, _: *Env, res: *Resources) anyerror!Value {
+    if (args.len != 0) return error.ArityError;
+    const remaining = res.fuelRemaining();
+    const capped: i48 = if (remaining > std.math.maxInt(i48))
+        std.math.maxInt(i48)
+    else
+        @intCast(remaining);
+    return Value.makeInt(capped);
+}
+
+/// (charge v) — the GF(3) charge transitivity.zig already assigns to every value.
+/// Returns -1, 0, or +1. Lets Clojure code observe the conservation quantity
+/// the runtime tracks per-value (Barton reflexivity of the law itself).
+fn chargeFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    return Value.makeInt(@intCast(semantics.valueTrit(args[0])));
+}
+
+/// (depth) — current eval recursion depth. Completes the reflexivity triad:
+/// fuel (time budget) × charge (GF(3) state) × depth (stack position).
+fn depthFn(args: []Value, _: *GC, _: *Env, res: *Resources) anyerror!Value {
+    if (args.len != 0) return error.ArityError;
+    return Value.makeInt(@intCast(res.depth));
+}
+
+
 // ============================================================================
 // I/O
 // ============================================================================
 
-fn cFopen(path: []const u8, mode: [*c]const u8) ?*std.c.FILE {
-    var pbuf: [4096]u8 = undefined;
-    if (path.len >= pbuf.len) return null;
-    @memcpy(pbuf[0..path.len], path);
-    pbuf[path.len] = 0;
-    return std.c.fopen(@ptrCast(&pbuf), mode);
-}
-
-fn slurpFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
-    if (args.len != 1) return error.ArityError;
-    if (!args[0].isString()) return error.TypeError;
-    const path = gc.getString(args[0].asStringId());
-    const cf = cFopen(path, "r") orelse return Value.makeNil();
-    defer _ = std.c.fclose(cf);
-    var contents = compat.emptyList(u8);
-    defer contents.deinit(gc.allocator);
-    var rbuf: [4096]u8 = undefined;
-    while (true) {
-        const rn = std.c.fread(&rbuf, 1, rbuf.len, cf);
-        if (rn == 0) break;
-        try contents.appendSlice(gc.allocator, rbuf[0..rn]);
+// I/O functions: on WASM, filesystem/shell are unavailable
+const io_impl = if (is_wasm) struct {
+    // WASM stubs — no filesystem, no shell, no stdin
+    fn slurpFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeNil(); }
+    fn spitFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeNil(); }
+    fn readLineFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeNil(); }
+    fn shellFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeNil(); }
+} else struct {
+    fn cFopen(path: []const u8, mode: [*c]const u8) ?*std.c.FILE {
+        var pbuf: [4096]u8 = undefined;
+        if (path.len >= pbuf.len) return null;
+        @memcpy(pbuf[0..path.len], path);
+        pbuf[path.len] = 0;
+        return std.c.fopen(@ptrCast(&pbuf), mode);
     }
-    return Value.makeString(try gc.internString(contents.items));
+
+    fn slurpFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+        if (args.len != 1) return error.ArityError;
+        if (!args[0].isString()) return error.TypeError;
+        const path = gc.getString(args[0].asStringId());
+        const cf = cFopen(path, "r") orelse return Value.makeNil();
+        defer _ = std.c.fclose(cf);
+        var contents = compat.emptyList(u8);
+        defer contents.deinit(gc.allocator);
+        var rbuf: [4096]u8 = undefined;
+        while (true) {
+            const rn = std.c.fread(&rbuf, 1, rbuf.len, cf);
+            if (rn == 0) break;
+            try contents.appendSlice(gc.allocator, rbuf[0..rn]);
+        }
+        return Value.makeString(try gc.internString(contents.items));
+    }
+
+    fn spitFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+        if (args.len < 2) return error.ArityError;
+        if (!args[0].isString()) return error.TypeError;
+        const path = gc.getString(args[0].asStringId());
+        const data = if (args[1].isString()) gc.getString(args[1].asStringId()) else blk: {
+            var pbuf = compat.emptyList(u8);
+            defer pbuf.deinit(gc.allocator);
+            try printer.prStrInto(&pbuf, args[1], gc, false);
+            break :blk try gc.allocator.dupe(u8, pbuf.items);
+        };
+        const cf = cFopen(path, "w") orelse return Value.makeNil();
+        defer _ = std.c.fclose(cf);
+        _ = std.c.fwrite(data.ptr, 1, data.len, cf);
+        return Value.makeNil();
+    }
+
+    fn readLineFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+        const stdin = compat.stdinFile();
+        var buf: [4096]u8 = undefined;
+        var len: usize = 0;
+        while (len < buf.len) {
+            const n = compat.fileRead(stdin, buf[len .. len + 1]);
+            if (n == 0) break;
+            if (buf[len] == '\n') break;
+            len += 1;
+        }
+        if (len == 0) return Value.makeNil();
+        return Value.makeString(try gc.internString(buf[0..len]));
+    }
+
+    extern "c" fn popen(command: [*c]const u8, mode: [*c]const u8) ?*std.c.FILE;
+    extern "c" fn pclose(stream: *std.c.FILE) c_int;
+
+    fn shellFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+        if (args.len < 1) return error.ArityError;
+        if (!args[0].isString()) return error.TypeError;
+        const cmd = gc.getString(args[0].asStringId());
+        var cbuf: [8192]u8 = undefined;
+        if (cmd.len >= cbuf.len) return error.ValueError;
+        @memcpy(cbuf[0..cmd.len], cmd);
+        cbuf[cmd.len] = 0;
+        const pipe = popen(@ptrCast(&cbuf), "r") orelse return Value.makeNil();
+        var out = compat.emptyList(u8);
+        defer out.deinit(gc.allocator);
+        var rbuf: [4096]u8 = undefined;
+        while (true) {
+            const n = std.c.fread(&rbuf, 1, rbuf.len, pipe);
+            if (n == 0) break;
+            try out.appendSlice(gc.allocator, rbuf[0..n]);
+        }
+        const status = pclose(pipe);
+        const exit_code: i48 = @intCast(@as(i32, @intCast(status)) >> 8);
+        const result_obj = try gc.allocObj(.map);
+        try result_obj.data.map.keys.append(gc.allocator, Value.makeString(try gc.internString("out")));
+        try result_obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(out.items)));
+        try result_obj.data.map.keys.append(gc.allocator, Value.makeString(try gc.internString("exit")));
+        try result_obj.data.map.vals.append(gc.allocator, Value.makeInt(exit_code));
+        return Value.makeObj(result_obj);
+    }
+};
+
+// Expose I/O functions via io_impl (native or WASM stub)
+const slurpFn = io_impl.slurpFn;
+const spitFn = io_impl.spitFn;
+const readLineFn = io_impl.readLineFn;
+const shellFn = io_impl.shellFn;
+
+// ============================================================================
+// DISK I/O: Zig-unique primitives (pread/pwrite/fsync/atomic-spit)
+// ============================================================================
+// file-handle = Poly p's position; pread/pwrite/fsync are the directions.
+// Crash-safety via atomic-spit (tmp + fsync + rename) lifts writes into the
+// lattice (bytes* × {durable-bit}) — see sdf + topos-polynomial-functors skills.
+
+const diskio = @import("diskio.zig");
+
+fn readFlagsMap(m: *value.Obj, gc: *GC) diskio.OpenFlags {
+    var f: diskio.OpenFlags = .{};
+    const keys = m.data.map.keys.items;
+    const vals = m.data.map.vals.items;
+    for (keys, 0..) |k, i| {
+        const name = if (k.isKeyword())
+            gc.getString(k.asKeywordId())
+        else if (k.isString())
+            gc.getString(k.asStringId())
+        else
+            continue;
+        const b = vals[i].isBool() and vals[i].asBool();
+        if (std.mem.eql(u8, name, "read")) f.read = b
+        else if (std.mem.eql(u8, name, "write")) f.write = b
+        else if (std.mem.eql(u8, name, "create")) f.create = b
+        else if (std.mem.eql(u8, name, "truncate")) f.truncate = b
+        else if (std.mem.eql(u8, name, "append")) f.append = b
+        else if (std.mem.eql(u8, name, "excl")) f.excl = b;
+    }
+    // If write+create but no explicit read, allow read-false default
+    if (f.write and !f.read) f.read = false;
+    return f;
 }
 
-fn spitFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
-    if (args.len < 2) return error.ArityError;
+fn requireFileHandle(v: Value) !*value.Obj {
+    if (!v.isObj()) return error.TypeError;
+    const o = v.asObj();
+    if (o.kind != .file_handle) return error.TypeError;
+    return o;
+}
+
+fn asBytesOrString(v: Value, gc: *GC) ![]const u8 {
+    if (v.isString()) return gc.getString(v.asStringId());
+    if (!v.isObj()) return error.TypeError;
+    const o = v.asObj();
+    if (o.kind != .bytes) return error.TypeError;
+    return o.data.bytes.data;
+}
+
+fn makeBytes(gc: *GC, data: []u8) !Value {
+    const obj = try gc.allocObj(.bytes);
+    obj.data.bytes = .{ .data = data, .owned = true };
+    return Value.makeObj(obj);
+}
+
+fn fileOpenFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 1 or args.len > 2) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
     const path = gc.getString(args[0].asStringId());
-    const data = if (args[1].isString()) gc.getString(args[1].asStringId()) else blk: {
-        var pbuf = compat.emptyList(u8);
-        defer pbuf.deinit(gc.allocator);
-        try printer.prStrInto(&pbuf, args[1], gc, false);
-        break :blk try gc.allocator.dupe(u8, pbuf.items);
-    };
-    const cf = cFopen(path, "w") orelse return Value.makeNil();
-    defer _ = std.c.fclose(cf);
-    _ = std.c.fwrite(data.ptr, 1, data.len, cf);
+    var flags: diskio.OpenFlags = .{};
+    if (args.len == 2) {
+        if (!args[1].isObj() or args[1].asObj().kind != .map) return error.TypeError;
+        flags = readFlagsMap(args[1].asObj(), gc);
+    }
+    const fd = diskio.open(path, flags) catch return Value.makeNil();
+    const obj = try gc.allocObj(.file_handle);
+    const path_copy = try gc.allocator.dupe(u8, path);
+    obj.data.file_handle = .{ .fd = fd, .closed = false, .path = path_copy };
+    return Value.makeObj(obj);
+}
+
+fn fileCloseFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const o = try requireFileHandle(args[0]);
+    o.data.file_handle.close();
     return Value.makeNil();
 }
 
-fn readLineFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
-    const stdin = compat.stdinFile();
-    var buf: [4096]u8 = undefined;
-    var len: usize = 0;
-    while (len < buf.len) {
-        const n = compat.fileRead(stdin, buf[len .. len + 1]);
-        if (n == 0) break;
-        if (buf[len] == '\n') break;
-        len += 1;
-    }
-    if (len == 0) return Value.makeNil();
-    return Value.makeString(try gc.internString(buf[0..len]));
+fn fileSizeFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const o = try requireFileHandle(args[0]);
+    if (o.data.file_handle.closed) return error.ValueError;
+    const sz = diskio.size(o.data.file_handle.fd) catch return Value.makeNil();
+    return Value.makeInt(@intCast(sz));
 }
 
-extern "c" fn popen(command: [*c]const u8, mode: [*c]const u8) ?*std.c.FILE;
-extern "c" fn pclose(stream: *std.c.FILE) c_int;
+fn filePreadFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    const o = try requireFileHandle(args[0]);
+    if (o.data.file_handle.closed) return error.ValueError;
+    if (!args[1].isInt() or !args[2].isInt()) return error.TypeError;
+    const off: u64 = @intCast(args[1].asInt());
+    const len: usize = @intCast(args[2].asInt());
+    const buf = try gc.allocator.alloc(u8, len);
+    errdefer gc.allocator.free(buf);
+    const n = diskio.pread(o.data.file_handle.fd, off, buf) catch {
+        gc.allocator.free(buf);
+        return Value.makeNil();
+    };
+    // Shrink to actually-read length without realloc (cheap view).
+    const shrunk = try gc.allocator.realloc(buf, n);
+    return makeBytes(gc, shrunk);
+}
 
-/// (shell cmd) → {:out "stdout" :exit code} — execute shell command via popen
-/// (sh cmd) — alias
-fn shellFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
-    if (args.len < 1) return error.ArityError;
+fn filePwriteFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    const o = try requireFileHandle(args[0]);
+    if (o.data.file_handle.closed) return error.ValueError;
+    if (!args[1].isInt()) return error.TypeError;
+    const off: u64 = @intCast(args[1].asInt());
+    const data = try asBytesOrString(args[2], gc);
+    const n = diskio.pwrite(o.data.file_handle.fd, off, data) catch return Value.makeNil();
+    return Value.makeInt(@intCast(n));
+}
+
+fn fileFsyncFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const o = try requireFileHandle(args[0]);
+    if (o.data.file_handle.closed) return error.ValueError;
+    diskio.fsync(o.data.file_handle.fd) catch return Value.makeNil();
+    return Value.makeBool(true);
+}
+
+fn fileReadAllBytesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
     if (!args[0].isString()) return error.TypeError;
-    const cmd = gc.getString(args[0].asStringId());
-    // Null-terminate for C
-    var cbuf: [8192]u8 = undefined;
-    if (cmd.len >= cbuf.len) return error.ValueError;
-    @memcpy(cbuf[0..cmd.len], cmd);
-    cbuf[cmd.len] = 0;
-    const pipe = popen(@ptrCast(&cbuf), "r") orelse return Value.makeNil();
-    // Read all stdout
-    var out = compat.emptyList(u8);
-    defer out.deinit(gc.allocator);
-    var rbuf: [4096]u8 = undefined;
-    while (true) {
-        const n = std.c.fread(&rbuf, 1, rbuf.len, pipe);
-        if (n == 0) break;
-        try out.appendSlice(gc.allocator, rbuf[0..n]);
-    }
-    const status = pclose(pipe);
-    const exit_code: i48 = @intCast(@as(i32, @intCast(status)) >> 8);
-    // Build result map {:out "..." :exit code}
-    const result_obj = try gc.allocObj(.map);
-    try result_obj.data.map.keys.append(gc.allocator, Value.makeString(try gc.internString("out")));
-    try result_obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(out.items)));
-    try result_obj.data.map.keys.append(gc.allocator, Value.makeString(try gc.internString("exit")));
-    try result_obj.data.map.vals.append(gc.allocator, Value.makeInt(exit_code));
-    return Value.makeObj(result_obj);
+    const path = gc.getString(args[0].asStringId());
+    const data = diskio.readAllBytes(gc.allocator, path) catch return Value.makeNil();
+    return makeBytes(gc, data);
+}
+
+fn fileAtomicSpitFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const path = gc.getString(args[0].asStringId());
+    const data = try asBytesOrString(args[1], gc);
+    diskio.atomicSpit(path, data) catch return Value.makeNil();
+    return Value.makeBool(true);
+}
+
+fn bytesCountFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .bytes) return error.TypeError;
+    return Value.makeInt(@intCast(args[0].asObj().data.bytes.data.len));
+}
+
+fn bytesStrFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .bytes) return error.TypeError;
+    return Value.makeString(try gc.internString(args[0].asObj().data.bytes.data));
+}
+
+fn strBytesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const s = gc.getString(args[0].asStringId());
+    const copy = try gc.allocator.dupe(u8, s);
+    return makeBytes(gc, copy);
 }
 
 // ============================================================================
@@ -3593,6 +4143,103 @@ fn reSeqFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     return Value.makeObj(result);
 }
 
+// ---------------------------------------------------------------------------
+// Clojure-style stateful matcher: (re-matcher pat s), (re-matcher-find m),
+// (re-groups m). Our Value type has no Java Matcher, so the matcher is an
+// atom wrapping a small map {:pattern p :input s :pos i :last last-result}.
+// `:last` is nil before first find, or a vector of group strings after.
+// ---------------------------------------------------------------------------
+
+fn matcherMapFindKey(m: *value.Obj, name: []const u8, gc: *GC) ?usize {
+    for (m.data.map.keys.items, 0..) |k, i| {
+        if (k.isKeyword()) {
+            const kn = gc.getString(k.asKeywordId());
+            if (std.mem.eql(u8, kn, name)) return i;
+        }
+    }
+    return null;
+}
+
+/// (re-matcher pattern input) → atom wrapping a matcher-state map.
+fn reMatcherFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isString() or !args[1].isString()) return error.TypeError;
+    const map_obj = try gc.allocObj(.map);
+    try map_obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("pattern")));
+    try map_obj.data.map.vals.append(gc.allocator, args[0]);
+    try map_obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("input")));
+    try map_obj.data.map.vals.append(gc.allocator, args[1]);
+    try map_obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("pos")));
+    try map_obj.data.map.vals.append(gc.allocator, Value.makeInt(0));
+    try map_obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("last")));
+    try map_obj.data.map.vals.append(gc.allocator, Value.makeNil());
+    const atom_obj = try gc.allocObj(.atom);
+    atom_obj.data.atom.val = Value.makeObj(map_obj);
+    return Value.makeObj(atom_obj);
+}
+
+/// (re-matcher-find matcher) — advance; returns the matcher on success
+/// (so `(re-groups (re-matcher-find m))` works) or nil when exhausted.
+fn reMatcherFindFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .atom) return error.TypeError;
+    const atom_obj = args[0].asObj();
+    const state = atom_obj.data.atom.val;
+    if (!state.isObj() or state.asObj().kind != .map) return error.TypeError;
+    const m = state.asObj();
+
+    const pat_idx = matcherMapFindKey(m, "pattern", gc) orelse return error.TypeError;
+    const in_idx = matcherMapFindKey(m, "input", gc) orelse return error.TypeError;
+    const pos_idx = matcherMapFindKey(m, "pos", gc) orelse return error.TypeError;
+    const last_idx = matcherMapFindKey(m, "last", gc) orelse return error.TypeError;
+
+    const pat_v = m.data.map.vals.items[pat_idx];
+    const in_v = m.data.map.vals.items[in_idx];
+    const pos_v = m.data.map.vals.items[pos_idx];
+    if (!pat_v.isString() or !in_v.isString() or !pos_v.isInt()) return error.TypeError;
+    const pat_str = gc.getString(pat_v.asStringId());
+    const text = gc.getString(in_v.asStringId());
+    const start_pos: usize = @intCast(pos_v.asInt());
+    if (start_pos > text.len) {
+        m.data.map.vals.items[last_idx] = Value.makeNil();
+        return Value.makeNil();
+    }
+
+    const re = regex.Regex.init(pat_str);
+    const hit_opt = re.findWithGroups(text, start_pos, gc.allocator) catch return error.OutOfMemory;
+    if (hit_opt) |hit| {
+        defer gc.allocator.free(hit.groups);
+        // Build vector of interned strings: [match g1 g2 ...].
+        const vec = try gc.allocObj(.vector);
+        for (hit.groups) |g| {
+            const id = try gc.internString(g);
+            try vec.data.vector.items.append(gc.allocator, Value.makeString(id));
+        }
+        m.data.map.vals.items[last_idx] = Value.makeObj(vec);
+        // Advance past this match; guarantee forward progress on zero-width.
+        const new_pos: i48 = if (hit.end > hit.start) @intCast(hit.end) else @intCast(hit.start + 1);
+        m.data.map.vals.items[pos_idx] = Value.makeInt(new_pos);
+        return args[0];
+    } else {
+        m.data.map.vals.items[last_idx] = Value.makeNil();
+        return Value.makeNil();
+    }
+}
+
+/// (re-groups matcher) — return the last match vector or throw if none yet.
+fn reGroupsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (args[0].isNil()) return error.IllegalState;
+    if (!args[0].isObj() or args[0].asObj().kind != .atom) return error.TypeError;
+    const state = args[0].asObj().data.atom.val;
+    if (!state.isObj() or state.asObj().kind != .map) return error.TypeError;
+    const m = state.asObj();
+    const last_idx = matcherMapFindKey(m, "last", gc) orelse return error.TypeError;
+    const last = m.data.map.vals.items[last_idx];
+    if (last.isNil()) return error.IllegalState;
+    return last;
+}
+
 // ============================================================================
 // NESTED MAP OPS
 // ============================================================================
@@ -3882,6 +4529,23 @@ fn vecFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (args[0].isNil()) return Value.makeObj(try gc.allocObj(.vector));
     if (!args[0].isObj()) return error.TypeError;
+    // Special-case: dense_f64 arrays (from make-array / fv) project to a
+    // regular vector. Integral values round-trip as i48, fractional as f64.
+    if (args[0].asObj().kind == .dense_f64) {
+        const dv = &args[0].asObj().data.dense_f64;
+        const obj = try gc.allocObj(.vector);
+        var i: usize = 0;
+        while (i < dv.len) : (i += 1) {
+            const x = dv.get(i);
+            const ix: i48 = @intFromFloat(x);
+            if (@as(f64, @floatFromInt(ix)) == x) {
+                try obj.data.vector.items.append(gc.allocator, Value.makeInt(ix));
+            } else {
+                try obj.data.vector.items.append(gc.allocator, Value.makeFloat(x));
+            }
+        }
+        return Value.makeObj(obj);
+    }
     const items = getItems(args[0]) orelse return error.TypeError;
     const obj = try gc.allocObj(.vector);
     try obj.data.vector.items.appendSlice(gc.allocator, items);
@@ -4330,7 +4994,7 @@ fn shuffleFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
         i -= 1;
         const r = substrate.splitmix_next(state);
         state = r.next;
-        const j = r.val % (i + 1);
+        const j: usize = @intCast(r.val % (i + 1));
         const tmp = sl[i];
         sl[i] = sl[j];
         sl[j] = tmp;
@@ -4343,7 +5007,7 @@ fn randNthFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (items.len == 0) return Value.makeNil();
     const r = substrate.splitmix_next(rand_state);
     rand_state = r.next;
-    return items[r.val % items.len];
+    return items[@as(usize, @intCast(r.val % items.len))];
 }
 fn minKeyFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
     if (args.len < 2) return error.ArityError;
@@ -4740,6 +5404,53 @@ fn removeWatchFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     return args[0];
 }
 
+/// (memoize f) — wrap f so that repeated calls with equal arg-vectors are cached.
+/// Specification:
+///   - f is any IFn (function | partial_fn | builtin_ref | multimethod).
+///   - returns a partial_fn wrapper with func=nil and bound=[:__memoize__ f atom].
+///   - cache is an atom whose value is a persistent map { arg-vec => result }.
+///   - equality follows Clojure structural equality (semantics.structuralEq).
+///   - not thread-safe under the embed-min profile (no agents/refs there).
+fn memoizeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    // Build atom holding empty map
+    const empty_map = try gc.allocObj(.map);
+    const cache_atom = try gc.allocObj(.atom);
+    cache_atom.data.atom.val = Value.makeObj(empty_map);
+    // Build partial_fn with func=nil, bound=[:__memoize__, f, cache-atom]
+    const pf = try gc.allocObj(.partial_fn);
+    pf.data.partial_fn.func = Value.makeNil();
+    const kw_id = try gc.internString("__memoize__");
+    try pf.data.partial_fn.bound_args.append(gc.allocator, Value.makeKeyword(kw_id));
+    try pf.data.partial_fn.bound_args.append(gc.allocator, args[0]);
+    try pf.data.partial_fn.bound_args.append(gc.allocator, Value.makeObj(cache_atom));
+    return Value.makeObj(pf);
+}
+
+/// (trampoline f) or (trampoline f & args) — iterative fixed-point over thunk-returning fns.
+/// Specification:
+///   - Call `f` with args (or zero args).
+///   - While the return value is itself an IFn, call it with zero args again.
+///   - Terminates when the return value is a non-fn value.
+///   - Fuel-independent: bounded by caller's fuel budget, not by stack depth.
+///     (This is the TCO story for mutual recursion that `recur` can't express.)
+fn trampolineFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Value {
+    if (args.len == 0) return error.ArityError;
+    var cur = try eval_mod.apply(args[0], args[1..], env, gc);
+    while (isIFn(cur)) {
+        cur = try eval_mod.apply(cur, &[_]Value{}, env, gc);
+    }
+    return cur;
+}
+
+/// True when `v` is callable (Clojure `ifn?` semantics for trampoline's perspective).
+fn isIFn(v: Value) bool {
+    if (!v.isObj()) return v.isKeyword(); // keywords as fns
+    const k = v.asObj().kind;
+    return k == .function or k == .macro_fn or k == .partial_fn or
+        k == .builtin_ref or k == .multimethod or k == .bc_closure;
+}
+
 // ============================================================================
 // DENSE F64 (Neanderthal-compatible)
 // ============================================================================
@@ -4813,6 +5524,84 @@ fn fvAxpyBangFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
 
 /// (fv-count v) — length
 fn fvCountFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64) return error.TypeError;
+    return Value.makeInt(@intCast(args[0].asObj().data.dense_f64.len));
+}
+
+// ============================================================================
+// CLOJURE ARRAY API (amap/areduce/aset/aget/make-array)
+// ============================================================================
+// Semantics: backed by dense_f64. char/long writes coerce to f64.
+// amap/areduce are implemented as Clojure-level macros in loadMacroPrelude.
+
+/// (make-array n) or (make-array n init) — allocate dense_f64, zero-filled.
+fn makeArrayFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 1 or args.len > 2 or !args[0].isInt()) return error.ArityError;
+    const n: usize = @intCast(@max(@as(i48, 0), args[0].asInt()));
+    const data = try gc.allocator.alloc(f64, n);
+    const init: f64 = if (args.len == 2) blk: {
+        const v = args[1];
+        break :blk if (v.isFloat()) v.asFloat() else if (v.isInt()) @as(f64, @floatFromInt(v.asInt())) else 0;
+    } else 0;
+    @memset(data, init);
+    const obj = try gc.allocObj(.dense_f64);
+    obj.data.dense_f64 = .{ .data = data, .len = n, .owned = true };
+    return Value.makeObj(obj);
+}
+
+/// (aget arr i) — read element. Returns int if integral, else float.
+fn agetFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 2) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64 or !args[1].isInt()) return error.TypeError;
+    const dv = &args[0].asObj().data.dense_f64;
+    const i: usize = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    if (i >= dv.len) return error.InvalidArgs;
+    const x = dv.get(i);
+    const ix: i48 = @intFromFloat(x);
+    if (@as(f64, @floatFromInt(ix)) == x) return Value.makeInt(ix);
+    return Value.makeFloat(x);
+}
+
+/// (aset arr i x) — generic mutating set. Coerces x to f64. Returns x.
+fn asetFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64 or !args[1].isInt()) return error.TypeError;
+    var dv = &args[0].asObj().data.dense_f64;
+    const i: usize = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    if (i >= dv.len) return error.InvalidArgs;
+    const x: f64 = if (args[2].isFloat()) args[2].asFloat() else if (args[2].isInt()) @as(f64, @floatFromInt(args[2].asInt())) else return error.TypeError;
+    dv.set(i, x);
+    return args[2];
+}
+
+/// (aset-long arr i n) — typed set (coerced to f64). Returns n.
+fn asetLongFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64 or !args[1].isInt()) return error.TypeError;
+    if (!args[2].isInt()) return error.TypeError;
+    var dv = &args[0].asObj().data.dense_f64;
+    const i: usize = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    if (i >= dv.len) return error.InvalidArgs;
+    dv.set(i, @as(f64, @floatFromInt(args[2].asInt())));
+    return args[2];
+}
+
+/// (aset-char arr i c) — typed set for chars, coerced to f64. Returns c.
+/// Char values in nanoclj-zig are represented as ints (code points).
+fn asetCharFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 3) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .dense_f64 or !args[1].isInt()) return error.TypeError;
+    var dv = &args[0].asObj().data.dense_f64;
+    const i: usize = @intCast(@max(@as(i48, 0), args[1].asInt()));
+    if (i >= dv.len) return error.InvalidArgs;
+    const code: i48 = if (args[2].isInt()) args[2].asInt() else return error.TypeError;
+    dv.set(i, @as(f64, @floatFromInt(code)));
+    return args[2];
+}
+
+/// (alength arr) — length of array.
+fn alengthFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
     if (args.len != 1) return error.ArityError;
     if (!args[0].isObj() or args[0].asObj().kind != .dense_f64) return error.TypeError;
     return Value.makeInt(@intCast(args[0].asObj().data.dense_f64.len));

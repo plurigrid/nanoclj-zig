@@ -59,6 +59,11 @@ pub const Port = struct {
     }
 };
 
+/// Plastic constant ρ ≈ 1.3247 (root of x³ = x + 1, generates GF(27) = GF(3³)).
+/// Plastic angle = 360° / ρ² ≈ 205.14° — optimal 2D dispersion for trees.
+const PLASTIC_ANGLE: f32 = 205.1442;
+const GOLDEN_ANGLE: f32 = 137.5078;
+
 /// A cell in the interaction net.
 pub const Cell = struct {
     kind: CellKind,
@@ -78,6 +83,36 @@ pub const Cell = struct {
             .sup => 0,
             .num_op => 0,
         };
+    }
+
+    /// Plastic-angle color for this cell, given its depth in the net and
+    /// which auxiliary port is being visualized.
+    /// Golden angle disperses by depth, plastic angle by port/arity — matching
+    /// the 2D geometry of interaction nets (branching × nesting).
+    pub fn plasticColor(self: *const Cell, depth: u32, port_idx: u8) u24 {
+        const base_hue: f32 = switch (self.trit()) {
+            1 => 240.0, // Blue (γ constructor)
+            -1 => 0.0, // Red  (δ duplicator)
+            0 => 120.0, // Green (ε/ι/σ neutral)
+            else => 120.0,
+        };
+        const hue = @mod(
+            base_hue + @as(f32, @floatFromInt(depth)) * GOLDEN_ANGLE + @as(f32, @floatFromInt(port_idx)) * PLASTIC_ANGLE,
+            360.0,
+        );
+        // Simple HSL→u24 (s=0.6, l=0.55)
+        const c = 0.54; // (1 - |2*0.55 - 1|) * 0.6
+        const h_prime = hue / 60.0;
+        const x = c * (1.0 - @abs(@mod(h_prime, 2.0) - 1.0));
+        var r1: f32 = 0;
+        var g1: f32 = 0;
+        var b1: f32 = 0;
+        if (h_prime < 1) { r1 = c; g1 = x; } else if (h_prime < 2) { r1 = x; g1 = c; } else if (h_prime < 3) { g1 = c; b1 = x; } else if (h_prime < 4) { g1 = x; b1 = c; } else if (h_prime < 5) { r1 = x; b1 = c; } else { r1 = c; b1 = x; }
+        const m: f32 = 0.28; // 0.55 - c/2
+        const r: u8 = @intFromFloat(@max(0, @min(255, (r1 + m) * 255.0)));
+        const g: u8 = @intFromFloat(@max(0, @min(255, (g1 + m) * 255.0)));
+        const b: u8 = @intFromFloat(@max(0, @min(255, (b1 + m) * 255.0)));
+        return (@as(u24, r) << 16) | (@as(u24, g) << 8) | b;
     }
 };
 

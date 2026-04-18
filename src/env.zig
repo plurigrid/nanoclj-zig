@@ -5,6 +5,9 @@ pub const Env = struct {
     parent: ?*Env,
     bindings: std.StringHashMap(Value),
     id_bindings: std.AutoHashMapUnmanaged(u48, Value) = .{},
+    /// Symbol IDs marked ^:dynamic (typically populated on the root env).
+    /// Lookup walks parents so descendants see ancestor marks.
+    dynamic_ids: std.AutoHashMapUnmanaged(u48, void) = .empty,
     allocator: std.mem.Allocator,
     marked: bool = false,
     is_root: bool = false, // true for the global env (not GC-tracked)
@@ -39,6 +42,28 @@ pub const Env = struct {
     pub fn deinit(self: *Env) void {
         self.bindings.deinit();
         self.id_bindings.deinit(self.allocator);
+        self.dynamic_ids.deinit(self.allocator);
+    }
+
+    /// Mark a symbol ID as dynamic on this env (promotes on root).
+    pub fn markDynamic(self: *Env, id: u48) !void {
+        try self.dynamic_ids.put(self.allocator, id, {});
+    }
+
+    /// True if this env or any ancestor has `id` flagged ^:dynamic.
+    pub fn isDynamic(self: *const Env, id: u48) bool {
+        if (self.dynamic_ids.contains(id)) return true;
+        if (self.parent) |p| return p.isDynamic(id);
+        return false;
+    }
+
+    /// Walk to the root (is_root=true or topmost) env.
+    pub fn rootEnv(self: *Env) *Env {
+        var e: *Env = self;
+        while (true) {
+            if (e.is_root) return e;
+            if (e.parent) |p| e = p else return e;
+        }
     }
 
     /// Lightweight deinit for small-env mode (no hash maps to free)

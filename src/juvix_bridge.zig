@@ -185,6 +185,9 @@ fn encodeValue(val: Value, gc: *GC) !Value {
         .dense_f64 => return try makeOpaqueKind(gc, "dense-f64"),
         .trace => return try makeOpaqueKind(gc, "trace"),
         .channel => return try makeOpaqueKind(gc, "channel"),
+        .agent => return try makeOpaqueKind(gc, "agent"),
+        .file_handle => return try makeOpaqueKind(gc, "file"),
+        .bytes => return try makeOpaqueKind(gc, "bytes"),
     }
 }
 

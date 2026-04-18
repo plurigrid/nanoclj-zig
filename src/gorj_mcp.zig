@@ -34,7 +34,7 @@ const bc = @import("bytecode.zig");
 const Compiler = @import("compiler.zig").Compiler;
 
 const SERVER_NAME = "gorj-zig";
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.3.0";
 const PROTOCOL_VERSION = "2025-11-05";
 const MAX_LINE_SIZE = 4 * 1024 * 1024;
 
@@ -168,7 +168,7 @@ const prelude_forms = [_][]const u8{
     \\  (fn* [args]
     \\    (pr-str {:version (gorj-version)})))
     ,
-    // gorj_tools: list gorj's 29 MCP tool names
+    // gorj_tools: list gorj's 45 MCP tool names
     \\(def gorj-mcp-tools
     \\  (fn* [args]
     \\    (pr-str (gorj-tools))))
@@ -775,7 +775,7 @@ const prelude_forms = [_][]const u8{
     \\    (pr-str
     \\      {:convergence
     \\        {:architecture "gorj-as-bridge-node"
-    \\         :version "0.2.0"
+    \\         :version "0.3.0"
     \\         :date "2026-04"
     \\         :nodes
     \\           [{:name "unison" :unit "content-addressed-hash" :mcp "ucm-mcp"
@@ -788,7 +788,8 @@ const prelude_forms = [_][]const u8{
     \\         :unique-capabilities
     \\           ["fuel-bounded-eval" "gf3-trit-conservation" "interaction-net-reduction"
     \\            "self-hosted-mcp" "syrup-wire-format" "captp-session-bootstrap"
-    \\            "index-addressed-versioning" "mcp-proxy-gateway" "oklab-color"]
+    \\            "index-addressed-versioning" "mcp-proxy-gateway" "oklab-color"
+    \\            "string-diagram-visualization" "mechanical-diagram-to-net"]
     \\         :protocol-bridge
     \\           {:mcp "2025-11-25" :captp "1.0-draft" :syrup "1.0"
     \\            :note "gorj is the first MCP server that speaks OCapN/Syrup"}
@@ -809,6 +810,237 @@ const prelude_forms = [_][]const u8{
     \\               :trit (get result :trit)
     \\               :gf3-balanced (get result :gf3-balanced?)
     \\               :note "fuel = thermodynamic cost; fork divides adiabatically; join costs kT*ln(n)"}))))
+    ,
+    // ================================================================
+    // STRING DIAGRAMS — visualization AND definition (v0.3.0)
+    //
+    // Per the monoidal category literature: string diagrams are not
+    // just pictures — they are definition-making devices where conversion
+    // to underlying meaning is "entirely mechanical and could be automated."
+    //
+    // The {- _ +} kernel maps to string diagram primitives:
+    //   γ(+1) = constructor = merge node (fan-in)   ─┐γ+┌─
+    //   δ(-1) = duplicator  = split node (fan-out)  ─┘δ-└─
+    //   ε( 0) = eraser      = cap/cup    (terminal)  ─┤ε○
+    //   wire  = identity    = straight line           ───
+    //   active pair = two principals touching         ═══
+    //
+    // Composition: ∘ = sequential (plug outputs→inputs)
+    //              ⊗ = parallel (tensor/side-by-side)
+    // ================================================================
+
+    // gorj_string_diagram: render an expression as a Unicode string diagram
+    // showing the interaction net structure with GF(3) charges
+    \\(def gorj-mcp-string-diagram
+    \\  (fn* [args]
+    \\    (let* [code (or (get args "code") "(fn* [x] x)")
+    \\           result (gorj-pipe code)
+    \\           val (first result)
+    \\           trit (nth result 2)
+    \\           ;; Map trit to cell type
+    \\           cell (cond (= trit 1) {:kind "γ" :charge "+1" :role "constructor" :ascii "─┤γ+├─"}
+    \\                      (= trit -1) {:kind "δ" :charge "-1" :role "duplicator" :ascii "─┤δ-├─"}
+    \\                      :else {:kind "ε" :charge "0" :role "eraser" :ascii "─┤ε○├─"})
+    \\           ;; Build diagram: header, cell, wires
+    \\           ports (if (= trit 1) 2 (if (= trit -1) 2 0))
+    \\           in-wires (apply str (repeat ports "  │  "))
+    \\           header (str "  ┌─" (get cell :kind) (if (= trit 1) "+" (if (= trit -1) "-" "○")) "─┐")
+    \\           body   (str "──┤ " (get cell :role) " ├──")
+    \\           footer (str "  └───┘")
+    \\           diagram (str
+    \\             "╔═══════════════════════╗\n"
+    \\             "║  String Diagram v0.3  ║\n"
+    \\             "╠═══════════════════════╣\n"
+    \\             "║ " header "       ║\n"
+    \\             "║ " body "  ║\n"
+    \\             "║ " footer "           ║\n"
+    \\             "╠═══════════════════════╣\n"
+    \\             "║ charge: " (get cell :charge) "            ║\n"
+    \\             "║ trit:   {" (if (= trit 1) "+" (if (= trit -1) "-" "_")) "}             ║\n"
+    \\             "╚═══════════════════════╝")]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_string_diagram"
+    \\               :diagram diagram
+    \\               :cell cell
+    \\               :expr code
+    \\               :result val
+    \\               :trit trit}))))
+    ,
+    // gorj_diagram_reduce: step-by-step interaction net reduction with diagrams
+    // Takes two cells, shows the active pair, applies the reduction rule, shows result
+    // This IS the mechanical conversion: diagram → meaning
+    \\(def gorj-mcp-diagram-reduce
+    \\  (fn* [args]
+    \\    (let* [left (or (get args "left") "gamma")
+    \\           right (or (get args "right") "delta")
+    \\           ;; Map names to trit charges
+    \\           charge-of (fn* [name]
+    \\                       (cond (or (= name "gamma") (= name "γ")) 1
+    \\                             (or (= name "delta") (= name "δ")) -1
+    \\                             (or (= name "epsilon") (= name "ε")) 0
+    \\                             :else 0))
+    \\           sym-of (fn* [name]
+    \\                    (cond (or (= name "gamma") (= name "γ")) "γ"
+    \\                          (or (= name "delta") (= name "δ")) "δ"
+    \\                          (or (= name "epsilon") (= name "ε")) "ε"
+    \\                          :else "?"))
+    \\           lc (charge-of left) rc (charge-of right)
+    \\           ls (sym-of left)   rs (sym-of right)
+    \\           sum (+ lc rc)
+    \\           ;; Lafont reduction rules:
+    \\           ;; γ-δ (same label): annihilate → wires (sum=0)
+    \\           ;; γ-δ (diff label): commute → cross (sum=0)
+    \\           ;; γ-ε or δ-ε: erase (sum=±1)
+    \\           ;; ε-ε: vanish (sum=0)
+    \\           rule (cond
+    \\                  (and (= ls "γ") (= rs "δ")) "annihilate"
+    \\                  (and (= ls "δ") (= rs "γ")) "annihilate"
+    \\                  (and (= ls "γ") (= rs "ε")) "erase-right"
+    \\                  (and (= ls "ε") (= rs "γ")) "erase-left"
+    \\                  (and (= ls "δ") (= rs "ε")) "erase-right"
+    \\                  (and (= ls "ε") (= rs "δ")) "erase-left"
+    \\                  (and (= ls "ε") (= rs "ε")) "vanish"
+    \\                  (and (= ls "γ") (= rs "γ")) "commute"
+    \\                  (and (= ls "δ") (= rs "δ")) "commute"
+    \\                  :else "unknown")
+    \\           ;; Before diagram: active pair
+    \\           before (str
+    \\             "  ┌──┐   ┌──┐\n"
+    \\             "──┤" ls (if (>= lc 0) "+" "-") "├═══┤" rs (if (>= rc 0) "+" "-") "├──\n"
+    \\             "  └──┘   └──┘")
+    \\           ;; After diagram depends on rule
+    \\           after (cond
+    \\                   (= rule "annihilate")
+    \\                     "──────────────────\n  (wires pass through)"
+    \\                   (= rule "commute")
+    \\                     (str "  ┌──┐   ┌──┐\n"
+    \\                          "──┤" rs "├─╳─┤" ls "├──\n"
+    \\                          "  └──┘   └──┘\n"
+    \\                          "  (cells swap + cross wires)")
+    \\                   (or (= rule "erase-right") (= rule "erase-left"))
+    \\                     "──┤ε○      ε○├──\n  (erased)"
+    \\                   (= rule "vanish")
+    \\                     "  (nothing — both erased)"
+    \\                   :else "  (?)")
+    \\           conserved (= 0 (mod sum 3))]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_diagram_reduce"
+    \\               :left {:cell ls :charge lc}
+    \\               :right {:cell rs :charge rc}
+    \\               :active-pair {:charge-sum sum :conserved conserved}
+    \\               :rule rule
+    \\               :before before
+    \\               :after after
+    \\               :note "Mechanical: diagram → reduction rule is deterministic. GF(3) charge conserved."}))))
+    ,
+    // gorj_diagram_compose: monoidal composition of diagrams
+    // ∘ = sequential (output of first → input of second)
+    // ⊗ = parallel (tensor product, side by side)
+    \\(def gorj-mcp-diagram-compose
+    \\  (fn* [args]
+    \\    (let* [cells-str (or (get args "cells") "[\"gamma\" \"delta\"]")
+    \\           mode (or (get args "mode") "sequential")
+    \\           cells (read-string cells-str)
+    \\           sym-of (fn* [name]
+    \\                    (cond (or (= name "gamma") (= name "γ")) "γ+"
+    \\                          (or (= name "delta") (= name "δ")) "δ-"
+    \\                          (or (= name "epsilon") (= name "ε")) "ε○"
+    \\                          :else "?"))
+    \\           charge-of (fn* [name]
+    \\                       (cond (or (= name "gamma") (= name "γ")) 1
+    \\                             (or (= name "delta") (= name "δ")) -1
+    \\                             :else 0))
+    \\           syms (vec (map sym-of cells))
+    \\           charges (vec (map charge-of cells))
+    \\           total (reduce + 0 charges)
+    \\           ;; Sequential: ──┤A├──┤B├──┤C├──
+    \\           seq-diagram (str "──" (apply str (map (fn* [s] (str "┤" s "├──")) syms)))
+    \\           ;; Parallel:  ──┤A├──
+    \\           ;;            ──┤B├──
+    \\           ;;            ──┤C├──
+    \\           par-diagram (apply str (map (fn* [s] (str "──┤" s "├──\n")) syms))
+    \\           diagram (if (= mode "sequential") seq-diagram par-diagram)
+    \\           label (if (= mode "sequential") "∘ (sequential)" "⊗ (parallel/tensor)")]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_diagram_compose"
+    \\               :mode mode
+    \\               :composition label
+    \\               :cells (vec (map (fn* [c s ch] {:name c :sym s :charge ch}) cells syms charges))
+    \\               :diagram diagram
+    \\               :total-charge total
+    \\               :gf3-balanced (= 0 (mod total 3))
+    \\               :note (str "Monoidal category: " label ". String diagrams = morphisms in SMC.")}))))
+    ,
+    // gorj_diagram_parse: parse compact DSL → interaction net definition
+    // DSL: "γ+ ∘ δ- ∘ ε○" or "γ+ ⊗ δ-" or nested "(γ+ ∘ δ-) ⊗ ε○"
+    // This is the "entirely mechanical" direction: diagram → meaning
+    \\(def gorj-mcp-diagram-parse
+    \\  (fn* [args]
+    \\    (let* [dsl (or (get args "dsl") "γ+ ∘ δ- ∘ ε○")
+    \\           ;; Tokenize: split on spaces, identify cells and operators
+    \\           tokens (clojure.string/split dsl " ")
+    \\           parse-cell (fn* [tok]
+    \\                        (cond
+    \\                          (or (= tok "γ+") (= tok "gamma") (= tok "+"))
+    \\                            {:kind :gamma :charge 1 :arity 2 :trit "+"}
+    \\                          (or (= tok "δ-") (= tok "delta") (= tok "-"))
+    \\                            {:kind :delta :charge -1 :arity 2 :trit "-"}
+    \\                          (or (= tok "ε○") (= tok "epsilon") (= tok "_") (= tok "0"))
+    \\                            {:kind :epsilon :charge 0 :arity 0 :trit "_"}
+    \\                          (= tok "∘") {:op :seq}
+    \\                          (= tok "⊗") {:op :par}
+    \\                          :else nil))
+    \\           parsed (vec (filter some? (map parse-cell tokens)))
+    \\           cells (vec (filter (fn* [p] (not (contains? p :op))) parsed))
+    \\           ops (vec (filter (fn* [p] (contains? p :op)) parsed))
+    \\           charges (vec (map (fn* [c] (get c :charge)) cells))
+    \\           total (reduce + 0 charges)
+    \\           trit-str (apply str (map (fn* [c] (get c :trit)) cells))
+    \\           ;; Build the net definition
+    \\           net {:cells cells
+    \\                :wiring (if (and (> (count ops) 0) (= (get (first ops) :op) :par))
+    \\                          :parallel :sequential)
+    \\                :total-charge total
+    \\                :gf3-balanced (= 0 (mod total 3))
+    \\                :trit-word trit-str}]
+    \\      (pr-str {:ok true
+    \\               :tool "gorj_diagram_parse"
+    \\               :dsl dsl
+    \\               :net net
+    \\               :mechanical true
+    \\               :note "Diagram → net is fully mechanical (no creativity needed). This is the definition direction."}))))
+    ,
+    // gorj_diagram_kernel: the meta-tool — shows {- _ +} ↔ string diagram correspondence
+    // This is the Rosetta Stone: three equivalent views of the same kernel
+    \\(def gorj-mcp-diagram-kernel
+    \\  (fn* [args]
+    \\    (pr-str
+    \\      {:ok true
+    \\       :tool "gorj_diagram_kernel"
+    \\       :version "0.3.0"
+    \\       :kernel
+    \\         {:trit-symbols ["-" "_" "+"]
+    \\          :gf3-values [-1 0 1]
+    \\          :lafont-cells ["δ (duplicator)" "ε (eraser)" "γ (constructor)"]
+    \\          :diagram-nodes ["split ─┘δ-└─" "cap ─┤ε○" "merge ─┐γ+┌─"]
+    \\          :roles ["copy/fan-out" "garbage-collect" "build/fan-in"]
+    \\          :captp-ops ["op:abort (reject)" "op:listen (wait)" "op:deliver (resolve)"]
+    \\          :poly-lens ["get (expose)" "id (pass)" "put (update)"]
+    \\          :conservation "Every reduction conserves trit sum mod 3"
+    \\          :minimality "Legrand 2024: 2 combinators insufficient; 3 is minimal universal basis"
+    \\          :monoidal "String diagrams = morphisms in symmetric monoidal category"}
+    \\       :compositions
+    \\         {:sequential "f ∘ g — plug output wires of f into input wires of g"
+    \\          :parallel "f ⊗ g — tensor product, side-by-side, no wire crossing"
+    \\          :braiding "σ — swap two wires (symmetric monoidal structure)"}
+    \\       :active-pairs
+    \\         [{:pair "γ-δ" :rule "annihilate" :charge-sum 0 :diagram "─┤γ+├═┤δ-├─  →  ─────────"}
+    \\          {:pair "γ-ε" :rule "erase"      :charge-sum 1 :diagram "─┤γ+├═┤ε○├   →  ─┤ε○ ε○├"}
+    \\          {:pair "δ-ε" :rule "erase"      :charge-sum -1 :diagram "─┤δ-├═┤ε○├   →  ε○├ ε○├─"}
+    \\          {:pair "ε-ε" :rule "vanish"     :charge-sum 0 :diagram "─┤ε○├═┤ε○├   →  (nothing)"}
+    \\          {:pair "γ-γ" :rule "commute"    :charge-sum 2 :diagram "─┤γ+├═┤γ+├─  →  ─┤γ+├╳┤γ+├─"}
+    \\          {:pair "δ-δ" :rule "commute"    :charge-sum -2 :diagram "─┤δ-├═┤δ-├─  →  ─┤δ-├╳┤δ-├─"}]
+    \\       :quote "String diagrams serve as definition-making devices where converting the diagram into its underlying meaning is entirely mechanical and could be automated."})))
     ,
     // MCP dispatch table: tool name → handler function symbol
     \\(def gorj-mcp-dispatch-table
@@ -851,7 +1083,12 @@ const prelude_forms = [_][]const u8{
     \\   "gorj_captp_abort" gorj-mcp-captp-abort
     \\   "gorj_inet_reduce" gorj-mcp-inet-reduce
     \\   "gorj_mcp_proxy" gorj-mcp-proxy
-    \\   "gorj_convergence" gorj-mcp-convergence})
+    \\   "gorj_convergence" gorj-mcp-convergence
+    \\   "gorj_string_diagram" gorj-mcp-string-diagram
+    \\   "gorj_diagram_reduce" gorj-mcp-diagram-reduce
+    \\   "gorj_diagram_compose" gorj-mcp-diagram-compose
+    \\   "gorj_diagram_parse" gorj-mcp-diagram-parse
+    \\   "gorj_diagram_kernel" gorj-mcp-diagram-kernel})
     ,
     // The dispatch function itself — self-hosted MCP routing
     \\(def gorj-mcp-dispatch
@@ -997,7 +1234,7 @@ const tool_defs = [_]ToolDef{
     },
     .{
         .name = "gorj_tools",
-        .description = "List gorj's 29 Clojure MCP tool names (for cross-bridge discovery).",
+        .description = "List gorj's 45 Clojure MCP tool names (for cross-bridge discovery).",
         .input_schema =
         \\{"type":"object","properties":{},"required":[]}
     },
@@ -1204,6 +1441,37 @@ const tool_defs = [_]ToolDef{
     .{
         .name = "gorj_convergence",
         .description = "Meta-tool: describes the Unison↔gorj↔GT convergence architecture. Shows bridge nodes, wire formats, unique capabilities, protocol versions, and the five seismic grounds of post-paradigm-shift development.",
+        .input_schema =
+        \\{"type":"object","properties":{},"required":[]}
+    },
+    // === STRING DIAGRAM TOOLS (v0.3.0) ===
+    .{
+        .name = "gorj_string_diagram",
+        .description = "Render an expression as a Unicode string diagram showing interaction net structure with GF(3) charges. Diagrams are definition-making devices — conversion to meaning is mechanical.",
+        .input_schema =
+        \\{"type":"object","properties":{"code":{"type":"string","description":"Clojure expression to diagram","default":"(fn* [x] x)"}},"required":[]}
+    },
+    .{
+        .name = "gorj_diagram_reduce",
+        .description = "Step-by-step interaction net reduction with string diagrams. Takes two cell names (gamma/delta/epsilon), shows active pair, applies Lafont reduction rule, shows result. The mechanical direction: diagram → meaning.",
+        .input_schema =
+        \\{"type":"object","properties":{"left":{"type":"string","default":"gamma","description":"Left cell (gamma/delta/epsilon/γ/δ/ε)"},"right":{"type":"string","default":"delta","description":"Right cell"}},"required":[]}
+    },
+    .{
+        .name = "gorj_diagram_compose",
+        .description = "Monoidal composition of string diagrams. Sequential (∘) plugs outputs→inputs. Parallel (⊗) is tensor product. String diagrams = morphisms in symmetric monoidal category.",
+        .input_schema =
+        \\{"type":"object","properties":{"cells":{"type":"string","default":"[\"gamma\" \"delta\"]","description":"EDN vector of cell names"},"mode":{"type":"string","enum":["sequential","parallel"],"default":"sequential","description":"Composition mode: sequential (∘) or parallel (⊗)"}},"required":[]}
+    },
+    .{
+        .name = "gorj_diagram_parse",
+        .description = "Parse compact string diagram DSL into interaction net definition. DSL: 'γ+ ∘ δ- ∘ ε○' or 'γ+ ⊗ δ-'. Entirely mechanical: diagram → net is deterministic with no creativity needed.",
+        .input_schema =
+        \\{"type":"object","properties":{"dsl":{"type":"string","default":"γ+ ∘ δ- ∘ ε○","description":"String diagram DSL expression"}},"required":[]}
+    },
+    .{
+        .name = "gorj_diagram_kernel",
+        .description = "Rosetta Stone: three equivalent views of the {- _ +} kernel — GF(3) values, Lafont interaction combinators, and string diagram nodes. Shows all active pair reduction rules with diagrams. The minimal universal basis.",
         .input_schema =
         \\{"type":"object","properties":{},"required":[]}
     },

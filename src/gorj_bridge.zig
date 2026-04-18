@@ -210,20 +210,30 @@ pub fn gorjVersionFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Va
     return Value.makeInt(@intCast(@as(i48, @truncate(@as(i64, @bitCast(vid))))));
 }
 
-/// (gorj-tools) → vector of gorj's 29 MCP tool names
+/// (gorj-tools) → vector of gorj's 45 MCP tool names
 pub fn gorjToolsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     _ = args;
     const tool_names = [_][]const u8{
-        "repl_eval",           "reload_namespace",    "eval_at",
-        "eval_comment_block",  "doc_symbol",          "find_usages",
-        "create_ns",           "create_test_ns",      "add_require",
-        "run_tests",           "run_ns_tests",        "run_test",
-        "test_coverage",       "clj_deps",            "add_dep",
-        "process_start",       "process_stop",        "process_list",
-        "process_log",         "env_info",            "status",
-        "eval_file",           "scaffold_api",        "scaffold_config",
-        "scaffold_db",         "scaffold_handler",    "scaffold_middleware",
-        "scaffold_model",      "scaffold_service",
+        // Core eval + pipeline
+        "gorj_eval",           "gorj_pipe",           "gorj_encode",
+        "gorj_decode",         "gorj_version",        "gorj_tools",
+        "gorj_trit_tick",      "gorj_generate_ticks", "gorj_partition_by_trit",
+        "gorj_spi_verify",     "gorj_color",          "gorj_substrate",
+        "gorj_compile",        "gorj_spacetime",      "gorj_peval",
+        "gorj_atom",           "gorj_session",        "gorj_fuel",
+        // Convergence bridge (OCapN/CapTP + MCP proxy + inet)
+        "gorj_captp_bootstrap","gorj_captp_introduce","gorj_captp_deliver",
+        "gorj_captp_abort",    "gorj_inet_reduce",    "gorj_mcp_proxy",
+        "gorj_convergence",
+        // String diagram tools (v0.3.0)
+        "gorj_string_diagram", "gorj_diagram_reduce",  "gorj_diagram_compose",
+        "gorj_diagram_parse",  "gorj_diagram_kernel",
+        // Dialect bridges
+        "gorj_bb",             "gorj_jank",           "gorj_cljw",
+        "gorj_squint",         "gorj_dart",           "gorj_basilisp",
+        "gorj_glojure",        "gorj_joker",          "gorj_nbb",
+        "gorj_scittle",        "gorj_clr",            "gorj_cherry",
+        "gorj_cream",          "gorj_clojerl",        "gorj_dialects",
     };
     const obj = try gc.allocObj(.vector);
     for (tool_names) |name| {
@@ -330,7 +340,7 @@ test "gorj-bridge: version counter increments across pipe calls" {
     try std.testing.expectEqual(@as(u64, 2), invocation_index);
 }
 
-test "gorj-bridge: gorj-tools returns 29 names" {
+test "gorj-bridge: gorj-tools returns 45 names" {
     var gc = GC.init(std.testing.allocator);
     defer gc.deinit();
     var env = Env.init(std.testing.allocator, null);
@@ -340,8 +350,8 @@ test "gorj-bridge: gorj-tools returns 29 names" {
     var args = [_]Value{};
     const result = try gorjToolsFn(&args, &gc, &env, &resources);
     try std.testing.expect(result.isObj());
-    try std.testing.expectEqual(@as(usize, 29), result.asObj().data.vector.items.items.len);
-    try std.testing.expectEqualStrings("repl_eval", gc.getString(result.asObj().data.vector.items.items[0].asStringId()));
+    try std.testing.expectEqual(@as(usize, 45), result.asObj().data.vector.items.items.len);
+    try std.testing.expectEqualStrings("gorj_eval", gc.getString(result.asObj().data.vector.items.items[0].asStringId()));
 }
 
 test "gorj-bridge: gorj-version nil before first eval" {

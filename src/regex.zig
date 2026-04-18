@@ -20,6 +20,30 @@
 
 const std = @import("std");
 
+/// Result of a match-with-groups call. `match` is the whole-match substring
+/// (group 0); `groups` holds the capture spans in order of opening `(` --
+/// group `i` = slice into the input text for the i-th parenthesized group.
+/// Caller owns `groups`; slices inside are borrowed from the input.
+pub const GroupMatch = struct {
+    match: []const u8,
+    groups: [][]const u8,
+};
+
+/// Per-recursion capture tracker threaded through matchBranch.
+const CapState = struct {
+    starts: []i64, // -1 = unset, else text index of `(`
+    ends: []i64, // -1 = unset, else text index of `)`
+
+    fn save(self: *const CapState, dst_starts: []i64, dst_ends: []i64) void {
+        @memcpy(dst_starts, self.starts);
+        @memcpy(dst_ends, self.ends);
+    }
+    fn restore(self: *CapState, src_starts: []const i64, src_ends: []const i64) void {
+        @memcpy(self.starts, src_starts);
+        @memcpy(self.ends, src_ends);
+    }
+};
+
 pub const Regex = struct {
     pattern: []const u8,
 
@@ -37,6 +61,70 @@ pub const Regex = struct {
             }
         }
         return null;
+    }
+
+    /// Count top-level `(` in pattern (not inside `[]` or escaped).
+    fn countGroups(self: *const Regex) usize {
+        var n: usize = 0;
+        var p: usize = 0;
+        var in_class = false;
+        while (p < self.pattern.len) : (p += 1) {
+            const c = self.pattern[p];
+            if (c == '\\') {
+                p += 1;
+                continue;
+            }
+            if (c == '[') in_class = true;
+            if (c == ']') in_class = false;
+            if (!in_class and c == '(') n += 1;
+        }
+        return n;
+    }
+
+    /// Find first match starting at `from`; fill capture spans.
+    /// Returns [from_adj, end) of the whole match or null.
+    fn findFromWithCaps(self: *const Regex, text: []const u8, from: usize, caps: *CapState) ?struct { start: usize, end: usize } {
+        var i: usize = from;
+        while (i <= text.len) : (i += 1) {
+            // Reset caps for each try.
+            for (caps.starts) |*s| s.* = -1;
+            for (caps.ends) |*e| e.* = -1;
+            var group_idx: usize = 0;
+            if (self.matchBranchCap(text, i, 0, self.pattern.len, caps, &group_idx)) |end| {
+                return .{ .start = i, .end = end };
+            }
+        }
+        return null;
+    }
+
+    /// Find first match starting at or after `from`, returning whole-match substring
+    /// plus per-group substrings (group 0 = whole match). Returns null on no match.
+    /// Caller owns the returned `groups` slice (allocator); inner strings borrow from text.
+    pub fn findWithGroups(
+        self: *const Regex,
+        text: []const u8,
+        from: usize,
+        allocator: std.mem.Allocator,
+    ) !?struct { start: usize, end: usize, match: []const u8, groups: [][]const u8 } {
+        const n_groups = self.countGroups();
+        const starts = try allocator.alloc(i64, n_groups);
+        defer allocator.free(starts);
+        const ends = try allocator.alloc(i64, n_groups);
+        defer allocator.free(ends);
+        for (starts) |*s| s.* = -1;
+        for (ends) |*e| e.* = -1;
+        var caps = CapState{ .starts = starts, .ends = ends };
+        const hit = self.findFromWithCaps(text, from, &caps) orelse return null;
+        const groups = try allocator.alloc([]const u8, n_groups + 1);
+        groups[0] = text[hit.start..hit.end];
+        for (0..n_groups) |gi| {
+            if (starts[gi] >= 0 and ends[gi] >= 0) {
+                groups[gi + 1] = text[@intCast(starts[gi])..@intCast(ends[gi])];
+            } else {
+                groups[gi + 1] = "";
+            }
+        }
+        return .{ .start = hit.start, .end = hit.end, .match = text[hit.start..hit.end], .groups = groups };
     }
 
     /// Check if the entire text matches the pattern.
@@ -185,6 +273,176 @@ pub const Regex = struct {
 
         // Literal character
         return if (c == self.pattern[atom_start]) tp + 1 else null;
+    }
+
+    // ------------------------------------------------------------------
+    // Capture-tracking variants. These mirror matchBranch/matchAtom but
+    // record `(` / `)` spans into a CapState. `group_idx` is threaded
+    // through so nested groups get stable indices matching source order.
+    // ------------------------------------------------------------------
+
+    fn matchBranchCap(
+        self: *const Regex,
+        text: []const u8,
+        text_pos: usize,
+        pat_start: usize,
+        pat_end: usize,
+        caps: *CapState,
+        group_idx: *usize,
+    ) ?usize {
+        // Handle alternation within [pat_start, pat_end).
+        if (self.findAlternationIn(pat_start, pat_end)) |alt_pos| {
+            // Snapshot caps, try left.
+            const save_starts = std.heap.page_allocator.alloc(i64, caps.starts.len) catch return null;
+            defer std.heap.page_allocator.free(save_starts);
+            const save_ends = std.heap.page_allocator.alloc(i64, caps.ends.len) catch return null;
+            defer std.heap.page_allocator.free(save_ends);
+            caps.save(save_starts, save_ends);
+            const saved_gidx = group_idx.*;
+            if (self.matchBranchCap(text, text_pos, pat_start, alt_pos, caps, group_idx)) |end| return end;
+            caps.restore(save_starts, save_ends);
+            group_idx.* = saved_gidx;
+            return self.matchBranchCap(text, text_pos, alt_pos + 1, pat_end, caps, group_idx);
+        }
+
+        var tp = text_pos;
+        var pp = pat_start;
+        while (pp < pat_end) {
+            if (self.pattern[pp] == '$') {
+                if (tp == text.len) {
+                    pp += 1;
+                    continue;
+                }
+                return null;
+            }
+            if (self.pattern[pp] == '^') {
+                if (tp != 0) return null;
+                pp += 1;
+                continue;
+            }
+
+            const atom_start = pp;
+            const atom_end = self.skipAtom(pp, pat_end);
+            if (atom_end == pp) return null;
+            const has_quant = atom_end < pat_end;
+            const quant: u8 = if (has_quant) self.pattern[atom_end] else 0;
+
+            if (quant == '*' or quant == '+' or quant == '?') {
+                const min: usize = if (quant == '+') 1 else 0;
+                const max: usize = if (quant == '?') 1 else text.len - tp + 1;
+                pp = atom_end + 1;
+                var count: usize = 0;
+                const saved_tp = tp;
+                const saved_gidx_outer = group_idx.*;
+                while (count < max and tp < text.len) {
+                    if (self.matchAtomCap(text, tp, atom_start, atom_end, caps, group_idx)) |next_tp| {
+                        tp = next_tp;
+                        count += 1;
+                    } else break;
+                }
+                if (count < min) return null;
+                while (true) {
+                    if (self.matchBranchCap(text, tp, pp, pat_end, caps, group_idx)) |end| return end;
+                    if (count <= min) return null;
+                    count -= 1;
+                    // Re-run `count` atoms to recompute tp & caps.
+                    tp = saved_tp;
+                    group_idx.* = saved_gidx_outer;
+                    var c: usize = 0;
+                    while (c < count) : (c += 1) {
+                        tp = self.matchAtomCap(text, tp, atom_start, atom_end, caps, group_idx) orelse break;
+                    }
+                }
+                return null;
+            }
+
+            if (self.matchAtomCap(text, tp, atom_start, atom_end, caps, group_idx)) |next_tp| {
+                tp = next_tp;
+                pp = atom_end;
+            } else {
+                return null;
+            }
+        }
+        return tp;
+    }
+
+    fn matchAtomCap(
+        self: *const Regex,
+        text: []const u8,
+        tp: usize,
+        atom_start: usize,
+        atom_end: usize,
+        caps: *CapState,
+        group_idx: *usize,
+    ) ?usize {
+        // Group atom: recurse on inner pattern, record span.
+        if (self.pattern[atom_start] == '(') {
+            if (atom_end <= atom_start + 2 or self.pattern[atom_end - 1] != ')') return null;
+            const gi = group_idx.*;
+            group_idx.* += 1;
+            if (gi >= caps.starts.len) return null;
+            caps.starts[gi] = @intCast(tp);
+            const inner = Regex{ .pattern = self.pattern[atom_start + 1 .. atom_end - 1] };
+            // inner.matchBranchCap against the inner pattern (from 0..len).
+            // Share the same caps state so nested groups are tracked.
+            if (inner.matchBranchCap(text, tp, 0, inner.pattern.len, caps, group_idx)) |end| {
+                caps.ends[gi] = @intCast(end);
+                return end;
+            }
+            caps.starts[gi] = -1;
+            return null;
+        }
+
+        // Non-group: behave like matchAtom.
+        if (tp >= text.len) return null;
+        const c = text[tp];
+
+        if (self.pattern[atom_start] == '.') {
+            if (c == '\n') return null;
+            return tp + 1;
+        }
+
+        if (self.pattern[atom_start] == '\\' and atom_start + 1 < atom_end) {
+            const esc = self.pattern[atom_start + 1];
+            const matched = switch (esc) {
+                'd' => std.ascii.isDigit(c),
+                'D' => !std.ascii.isDigit(c),
+                'w' => std.ascii.isAlphanumeric(c) or c == '_',
+                'W' => !(std.ascii.isAlphanumeric(c) or c == '_'),
+                's' => std.ascii.isWhitespace(c),
+                'S' => !std.ascii.isWhitespace(c),
+                else => c == esc,
+            };
+            return if (matched) tp + 1 else null;
+        }
+
+        if (self.pattern[atom_start] == '[') {
+            return if (self.matchCharClass(c, atom_start)) tp + 1 else null;
+        }
+
+        return if (c == self.pattern[atom_start]) tp + 1 else null;
+    }
+
+    /// Like findAlternation but within a sub-range.
+    fn findAlternationIn(self: *const Regex, start: usize, end: usize) ?usize {
+        var p = start;
+        var depth: u32 = 0;
+        var in_class = false;
+        while (p < end) : (p += 1) {
+            const c = self.pattern[p];
+            if (c == '\\') {
+                p += 1;
+                continue;
+            }
+            if (c == '[') in_class = true;
+            if (c == ']') in_class = false;
+            if (!in_class) {
+                if (c == '(') depth += 1;
+                if (c == ')') depth -= 1;
+                if (c == '|' and depth == 0) return p;
+            }
+        }
+        return null;
     }
 
     fn matchCharClass(self: *const Regex, c: u8, start: usize) bool {
@@ -354,6 +612,33 @@ test "regex: anchors" {
     try std.testing.expect(start.find("xabc") == null);
     const end_re = Regex.init("xyz$");
     try std.testing.expect(end_re.matches("xyz"));
+}
+
+test "regex: findWithGroups two captures" {
+    const re = Regex.init("(\\d+)-(\\d+)");
+    const r = (try re.findWithGroups("10-20", 0, std.testing.allocator)) orelse unreachable;
+    defer std.testing.allocator.free(r.groups);
+    try std.testing.expectEqual(@as(usize, 3), r.groups.len);
+    try std.testing.expectEqualStrings("10-20", r.groups[0]);
+    try std.testing.expectEqualStrings("10", r.groups[1]);
+    try std.testing.expectEqualStrings("20", r.groups[2]);
+    try std.testing.expectEqual(@as(usize, 0), r.start);
+    try std.testing.expectEqual(@as(usize, 5), r.end);
+}
+
+test "regex: findWithGroups advance from pos" {
+    const re = Regex.init("(\\d+)");
+    const r1 = (try re.findWithGroups("a1b22c333", 0, std.testing.allocator)) orelse unreachable;
+    defer std.testing.allocator.free(r1.groups);
+    try std.testing.expectEqualStrings("1", r1.groups[0]);
+    const r2 = (try re.findWithGroups("a1b22c333", r1.end, std.testing.allocator)) orelse unreachable;
+    defer std.testing.allocator.free(r2.groups);
+    try std.testing.expectEqualStrings("22", r2.groups[0]);
+    const r3 = (try re.findWithGroups("a1b22c333", r2.end, std.testing.allocator)) orelse unreachable;
+    defer std.testing.allocator.free(r3.groups);
+    try std.testing.expectEqualStrings("333", r3.groups[0]);
+    // Exhausted.
+    try std.testing.expect((try re.findWithGroups("a1b22c333", r3.end, std.testing.allocator)) == null);
 }
 
 test "regex: findAll" {

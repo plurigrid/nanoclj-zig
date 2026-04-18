@@ -148,6 +148,40 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
                 const s = std.fmt.bufPrint(&tmp, "#channel[{s} buf={d} cap={d}]", .{ status, ch.buf.items.len, ch.capacity }) catch "?";
                 try buf.appendSlice(gc.allocator, s);
             },
+            .agent => {
+                const a = &obj.data.agent;
+                try buf.appendSlice(gc.allocator, "#<agent ");
+                try prStrInto(buf, a.state, gc, readably);
+                if (a.mailbox.items.len > 0) {
+                    var tmp: [32]u8 = undefined;
+                    const s = std.fmt.bufPrint(&tmp, " pending={d}", .{a.mailbox.items.len}) catch "";
+                    try buf.appendSlice(gc.allocator, s);
+                }
+                if (a.isStopped()) try buf.appendSlice(gc.allocator, " FAILED");
+                try buf.append(gc.allocator, '>');
+            },
+            .file_handle => {
+                const h = &obj.data.file_handle;
+                const status = if (h.closed) "closed" else "open";
+                var tmp: [80]u8 = undefined;
+                const s = std.fmt.bufPrint(&tmp, "#<file {s} fd={d} {s}>", .{ status, h.fd, h.path }) catch "#<file>";
+                try buf.appendSlice(gc.allocator, s);
+            },
+            .bytes => {
+                const b = &obj.data.bytes;
+                var tmp: [32]u8 = undefined;
+                const s = std.fmt.bufPrint(&tmp, "#bytes[{d}]<", .{b.data.len}) catch "#bytes<";
+                try buf.appendSlice(gc.allocator, s);
+                const preview_len = @min(b.data.len, 16);
+                for (b.data[0..preview_len], 0..) |byte, i| {
+                    if (i > 0) try buf.append(gc.allocator, ' ');
+                    var hb: [2]u8 = undefined;
+                    _ = std.fmt.bufPrint(&hb, "{x:0>2}", .{byte}) catch continue;
+                    try buf.appendSlice(gc.allocator, &hb);
+                }
+                if (b.data.len > preview_len) try buf.appendSlice(gc.allocator, " ...");
+                try buf.append(gc.allocator, '>');
+            },
             .color => {
                 const c = &obj.data.color;
                 // OKLAB → linear sRGB → sRGB for ANSI true-color swatch

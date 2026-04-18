@@ -2,7 +2,8 @@
 
 ## Cobordism: NaN-boxed Clojure interpreter → maximally parallel via Solomonoff compression
 
-15 faces, 160 artifacts. Universal joint: Clairambault's "Rosetta Stone of Interactive & Quantitative Semantics" (CSL 2026).
+15 faces, 163 artifacts. Universal joint: Clairambault's "Rosetta Stone of
+Interactive & Quantitative Semantics" (CSL 2026).
 
 Solomonoff gradient: K(eval)≈800 LOC → K≈150 LOC, parallelism 0%→95%.
 Thermodynamic floor: kT·ln(3) per trit, kT·ln(2) per bit (Landauer).
@@ -12,6 +13,22 @@ Thermodynamic floor: kT·ln(3) per trit, kT·ln(2) per bit (Landauer).
 ## Tactics Documents (`.topos/`)
 
 - `molecular-upscale-tactics.md` — 7 tactics for molecular structure upscaling via band decomposition, GF(3) ring conservation, inet-based per-band upscale, kanren constraint propagation. Maps to faces 1,5,6,8,12,13,15.
+
+## Analyses (`.topos/analyses/`)
+
+- `world-coworld-contextad-open-games.md` — packages the open-game,
+  contextad, and world/coworld design into a native nanoclj-zig semantic
+  frame.
+
+## Models (`.topos/models/`)
+
+- `world-coworld-open-game-seed42.json` — machine-readable seed profile
+  for the first semantically closed world/coworld open-game run.
+
+## Diagrams (`.topos/diagrams/`)
+
+- `world-coworld-open-game-seed42.clj` — concrete lowering of the seed
+  profile into the monoidal diagram kernel.
 
 ## Skill Maps (`.topos/`)
 

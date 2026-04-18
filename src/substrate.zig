@@ -183,7 +183,7 @@ pub fn tritAt(seed: u64, index: u64) i8 {
 /// Trit sum over [0, n): exact 0 at every 3k, bounded drift otherwise.
 pub fn tritSum(seed: u64, n: u64) i32 {
     var s: i32 = 0;
-    for (0..n) |i| {
+    for (0..@as(usize, @intCast(n))) |i| {
         s += @as(i32, tritAt(seed, i));
     }
     return s;
