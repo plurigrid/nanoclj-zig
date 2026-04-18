@@ -1,0 +1,16 @@
+{
+  "wall_ms" : 7012,
+  "exit" : 1,
+  "rows" : [ {
+    "upper" : 100.32,
+    "cv" : 27.65,
+    "name" : "flow_inhabit_3block",
+    "batch" : 76837,
+    "alloc" : null,
+    "median" : 61.73,
+    "ratio" : null,
+    "lower" : 43.67,
+    "forms" : null
+  } ],
+  "raw" : [ "{\"flow_inhabit_3block\":{\"latency\":{\"value\":61.73,\"lower_value\":43.67,\"upper_value\":100.32},\"cv_pct\":{\"value\":27.65},\"batch\":{\"value\":76837}}}" ]
+}

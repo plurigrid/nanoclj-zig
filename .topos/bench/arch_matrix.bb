@@ -13,17 +13,21 @@
    "riscv64-linux"
    "wasm32-freestanding"])
 
-(let [root (-> *file* fs/parent fs/parent fs/parent str)]
+(let [root (-> *file* fs/parent fs/parent fs/parent str)
+      zig  (str root "/.zig-toolchains/zig-aarch64-macos-0.16.0-dev.3070+b22eb176b/zig")]
   (doseq [t targets]
     (let [log  (str "/tmp/bench_arch_" t ".log")
+          t0   (System/nanoTime)
           res  (shell {:dir root :out :string :err :string
                        :continue true}
-                 "zig" "build" (str "-Dtarget=" t))
+                 zig "build" (str "-Dtarget=" t))
+          ns   (- (System/nanoTime) t0)
           ok?  (zero? (:exit res))]
       (when-not ok?
         (spit log (str (:out res) (:err res))))
       (println (json/generate-string
-                 (cond-> {:bench  "arch_matrix"
-                          :target t
-                          :status (if ok? "ok" "fail")}
+                 (cond-> {:bench   "arch_matrix"
+                          :target  t
+                          :status  (if ok? "ok" "fail")
+                          :wall_ms (long (/ ns 1000000))}
                    (not ok?) (assoc :log log)))))))

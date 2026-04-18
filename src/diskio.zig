@@ -7,8 +7,10 @@
 //!   file-as-cell: lattice L = bytes* × {0,1}       ← fsync climbs the d-bit
 //!     merge = compatible-extension + d ∨ d'        (info-monotone)
 //!
-//! Four p-directions (pread / pwrite / fsync / size) + two p-positions
-//! (open / close) + one lattice-compat combinator (atomic_spit).
+//! Five p-directions (pread / pwrite / fsync / size / mmap_ro) + two
+//! p-positions (open / close) + one lattice-compat combinator
+//! (atomic_spit). mmap_ro returns a zero-copy view-position whose lifetime
+//! is explicit (munmap) or GC-managed.
 //!
 //! Positional I/O (pread/pwrite) is thread-safe: no seek state mutated.
 
@@ -50,6 +52,23 @@ pub const Bytes = struct {
     }
 };
 
+/// Zero-copy memory-mapped read-only view. Valid until `unmap` is called
+/// (explicitly via `file/munmap!` or implicitly by the GC).
+pub const MmapView = struct {
+    data: []const u8,
+    unmapped: bool = false,
+
+    pub fn unmap(self: *MmapView) void {
+        if (self.unmapped or self.data.len == 0) return;
+        if (!is_wasm) {
+            const aligned: *align(std.heap.page_size_min) anyopaque =
+                @ptrCast(@alignCast(@constCast(self.data.ptr)));
+            _ = std.c.munmap(aligned, self.data.len);
+        }
+        self.unmapped = true;
+    }
+};
+
 pub const DiskError = error{
     InvalidPath,
     OpenFailed,
@@ -58,6 +77,7 @@ pub const DiskError = error{
     FsyncFailed,
     StatFailed,
     RenameFailed,
+    MmapFailed,
     OutOfMemory,
     Unsupported,
 };
@@ -185,6 +205,22 @@ pub fn atomicSpitNative(path: []const u8, data: []const u8) DiskError!void {
     if (rc != 0) return DiskError.RenameFailed;
 }
 
+/// Read-only zero-copy view: mmap(PROT_READ, MAP_PRIVATE) the whole file.
+/// Returned slice is valid until the caller unmaps via MmapView.unmap().
+pub fn mmapReadOnlyNative(path: []const u8) DiskError!MmapView {
+    const fd = try openNative(path, .{ .read = true });
+    defer closeNative(fd);
+    const sz = try sizeNative(fd);
+    if (sz == 0) return .{ .data = &[_]u8{}, .unmapped = true };
+
+    const prot: std.c.PROT = .{ .READ = true };
+    const flags: std.c.MAP = .{ .TYPE = .PRIVATE };
+    const ptr = std.c.mmap(null, @intCast(sz), prot, flags, fd, 0);
+    if (@intFromPtr(ptr) == ~@as(usize, 0)) return DiskError.MmapFailed;
+    const bytes: [*]const u8 = @ptrCast(ptr);
+    return .{ .data = bytes[0..@intCast(sz)], .unmapped = false };
+}
+
 // ============================================================================
 // WASM STUBS
 // ============================================================================
@@ -211,6 +247,9 @@ pub fn readAllBytesStub(_: std.mem.Allocator, _: []const u8) DiskError![]u8 {
 pub fn atomicSpitStub(_: []const u8, _: []const u8) DiskError!void {
     return DiskError.Unsupported;
 }
+pub fn mmapReadOnlyStub(_: []const u8) DiskError!MmapView {
+    return DiskError.Unsupported;
+}
 
 // ============================================================================
 // DISPATCH
@@ -224,3 +263,4 @@ pub const pwrite = if (is_wasm) pwriteStub else pwriteNative;
 pub const fsync = if (is_wasm) fsyncStub else fsyncNative;
 pub const readAllBytes = if (is_wasm) readAllBytesStub else readAllBytesNative;
 pub const atomicSpit = if (is_wasm) atomicSpitStub else atomicSpitNative;
+pub const mmapReadOnly = if (is_wasm) mmapReadOnlyStub else mmapReadOnlyNative;

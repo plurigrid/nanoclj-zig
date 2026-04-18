@@ -1,8 +1,11 @@
-//! fuel_slope.zig — regress ns ≈ α + β·n on fib(n), n ∈ {5,10,15,18,20,22}.
+//! map_reduce.zig — `(reduce + (map inc (range N)))` ∀ N ∈ {100, 1000, 10000}.
 //!
-//! Tier −1. β-slope stability between releases is the claim that our
-//! fuel accounting faithfully tracks wall time. Emits one BMF row per n.
-//! TODO: once eval.zig exposes a fuel counter, replace n with fuel_units.
+//! Dialect-profile (tier −1). Clojure-specific HOF dispatch + lazy-seq
+//! realization. Hickey's reduce/transducer talk (Strange Loop 2014) set
+//! expectations: JVM Clojure warm ~3–10 ns/element for arithmetic reduce;
+//! SCI-JVM 50–200 ns/element; Babashka 30–80 ns/element.
+//!
+//! Target ReleaseFast: <30 ns/element at N=10000.
 
 const std = @import("std");
 const util = @import("bench_util.zig");
@@ -15,8 +18,6 @@ const eval_mod = nanoclj.eval;
 const compat = nanoclj.compat;
 const core = nanoclj.core;
 
-const SETUP = "(def fib (fn* [n] (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))";
-
 pub fn main() !void {
     const alloc = std.heap.c_allocator;
 
@@ -28,17 +29,13 @@ pub fn main() !void {
     try core.initCore(&env, &gc);
     defer core.deinitCore();
 
-    var rs = Reader.init(SETUP, &gc);
-    const setup = try rs.readForm();
-    _ = try eval_mod.eval(setup, &env, &gc);
-
-    const ns_values = [_]i64{ 5, 10, 15, 18, 20, 22 };
     const stdout = compat.stdoutFile();
     var out_buf: [512]u8 = undefined;
 
-    for (ns_values) |n| {
-        var src_buf: [64]u8 = undefined;
-        const src = try std.fmt.bufPrint(&src_buf, "(fib {d})", .{n});
+    const sizes = [_]i64{ 100, 1000, 10_000 };
+    for (sizes) |n| {
+        var src_buf: [96]u8 = undefined;
+        const src = try std.fmt.bufPrint(&src_buf, "(reduce + (map inc (range {d})))", .{n});
         var r = Reader.init(src, &gc);
         const form = try r.readForm();
 
@@ -52,8 +49,8 @@ pub fn main() !void {
         };
         const ctx = Ctx{ .form = form, .env_p = &env, .gc_p = &gc };
 
-        var name_buf: [32]u8 = undefined;
-        const name = try std.fmt.bufPrint(&name_buf, "fib_n{d}", .{n});
+        var name_buf: [48]u8 = undefined;
+        const name = try std.fmt.bufPrint(&name_buf, "map_reduce_n{d}", .{n});
         const stats = try util.bench(alloc, name, Ctx.run, .{ctx}, .{
             .min_sample_ns = 1_000_000,
             .samples = 20,

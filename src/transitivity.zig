@@ -533,6 +533,7 @@ fn structuralEqObj(a: *Obj, b: *Obj, gc: *GC) bool {
         .function, .macro_fn, .bc_closure, .builtin_ref, .lazy_seq, .partial_fn, .multimethod, .protocol, .dense_f64, .trace, .channel, .agent, .file_handle => false,
         .atom => structuralEq(a.data.atom.val, b.data.atom.val, gc),
         .bytes => std.mem.eql(u8, a.data.bytes.data, b.data.bytes.data),
+        .mmap_view => std.mem.eql(u8, a.data.mmap_view.data, b.data.mmap_view.data),
     };
 }
 

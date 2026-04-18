@@ -13,37 +13,42 @@ const Reader = nanoclj.reader.Reader;
 const GC = nanoclj.gc.GC;
 const Env = nanoclj.env.Env;
 const eval_mod = nanoclj.eval;
+const compat = nanoclj.compat;
+const core = nanoclj.core;
+
+fn nowNs() u64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC_RAW, &ts);
+    return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+}
 
 const N_SAMPLES: usize = 30;
 const WARMUP: usize = 3;
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+    const alloc = std.heap.c_allocator;
 
     var samples_buf: [N_SAMPLES + WARMUP]f64 = undefined;
     for (0..N_SAMPLES + WARMUP) |i| {
-        var timer = try std.time.Timer.start();
+        const t0 = nowNs();
         var gc = GC.init(alloc);
         defer gc.deinit();
         var env = Env.init(alloc, null);
         env.is_root = true;
         defer env.deinit();
-        try eval_mod.initNamespaces(alloc, &env);
+        try core.initCore(&env, &gc);
+        defer core.deinitCore();
 
         var r = Reader.init("(+ 1 2)", &gc);
         const form = try r.readForm();
         const result = try eval_mod.eval(form, &env, &gc);
         std.mem.doNotOptimizeAway(result);
 
-        samples_buf[i] = @as(f64, @floatFromInt(timer.read()));
+        samples_buf[i] = @as(f64, @floatFromInt(nowNs() - t0));
     }
 
     const stats = try util.summarize(alloc, "cold_start", samples_buf[WARMUP..]);
-    const stdout = std.fs.File.stdout();
     var buf: [1024]u8 = undefined;
-    var bw = std.io.fixedBufferStream(&buf);
-    try stats.writeBmfLine(bw.writer());
-    _ = try stdout.write(bw.getWritten());
+    const line = try stats.bmfLine(&buf);
+    compat.fileWriteAll(compat.stdoutFile(), line);
 }

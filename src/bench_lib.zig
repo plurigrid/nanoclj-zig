@@ -7,3 +7,5 @@ pub const env = @import("env.zig");
 pub const reader = @import("reader.zig");
 pub const eval = @import("eval.zig");
 pub const flow = @import("flow.zig");
+pub const compat = @import("compat.zig");
+pub const core = @import("core.zig");

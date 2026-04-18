@@ -9,6 +9,12 @@
 
 const std = @import("std");
 
+fn nowNs() u64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC_RAW, &ts);
+    return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+}
+
 pub const Options = struct {
     min_sample_ns: u64 = 1_000_000, // 1 ms per sample
     samples: u64 = 30,
@@ -27,18 +33,20 @@ pub const Stats = struct {
     cv_pct: f64,
     alloc_bytes: u64 = 0,
 
-    /// Emit one BMF line so `bencher run --adapter json` can ingest it.
-    pub fn writeBmfLine(self: Stats, w: anytype) !void {
-        try w.print(
-            "{{\"{s}\":{{\"latency\":{{\"value\":{d:.2},\"lower_value\":{d:.2},\"upper_value\":{d:.2}}}",
-            .{ self.name, self.median_ns, self.min_ns, self.max_ns },
-        );
+    /// Format one BMF line into buf; return the written slice. Callers
+    /// typically pass to `compat.fileWriteAll(stdout, slice)`.
+    pub fn bmfLine(self: Stats, buf: []u8) ![]const u8 {
         if (self.alloc_bytes > 0) {
-            try w.print(",\"allocated\":{{\"value\":{d}}}", .{self.alloc_bytes});
+            return std.fmt.bufPrint(
+                buf,
+                "{{\"{s}\":{{\"latency\":{{\"value\":{d:.2},\"lower_value\":{d:.2},\"upper_value\":{d:.2}}},\"allocated\":{{\"value\":{d}}},\"cv_pct\":{{\"value\":{d:.2}}},\"batch\":{{\"value\":{d}}}}}}}\n",
+                .{ self.name, self.median_ns, self.min_ns, self.max_ns, self.alloc_bytes, self.cv_pct, self.batch_size },
+            );
         }
-        try w.print(
-            ",\"cv_pct\":{{\"value\":{d:.2}}},\"batch\":{{\"value\":{d}}}}}}}\n",
-            .{ self.cv_pct, self.batch_size },
+        return std.fmt.bufPrint(
+            buf,
+            "{{\"{s}\":{{\"latency\":{{\"value\":{d:.2},\"lower_value\":{d:.2},\"upper_value\":{d:.2}}},\"cv_pct\":{{\"value\":{d:.2}}},\"batch\":{{\"value\":{d}}}}}}}\n",
+            .{ self.name, self.median_ns, self.min_ns, self.max_ns, self.cv_pct, self.batch_size },
         );
     }
 };
@@ -51,17 +59,15 @@ pub fn bench(
     args: anytype,
     opts: Options,
 ) !Stats {
-    var timer = try std.time.Timer.start();
-
     // 1. Calibrate batch so one sample ≥ min_sample_ns.
     var batch: u64 = 1;
     while (true) {
-        timer.reset();
+        const t0 = nowNs();
         for (0..batch) |_| {
             const r = @call(.auto, func, args);
             std.mem.doNotOptimizeAway(r);
         }
-        const elapsed = timer.read();
+        const elapsed = nowNs() - t0;
         if (elapsed >= opts.min_sample_ns) break;
         const ratio_f = @as(f64, @floatFromInt(opts.min_sample_ns)) /
             @as(f64, @floatFromInt(@max(elapsed, 1)));
@@ -72,24 +78,24 @@ pub fn bench(
 
     // 2. Warmup (thrown away).
     for (0..opts.warmup) |_| {
-        timer.reset();
+        const t0 = nowNs();
         for (0..batch) |_| {
             const r = @call(.auto, func, args);
             std.mem.doNotOptimizeAway(r);
         }
-        _ = timer.read();
+        _ = nowNs() - t0;
     }
 
     // 3. Collect samples → per-op ns.
     const samples = try alloc.alloc(f64, opts.samples);
     defer alloc.free(samples);
     for (0..opts.samples) |i| {
-        timer.reset();
+        const t0 = nowNs();
         for (0..batch) |_| {
             const r = @call(.auto, func, args);
             std.mem.doNotOptimizeAway(r);
         }
-        const elapsed = timer.read();
+        const elapsed = nowNs() - t0;
         samples[i] = @as(f64, @floatFromInt(elapsed)) / @as(f64, @floatFromInt(batch));
     }
 

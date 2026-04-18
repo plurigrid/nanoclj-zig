@@ -182,6 +182,13 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
                 if (b.data.len > preview_len) try buf.appendSlice(gc.allocator, " ...");
                 try buf.append(gc.allocator, '>');
             },
+            .mmap_view => {
+                const m = &obj.data.mmap_view;
+                const status = if (m.unmapped) "unmapped" else "mapped";
+                var tmp: [48]u8 = undefined;
+                const s = std.fmt.bufPrint(&tmp, "#<mmap {s} {d}>", .{ status, m.data.len }) catch "#<mmap>";
+                try buf.appendSlice(gc.allocator, s);
+            },
             .color => {
                 const c = &obj.data.color;
                 // OKLAB → linear sRGB → sRGB for ANSI true-color swatch

@@ -44,6 +44,7 @@ pub const ObjKind = enum(u8) {
     agent, // Clojure agent: state + mailbox + validator + error handler
     file_handle, // POSIX fd + open/closed state + path (for pread/pwrite/fsync)
     bytes, // raw []u8 byte-vector (mutable, binary — orthogonal to interned strings)
+    mmap_view, // memory-mapped read-only file view (zero-copy; must munmap)
 };
 
 pub const Obj = struct {
@@ -85,6 +86,7 @@ pub const ObjData = union {
     agent: @import("agent.zig").AgentData,
     file_handle: @import("diskio.zig").Handle,
     bytes: @import("diskio.zig").Bytes,
+    mmap_view: @import("diskio.zig").MmapView,
 };
 
 /// Neanderthal-compatible dense f64 vector.

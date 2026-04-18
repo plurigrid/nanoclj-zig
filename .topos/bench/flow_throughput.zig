@@ -5,7 +5,9 @@
 
 const std = @import("std");
 const util = @import("bench_util.zig");
-const flow = @import("nanoclj").flow;
+const nanoclj = @import("nanoclj");
+const flow = nanoclj.flow;
+const compat = nanoclj.compat;
 
 fn inc(inputs: []const i64) i64 {
     return inputs[0] + 1;
@@ -30,22 +32,13 @@ fn oneInhabit(alloc: std.mem.Allocator) i64 {
 }
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+    const alloc = std.heap.c_allocator;
 
-    var stats = try util.bench(alloc, "flow_inhabit_3block", oneInhabit, .{alloc}, .{
+    const stats = try util.bench(alloc, "flow_inhabit_3block", oneInhabit, .{alloc}, .{
         .min_sample_ns = 5_000_000, // 5 ms / sample — allocator noise compensator
         .samples = 30,
     });
 
-    // Derive ops/sec for human readability (BMF line already has median_ns).
-    const ops_per_sec: u64 = @intFromFloat(1e9 / stats.median_ns);
-    _ = ops_per_sec;
-
-    const stdout = std.fs.File.stdout();
     var buf: [1024]u8 = undefined;
-    var bw = std.io.fixedBufferStream(&buf);
-    try stats.writeBmfLine(bw.writer());
-    _ = try stdout.write(bw.getWritten());
+    compat.fileWriteAll(compat.stdoutFile(), try stats.bmfLine(&buf));
 }

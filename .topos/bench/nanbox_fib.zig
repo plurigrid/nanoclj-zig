@@ -15,6 +15,8 @@ const GC = nanoclj.gc.GC;
 const Env = nanoclj.env.Env;
 const value_mod = nanoclj.value;
 const eval_mod = nanoclj.eval;
+const compat = nanoclj.compat;
+const core = nanoclj.core;
 
 const FIB_DEF = "(def fib (fn* [n] (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))";
 
@@ -23,13 +25,23 @@ fn fibZig(n: i64) i64 {
     return fibZig(n - 1) + fibZig(n - 2);
 }
 
+// Hide n from comptime/const-prop so LLVM can't precompute fib(25)=75025.
+var fib_n_runtime: i64 = 25;
+
+const FibZigCtx = struct {
+    n_ptr: *volatile i64,
+    fn run(self: @This()) i64 {
+        return fibZig(self.n_ptr.*);
+    }
+};
+
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+    const alloc = std.heap.c_allocator;
 
     // -------- Zig baseline --------
-    const zig_stats = try util.bench(alloc, "fib25_zig", fibZig, .{@as(i64, 25)}, .{
+    // volatile ptr blocks const-prop so LLVM can't precompute fib(25).
+    const fib_zig_ctx = FibZigCtx{ .n_ptr = @ptrCast(&fib_n_runtime) };
+    const zig_stats = try util.bench(alloc, "fib25_zig", FibZigCtx.run, .{fib_zig_ctx}, .{
         .min_sample_ns = 1_000_000,
         .samples = 30,
     });
@@ -40,7 +52,8 @@ pub fn main() !void {
     var env = Env.init(alloc, null);
     env.is_root = true;
     defer env.deinit();
-    try eval_mod.initNamespaces(alloc, &env);
+    try core.initCore(&env, &gc);
+    defer core.deinitCore();
 
     var rs = Reader.init(FIB_DEF, &gc);
     const setup = try rs.readForm();
@@ -60,9 +73,9 @@ pub fn main() !void {
     const cctx = CallCtx{ .form = call, .env_p = &env, .gc_p = &gc };
 
     // Measure allocation delta across one call.
-    const alloc_before = gc.totalAllocated();
+    const alloc_before = gc.bytes_allocated;
     _ = cctx.run();
-    const alloc_per_call = gc.totalAllocated() - alloc_before;
+    const alloc_per_call = gc.bytes_allocated - alloc_before;
 
     var clj_stats = try util.bench(alloc, "fib25_nanoclj", CallCtx.run, .{cctx}, .{
         .min_sample_ns = 1_000_000,
@@ -70,10 +83,8 @@ pub fn main() !void {
     });
     clj_stats.alloc_bytes = alloc_per_call;
 
-    const stdout = std.fs.File.stdout();
-    var buf: [2048]u8 = undefined;
-    var bw = std.io.fixedBufferStream(&buf);
-    try zig_stats.writeBmfLine(bw.writer());
-    try clj_stats.writeBmfLine(bw.writer());
-    _ = try stdout.write(bw.getWritten());
+    const stdout = compat.stdoutFile();
+    var buf: [1024]u8 = undefined;
+    compat.fileWriteAll(stdout, try zig_stats.bmfLine(&buf));
+    compat.fileWriteAll(stdout, try clj_stats.bmfLine(&buf));
 }

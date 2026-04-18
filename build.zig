@@ -201,6 +201,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = .ReleaseSmall,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
                 .{ .name = "build_options", .module = embed_min_options },
@@ -301,6 +302,12 @@ pub fn build(b: *std.Build) void {
         "reader_arena",
         "flow_throughput",
         "fuel_slope",
+        "tak_gabriel",
+        "map_reduce",
+        "assoc_growth",
+        "ackermann",
+        "binary_trees",
+        "loop_tight",
     };
     inline for (bench_names) |name| {
         const bench_exe = b.addExecutable(.{

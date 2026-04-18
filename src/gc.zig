@@ -97,6 +97,7 @@ pub const GC = struct {
                 .agent => .{ .agent = .{} },
                 .file_handle => .{ .file_handle = .{ .fd = -1, .closed = true } },
                 .bytes => .{ .bytes = .{ .data = &.{}, .owned = false } },
+                .mmap_view => .{ .mmap_view = .{ .data = &[_]u8{}, .unmapped = true } },
             },
         };
         try self.objects.append(self.allocator, obj);
@@ -233,6 +234,7 @@ pub const GC = struct {
                 },
                 .file_handle => {}, // no Value refs; fd is plain
                 .bytes => {}, // raw []u8; no Value refs
+                .mmap_view => {}, // raw []const u8 view; no Value refs
             }
         }
     }
@@ -325,6 +327,9 @@ pub const GC = struct {
             },
             .bytes => {
                 obj.data.bytes.deinit(self.allocator);
+            },
+            .mmap_view => {
+                obj.data.mmap_view.unmap();
             },
         }
         self.allocator.destroy(obj);

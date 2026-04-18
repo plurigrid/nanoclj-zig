@@ -10,6 +10,13 @@ const util = @import("bench_util.zig");
 const nanoclj = @import("nanoclj");
 const Reader = nanoclj.reader.Reader;
 const GC = nanoclj.gc.GC;
+const compat = nanoclj.compat;
+
+fn nowNs() u64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC_RAW, &ts);
+    return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+}
 
 const FORM = "(let [x 1 y 2] (+ x y))";
 
@@ -27,9 +34,7 @@ const ParseCtx = struct {
 };
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+    const alloc = std.heap.c_allocator;
 
     var gc = GC.init(alloc);
     defer gc.deinit();
@@ -50,23 +55,23 @@ pub fn main() !void {
         buf[off + FORM.len] = ' ';
     }
 
-    const alloc_before = gc.totalAllocated();
-    var timer = try std.time.Timer.start();
+    const alloc_before = gc.bytes_allocated;
+    const t0 = nowNs();
     var r = Reader.init(buf, &gc);
     var forms: u64 = 0;
     while (r.readForm()) |_| {
         forms += 1;
     } else |_| {}
-    const ns = timer.read();
-    const peak = gc.totalAllocated() - alloc_before;
+    const ns = nowNs() - t0;
+    const peak = gc.bytes_allocated - alloc_before;
 
-    const stdout = std.fs.File.stdout();
-    var out: [2048]u8 = undefined;
-    var bw = std.io.fixedBufferStream(&out);
-    try micro_stats.writeBmfLine(bw.writer());
-    try bw.writer().print(
+    const stdout = compat.stdoutFile();
+    var out: [1024]u8 = undefined;
+    compat.fileWriteAll(stdout, try micro_stats.bmfLine(&out));
+    const line = try std.fmt.bufPrint(
+        &out,
         "{{\"reader_1mb\":{{\"latency\":{{\"value\":{d}}},\"forms\":{{\"value\":{d}}},\"peak_alloc\":{{\"value\":{d}}},\"peak_ratio\":{{\"value\":{d:.3}}}}}}}\n",
         .{ ns, forms, peak, @as(f64, @floatFromInt(peak)) / @as(f64, @floatFromInt(buf.len)) },
     );
-    _ = try stdout.write(bw.getWritten());
+    compat.fileWriteAll(stdout, line);
 }

@@ -188,6 +188,7 @@ fn encodeValue(val: Value, gc: *GC) !Value {
         .agent => return try makeOpaqueKind(gc, "agent"),
         .file_handle => return try makeOpaqueKind(gc, "file"),
         .bytes => return try makeOpaqueKind(gc, "bytes"),
+        .mmap_view => return try makeOpaqueKind(gc, "mmap"),
     }
 }
 

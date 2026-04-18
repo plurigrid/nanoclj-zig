@@ -363,6 +363,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         .{ "file/size", &fileSizeFn },                                     .{ "file/pread", &filePreadFn },
         .{ "file/pwrite!", &filePwriteFn },                                .{ "file/fsync!", &fileFsyncFn },
         .{ "file/read-all-bytes", &fileReadAllBytesFn },                   .{ "file/atomic-spit!", &fileAtomicSpitFn },
+        .{ "file/mmap-ro", &fileMmapRoFn },                                .{ "file/munmap!", &fileMunmapFn },
+        .{ "mmap/count", &mmapCountFn },                                   .{ "mmap/str", &mmapStrFn },
         .{ "bytes/count", &bytesCountFn },                                 .{ "bytes/str", &bytesStrFn },
         .{ "str/bytes", &strBytesFn },
         // Math extras
@@ -949,6 +951,7 @@ pub fn valueTypeName(v: Value) []const u8 {
         .agent => "agent",
         .file_handle => "file-handle",
         .bytes => "bytes",
+        .mmap_view => "mmap",
     };
 }
 
@@ -3377,6 +3380,37 @@ fn strBytesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const s = gc.getString(args[0].asStringId());
     const copy = try gc.allocator.dupe(u8, s);
     return makeBytes(gc, copy);
+}
+
+fn fileMmapRoFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const path = gc.getString(args[0].asStringId());
+    const view = diskio.mmapReadOnly(path) catch return Value.makeNil();
+    const obj = try gc.allocObj(.mmap_view);
+    obj.data.mmap_view = view;
+    return Value.makeObj(obj);
+}
+
+fn fileMunmapFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .mmap_view) return error.TypeError;
+    args[0].asObj().data.mmap_view.unmap();
+    return Value.makeBool(true);
+}
+
+fn mmapCountFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .mmap_view) return error.TypeError;
+    return Value.makeInt(@intCast(args[0].asObj().data.mmap_view.data.len));
+}
+
+fn mmapStrFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isObj() or args[0].asObj().kind != .mmap_view) return error.TypeError;
+    const m = &args[0].asObj().data.mmap_view;
+    if (m.unmapped) return error.ValueError;
+    return Value.makeString(try gc.internString(m.data));
 }
 
 // ============================================================================
