@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .cwd_relative = syrup_path },
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     const full_build_options = addBuildOptions(b, target, optimize, .full);
@@ -41,6 +42,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
                 .{ .name = "build_options", .module = full_build_options },
@@ -62,6 +64,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/mcp_tool.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
@@ -83,6 +86,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/gorj_mcp.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
@@ -122,6 +126,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/world.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
