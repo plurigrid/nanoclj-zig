@@ -1423,16 +1423,16 @@ fn toolError(allocator: std.mem.Allocator, text: []const u8) !json.Value {
 
 fn handleInitialize(allocator: std.mem.Allocator) !json.Value {
     var server_info = try json.ObjectMap.init(allocator, &.{}, &.{});
-    try server_info.put("name", .{ .string = SERVER_NAME });
-    try server_info.put("version", .{ .string = SERVER_VERSION });
+    try server_info.put(allocator, "name", .{ .string = SERVER_NAME });
+    try server_info.put(allocator, "version", .{ .string = SERVER_VERSION });
 
     var capabilities = try json.ObjectMap.init(allocator, &.{}, &.{});
-    try capabilities.put("tools", .{ .object = try json.ObjectMap.init(allocator, &.{}, &.{}) });
+    try capabilities.put(allocator, "tools", .{ .object = try json.ObjectMap.init(allocator, &.{}, &.{}) });
 
     // Advertise experimental tasks support (MCP 2025-11-25)
     var tasks_cap = try json.ObjectMap.init(allocator, &.{}, &.{});
-    try tasks_cap.put("supported", .{ .bool = true });
-    try capabilities.put("tasks", .{ .object = tasks_cap });
+    try tasks_cap.put(allocator, "supported", .{ .bool = true });
+    try capabilities.put(allocator, "tasks", .{ .object = tasks_cap });
 
     var result = try json.ObjectMap.init(allocator, &.{}, &.{});
     try result.put(allocator, "protocolVersion", .{ .string = PROTOCOL_VERSION });
@@ -1454,8 +1454,8 @@ fn handleTasksGet(allocator: std.mem.Allocator, params: json.ObjectMap) !json.Va
     var task_obj = try json.ObjectMap.init(allocator, &.{}, &.{});
     var id_str_buf: [20]u8 = undefined;
     const id_str = std.fmt.bufPrint(&id_str_buf, "{d}", .{task.id}) catch "0";
-    try task_obj.put("taskId", .{ .string = id_str });
-    try task_obj.put("state", .{ .string = switch (task.state) {
+    try task_obj.put(allocator, "taskId", .{ .string = id_str });
+    try task_obj.put(allocator, "state", .{ .string = switch (task.state) {
         .working => "working",
         .completed => "completed",
         .failed => "failed",
@@ -1467,7 +1467,7 @@ fn handleTasksGet(allocator: std.mem.Allocator, params: json.ObjectMap) !json.Va
         try content_obj.put(allocator, "text", .{ .string = r });
         var content_arr = json.Array.init(allocator);
         try content_arr.append(.{ .object = content_obj });
-        try task_obj.put("content", .{ .array = content_arr });
+        try task_obj.put(allocator, "content", .{ .array = content_arr });
     }
 
     return .{ .object = task_obj };
@@ -1477,12 +1477,12 @@ fn handleToolsList(allocator: std.mem.Allocator) !json.Value {
     var tool_array = json.Array.init(allocator);
     for (tool_defs) |tool| {
         var tool_obj = try json.ObjectMap.init(allocator, &.{}, &.{});
-        try tool_obj.put("name", .{ .string = tool.name });
-        try tool_obj.put("description", .{ .string = tool.description });
+        try tool_obj.put(allocator, "name", .{ .string = tool.name });
+        try tool_obj.put(allocator, "description", .{ .string = tool.description });
         const schema = try json.parseFromSlice(json.Value, allocator, tool.input_schema, .{
             .allocate = .alloc_always,
         });
-        try tool_obj.put("inputSchema", schema.value);
+        try tool_obj.put(allocator, "inputSchema", schema.value);
         try tool_array.append(.{ .object = tool_obj });
     }
     var result = try json.ObjectMap.init(allocator, &.{}, &.{});

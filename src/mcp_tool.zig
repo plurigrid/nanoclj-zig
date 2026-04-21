@@ -445,13 +445,13 @@ fn handleToolsListResult(allocator: std.mem.Allocator) !json.Value {
     var tool_array = json.Array.init(allocator);
     for (tools) |tool| {
         var tool_obj = try json.ObjectMap.init(allocator, &.{}, &.{});
-        try tool_obj.put("name", .{ .string = tool.name });
-        try tool_obj.put("description", .{ .string = tool.description });
+        try tool_obj.put(allocator, "name", .{ .string = tool.name });
+        try tool_obj.put(allocator, "description", .{ .string = tool.description });
 
         const schema = try json.parseFromSlice(json.Value, allocator, tool.input_schema, .{
             .allocate = .alloc_always,
         });
-        try tool_obj.put("inputSchema", schema.value);
+        try tool_obj.put(allocator, "inputSchema", schema.value);
 
         try tool_array.append(.{ .object = tool_obj });
     }
@@ -495,12 +495,12 @@ fn handleCallTool(allocator: std.mem.Allocator, params: json.ObjectMap) !json.Va
 
 fn handleInitialize(allocator: std.mem.Allocator) !json.Value {
     var server_info = try json.ObjectMap.init(allocator, &.{}, &.{});
-    try server_info.put("name", .{ .string = SERVER_NAME });
-    try server_info.put("version", .{ .string = SERVER_VERSION });
+    try server_info.put(allocator, "name", .{ .string = SERVER_NAME });
+    try server_info.put(allocator, "version", .{ .string = SERVER_VERSION });
 
     var capabilities = try json.ObjectMap.init(allocator, &.{}, &.{});
     const tools_cap = try json.ObjectMap.init(allocator, &.{}, &.{});
-    try capabilities.put("tools", .{ .object = tools_cap });
+    try capabilities.put(allocator, "tools", .{ .object = tools_cap });
 
     var result = try json.ObjectMap.init(allocator, &.{}, &.{});
     try result.put(allocator, "protocolVersion", .{ .string = PROTOCOL_VERSION });
