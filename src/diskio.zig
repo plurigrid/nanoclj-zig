@@ -116,10 +116,10 @@ pub fn closeNative(fd: i32) void {
 }
 
 pub fn sizeNative(fd: i32) DiskError!u64 {
-    var st: std.c.Stat = undefined;
-    const rc = std.c.fstat(fd, &st);
-    if (rc != 0) return DiskError.StatFailed;
-    return @intCast(st.size);
+    const end = std.c.lseek(fd, 0, std.c.SEEK.END);
+    if (end < 0) return DiskError.StatFailed;
+    _ = std.c.lseek(fd, 0, std.c.SEEK.SET);
+    return @intCast(end);
 }
 
 pub fn preadNative(fd: i32, offset: u64, buf: []u8) DiskError!usize {
