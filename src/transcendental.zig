@@ -366,11 +366,10 @@ pub fn categoriesFn(_: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value 
     const obj = try gc.allocObj(.list);
     const alloc = gc.allocator;
     const names = [_][]const u8{
-        "quantity",  "quality",   "relation",  "modality",
-        "unity",     "plurality", "totality",
-        "reality",   "negation",  "limitation",
-        "substance", "causation", "community",
-        "possible",  "actual",    "necessary",
+        "quantity",  "quality",    "relation",  "modality",
+        "unity",     "plurality",  "totality",  "reality",
+        "negation",  "limitation", "substance", "causation",
+        "community", "possible",   "actual",    "necessary",
     };
     for (names) |n| {
         try obj.data.list.items.append(alloc, Value.makeKeyword(try gc.internString(n)));

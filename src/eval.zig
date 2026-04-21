@@ -284,8 +284,7 @@ fn evalBinding(items: []Value, env: *Env, gc: *GC) EvalError!Value {
         if (!target.isSymbol()) return error.TypeError;
         const id = target.asSymbolId();
         const v = try eval(bindings[i + 1], env, gc);
-        dynamic_stack.append(gc.allocator, .{ .id = id, .val = v })
-            catch return error.OutOfMemory;
+        dynamic_stack.append(gc.allocator, .{ .id = id, .val = v }) catch return error.OutOfMemory;
     }
 
     var result = Value.makeNil();
@@ -707,7 +706,11 @@ fn evalBlend(items: []Value, _: *Env, gc: *GC) EvalError!Value {
     _ = &reg;
     const name1 = if (items[1].isSymbol()) gc.getString(items[1].asSymbolId()) else if (items[1].isKeyword()) gc.getString(items[1].asKeywordId()) else return error.TypeError;
     const name2 = if (items[2].isSymbol()) gc.getString(items[2].asSymbolId()) else if (items[2].isKeyword()) gc.getString(items[2].asKeywordId()) else return error.TypeError;
-    const t_val = try eval(items[3], &struct { fn get() *Env { return cs_registry.?.currentEnv(); } }.get().*, gc);
+    const t_val = try eval(items[3], &struct {
+        fn get() *Env {
+            return cs_registry.?.currentEnv();
+        }
+    }.get().*, gc);
     const t: f32 = if (t_val.isFloat()) @as(f32, @floatCast(t_val.asFloat())) else if (t_val.isInt()) @as(f32, @floatFromInt(t_val.asInt())) else 0.5;
     const result_name = if (items.len > 4 and items[4].isSymbol())
         gc.getString(items[4].asSymbolId())

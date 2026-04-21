@@ -657,7 +657,10 @@ fn bindDestructured(pattern: Value, val: Value, env: *Env, gc: *GC) !void {
                             var found = Value.makeNil();
                             if (val.isObj() and val.asObj().kind == .map) {
                                 for (val.asObj().data.map.keys.items, val.asObj().data.map.vals.items) |mk, mv| {
-                                    if (transitivity.structuralEq(mk, kw, gc)) { found = mv; break; }
+                                    if (transitivity.structuralEq(mk, kw, gc)) {
+                                        found = mv;
+                                        break;
+                                    }
                                 }
                             }
                             try bindDestructured(sym, found, env, gc);

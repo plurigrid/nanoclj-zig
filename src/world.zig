@@ -71,18 +71,18 @@ pub fn main() !void {
     const width: u32 = 80;
 
     // ── Header ──
-    compat.fileWriteAll(f,"\n\x1b[1;97m");
-    compat.fileWriteAll(f,"  nanoclj-zig: Clojure in ~5K lines of Zig\x1b[0m\n\n");
+    compat.fileWriteAll(f, "\n\x1b[1;97m");
+    compat.fileWriteAll(f, "  nanoclj-zig: Clojure in ~5K lines of Zig\x1b[0m\n\n");
 
     // ── NaN-boxing diagram ──
-    compat.fileWriteAll(f,"\x1b[1m  NaN-boxing\x1b[0m (every value = one u64):\n");
-    compat.fileWriteAll(f,"  \x1b[90m┌─────┬──────────┬──┬────┬──────────────────────────────────────────┐\x1b[0m\n");
-    compat.fileWriteAll(f,"  \x1b[90m│\x1b[0msign \x1b[90m│\x1b[0m exponent \x1b[90m│\x1b[0mQ \x1b[90m│\x1b[0mtag \x1b[90m│\x1b[0m payload (48 bits)                      \x1b[90m│\x1b[0m\n");
-    compat.fileWriteAll(f,"  \x1b[90m└─────┴──────────┴──┴────┴──────────────────────────────────────────┘\x1b[0m\n");
-    compat.fileWriteAll(f,"  \x1b[90mtag: 0=nil 1=bool 2=i48 3=sym 4=kw 5=str 6=obj  (non-NaN = float)\x1b[0m\n\n");
+    compat.fileWriteAll(f, "\x1b[1m  NaN-boxing\x1b[0m (every value = one u64):\n");
+    compat.fileWriteAll(f, "  \x1b[90m┌─────┬──────────┬──┬────┬──────────────────────────────────────────┐\x1b[0m\n");
+    compat.fileWriteAll(f, "  \x1b[90m│\x1b[0msign \x1b[90m│\x1b[0m exponent \x1b[90m│\x1b[0mQ \x1b[90m│\x1b[0mtag \x1b[90m│\x1b[0m payload (48 bits)                      \x1b[90m│\x1b[0m\n");
+    compat.fileWriteAll(f, "  \x1b[90m└─────┴──────────┴──┴────┴──────────────────────────────────────────┘\x1b[0m\n");
+    compat.fileWriteAll(f, "  \x1b[90mtag: 0=nil 1=bool 2=i48 3=sym 4=kw 5=str 6=obj  (non-NaN = float)\x1b[0m\n\n");
 
     // ── Eval demos ──
-    compat.fileWriteAll(f,"\x1b[1m  Eval\x1b[0m (fuel-bounded, 1M steps max):\n");
+    compat.fileWriteAll(f, "\x1b[1m  Eval\x1b[0m (fuel-bounded, 1M steps max):\n");
     demoEval("(+ 1 2 3)", &env, &gc, f);
     demoEval("(str \"hello\" \" \" \"world\")", &env, &gc, f);
     demoEval("(let* [x 10 y 20] (* x y))", &env, &gc, f);
@@ -90,25 +90,25 @@ pub fn main() !void {
     demoEval("(first [10 20 30])", &env, &gc, f);
     demoEval("(count [1 2 3 4 5])", &env, &gc, f);
     demoEval("(if (> 3 2) \"math works\" \"uh oh\")", &env, &gc, f);
-    compat.fileWriteAll(f,"\n");
+    compat.fileWriteAll(f, "\n");
 
     // ── GF(3) algebra ──
-    compat.fileWriteAll(f,"\x1b[1m  GF(3) algebra\x1b[0m (trit conservation: sum mod 3 = 0):\n");
+    compat.fileWriteAll(f, "\x1b[1m  GF(3) algebra\x1b[0m (trit conservation: sum mod 3 = 0):\n");
     demoEval("(gf3-add 1 1)", &env, &gc, f);
     demoEval("(gf3-add 1 -1)", &env, &gc, f);
     demoEval("(gf3-mul -1 -1)", &env, &gc, f);
     demoEval("(color-at 1069 0)", &env, &gc, f);
     demoEval("(color-at 1069 1)", &env, &gc, f);
-    compat.fileWriteAll(f,"\n");
+    compat.fileWriteAll(f, "\n");
 
     // ── Color strip ──
-    compat.fileWriteAll(f,"\x1b[1m  Color strip\x1b[0m (SplitMix64 seed=1069, GF(3) verified):\n");
+    compat.fileWriteAll(f, "\x1b[1m  Color strip\x1b[0m (SplitMix64 seed=1069, GF(3) verified):\n");
     color_strip.renderTritWheel(f, width) catch {};
-    compat.fileWriteAll(f,"\n");
+    compat.fileWriteAll(f, "\n");
     color_strip.renderStrip(f, 1069, width, 2) catch {};
-    compat.fileWriteAll(f,"\n");
+    compat.fileWriteAll(f, "\n");
 
     // ── Footer ──
-    compat.fileWriteAll(f,"  \x1b[90m21 modules | 5K LOC | MIT license | zig 0.15+\x1b[0m\n");
-    compat.fileWriteAll(f,"  \x1b[90mhttps://github.com/plurigrid/nanoclj-zig\x1b[0m\n\n");
+    compat.fileWriteAll(f, "  \x1b[90m21 modules | 5K LOC | MIT license | zig 0.15+\x1b[0m\n");
+    compat.fileWriteAll(f, "  \x1b[90mhttps://github.com/plurigrid/nanoclj-zig\x1b[0m\n\n");
 }

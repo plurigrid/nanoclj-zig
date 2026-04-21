@@ -721,7 +721,7 @@ fn appendDistinct(values: *std.ArrayListUnmanaged(Value), candidate: Value, gc: 
 }
 
 fn collectPayoffAdjustments(attrs: *Obj, info: *StrategicInfo, gc: *GC) !void {
-    if (mapGetByNames(attrs, gc, &.{ "payoffs" })) |payoffs| {
+    if (mapGetByNames(attrs, gc, &.{"payoffs"})) |payoffs| {
         if (payoffs.asNumber()) |amount| {
             try info.adjustments.append(gc.allocator, .{
                 .player = Value.makeNil(),
@@ -749,7 +749,7 @@ fn collectPayoffAdjustments(attrs: *Obj, info: *StrategicInfo, gc: *GC) !void {
                     if (!row.isObj()) continue;
                     const row_obj = row.asObj();
                     if (row_obj.kind != .map) continue;
-                    const player = mapGetByNames(row_obj, gc, &.{ "player" }) orelse Value.makeNil();
+                    const player = mapGetByNames(row_obj, gc, &.{"player"}) orelse Value.makeNil();
                     const amount_val = mapGetByNames(row_obj, gc, &.{ "payoff", "amount" }) orelse continue;
                     const amount = amount_val.asNumber() orelse continue;
                     try info.adjustments.append(gc.allocator, .{
@@ -766,7 +766,7 @@ fn collectPayoffAdjustments(attrs: *Obj, info: *StrategicInfo, gc: *GC) !void {
 
     if (mapGetByNames(attrs, gc, &.{ "payoff", "amount" })) |raw| {
         const amount = raw.asNumber() orelse return;
-        const player = mapGetByNames(attrs, gc, &.{ "player" }) orelse Value.makeNil();
+        const player = mapGetByNames(attrs, gc, &.{"player"}) orelse Value.makeNil();
         try info.adjustments.append(gc.allocator, .{
             .player = player,
             .amount = amount,
@@ -796,14 +796,14 @@ fn collectStrategicInfo(diag: Value, gc: *GC, info: *StrategicInfo) !void {
         {
             const name_val = mapGetByKeyword(obj, gc, "name") orelse Value.makeNil();
             const action_space = mapGetByNames(attrs, gc, &.{ "action-space", "actions" }) orelse Value.makeNil();
-            const payoff_table = mapGetByNames(attrs, gc, &.{ "payoff-table" }) orelse Value.makeNil();
-            const default_action = mapGetByNames(attrs, gc, &.{ "default-action" }) orelse firstSeqItem(action_space) orelse Value.makeNil();
-            const epsilon = if (mapGetByNames(attrs, gc, &.{ "epsilon" })) |v| v.asNumber() orelse 0.0 else 0.0;
+            const payoff_table = mapGetByNames(attrs, gc, &.{"payoff-table"}) orelse Value.makeNil();
+            const default_action = mapGetByNames(attrs, gc, &.{"default-action"}) orelse firstSeqItem(action_space) orelse Value.makeNil();
+            const epsilon = if (mapGetByNames(attrs, gc, &.{"epsilon"})) |v| v.asNumber() orelse 0.0 else 0.0;
             if (payoff_table.isNil()) info.missing_payoff_tables += 1;
             try info.decisions.append(gc.allocator, .{
                 .atomic = atomic,
                 .name = name_val,
-                .player = mapGetByNames(attrs, gc, &.{ "player" }) orelse Value.makeNil(),
+                .player = mapGetByNames(attrs, gc, &.{"player"}) orelse Value.makeNil(),
                 .action_space = action_space,
                 .payoff_table = payoff_table,
                 .observation_space = mapGetByNames(attrs, gc, &.{ "observation-space", "observations" }) orelse Value.makeNil(),
@@ -920,7 +920,7 @@ fn payoffFromRow(row_obj: *Obj, player: Value, gc: *GC) ?f64 {
     if (mapGetByNames(row_obj, gc, &.{ "payoff", "utility" })) |v| {
         return v.asNumber();
     }
-    if (mapGetByNames(row_obj, gc, &.{ "payoffs" })) |v| {
+    if (mapGetByNames(row_obj, gc, &.{"payoffs"})) |v| {
         if (v.asNumber()) |n| return n;
         if (!v.isObj()) return null;
         const obj = v.asObj();
@@ -1365,7 +1365,7 @@ test "open game play returns seed42 world/coworld closure trace" {
 
     var bootstrap_args = [_]Value{
         try strv(&gc, "bootstrap-context"),
-        try vectorValue(&gc, &.{ try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "x") }) }),
+        try vectorValue(&gc, &.{try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "x") })}),
         try vectorValue(&gc, &.{
             try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "world"), try kw(&gc, "x") }),
             try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "coworld"), try kw(&gc, "x") }),
@@ -1376,16 +1376,16 @@ test "open game play returns seed42 world/coworld closure trace" {
 
     var world_args = [_]Value{
         try strv(&gc, "world-play"),
-        try vectorValue(&gc, &.{ try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "world"), try kw(&gc, "x") }) }),
-        try vectorValue(&gc, &.{ try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "world"), try kw(&gc, "y") }) }),
+        try vectorValue(&gc, &.{try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "world"), try kw(&gc, "x") })}),
+        try vectorValue(&gc, &.{try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "world"), try kw(&gc, "y") })}),
         world_attrs,
     };
     const world_box = try monoidal_diagram.diagramBoxFn(world_args[0..], &gc, &env, &resources);
 
     var coworld_args = [_]Value{
         try strv(&gc, "coworld-coplay"),
-        try vectorValue(&gc, &.{ try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "coworld"), try kw(&gc, "x") }) }),
-        try vectorValue(&gc, &.{ try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "coworld"), try kw(&gc, "r") }) }),
+        try vectorValue(&gc, &.{try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "coworld"), try kw(&gc, "x") })}),
+        try vectorValue(&gc, &.{try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "coworld"), try kw(&gc, "r") })}),
         coworld_attrs,
     };
     const coworld_box = try monoidal_diagram.diagramBoxFn(coworld_args[0..], &gc, &env, &resources);
@@ -1399,7 +1399,7 @@ test "open game play returns seed42 world/coworld closure trace" {
             try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "world"), try kw(&gc, "y") }),
             try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "coworld"), try kw(&gc, "r") }),
         }),
-        try vectorValue(&gc, &.{ try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "closed"), try kw(&gc, "payoff-trace") }) }),
+        try vectorValue(&gc, &.{try vectorValue(&gc, &.{ try kw(&gc, "ctx"), try kw(&gc, "closed"), try kw(&gc, "payoff-trace") })}),
         closure_attrs,
     };
     const close = try monoidal_diagram.diagramBoxFn(close_args[0..], &gc, &env, &resources);
@@ -1440,8 +1440,8 @@ test "open game evaluate reports missing coworld as a risk" {
 
     var box_args = [_]Value{
         try strv(&gc, "world-only"),
-        try vectorValue(&gc, &.{ try kw(&gc, "X") }),
-        try vectorValue(&gc, &.{ try kw(&gc, "Y") }),
+        try vectorValue(&gc, &.{try kw(&gc, "X")}),
+        try vectorValue(&gc, &.{try kw(&gc, "Y")}),
         world_attrs,
     };
     const game = try monoidal_diagram.diagramBoxFn(box_args[0..], &gc, &env, &resources);
@@ -1568,7 +1568,7 @@ test "open game dependent decision respects observation-specific payoffs" {
     var decision_args = [_]Value{
         try strv(&gc, "weather-choice"),
         alice,
-        try vectorValue(&gc, &.{ rain }),
+        try vectorValue(&gc, &.{rain}),
         try vectorValue(&gc, &.{ umbrella, no_umbrella }),
         opts,
     };

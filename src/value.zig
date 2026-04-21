@@ -178,7 +178,10 @@ pub const Rational = struct {
         if (den == 0) return .{ .numerator = 0, .denominator = 1 }; // fallback
         var n = num;
         var d = den;
-        if (d < 0) { n = -n; d = -d; } // ensure denominator > 0
+        if (d < 0) {
+            n = -n;
+            d = -d;
+        } // ensure denominator > 0
         const g: i64 = @intCast(gcd(n, d));
         return .{ .numerator = @divTrunc(n, g), .denominator = @divTrunc(d, g) };
     }
@@ -298,13 +301,27 @@ pub const Value = packed struct {
         return (self.bits & (QNAN | (@as(u64, 0x7) << TAG_SHIFT))) == expected;
     }
 
-    pub fn isNil(self: Value) bool { return self.isTag(.nil); }
-    pub fn isBool(self: Value) bool { return self.isTag(.boolean); }
-    pub fn isInt(self: Value) bool { return self.isTag(.integer); }
-    pub fn isSymbol(self: Value) bool { return self.isTag(.symbol); }
-    pub fn isKeyword(self: Value) bool { return self.isTag(.keyword); }
-    pub fn isString(self: Value) bool { return self.isTag(.string); }
-    pub fn isObj(self: Value) bool { return self.isTag(.object); }
+    pub fn isNil(self: Value) bool {
+        return self.isTag(.nil);
+    }
+    pub fn isBool(self: Value) bool {
+        return self.isTag(.boolean);
+    }
+    pub fn isInt(self: Value) bool {
+        return self.isTag(.integer);
+    }
+    pub fn isSymbol(self: Value) bool {
+        return self.isTag(.symbol);
+    }
+    pub fn isKeyword(self: Value) bool {
+        return self.isTag(.keyword);
+    }
+    pub fn isString(self: Value) bool {
+        return self.isTag(.string);
+    }
+    pub fn isObj(self: Value) bool {
+        return self.isTag(.object);
+    }
 
     pub fn asBool(self: Value) bool {
         return self.getPayload() != 0;

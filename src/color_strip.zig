@@ -36,7 +36,7 @@ pub fn renderStrip(f: File, seed: u64, width: u32, rows: u32) !void {
                 bot.r, bot.g, bot.b,
             });
         }
-        compat.fileWriteAll(f,"\x1b[0m\n");
+        compat.fileWriteAll(f, "\x1b[0m\n");
     }
 
     const balance = @mod(trit_sum, 3);
@@ -58,7 +58,7 @@ pub fn renderNamedStrip(f: File, name: []const u8, width: u32, rows: u32) !void 
 }
 
 pub fn renderTritWheel(f: File, width: u32) !void {
-    compat.fileWriteAll(f,"\x1b[1mGF(3) trit wheel\x1b[0m\n");
+    compat.fileWriteAll(f, "\x1b[1mGF(3) trit wheel\x1b[0m\n");
     const third = width / 3;
 
     var i: u32 = 0;
@@ -83,26 +83,26 @@ pub fn renderTritWheel(f: File, width: u32) !void {
         const b: u8 = @intFromFloat((1.0 - frac) * 255.0);
         try filePrint(f, "\x1b[48;2;{};0;{}m ", .{ r, b });
     }
-    compat.fileWriteAll(f,"\x1b[0m\n");
+    compat.fileWriteAll(f, "\x1b[0m\n");
     try filePrint(f, "\x1b[90m{s:>20}{s:>27}{s:>27}\x1b[0m\n", .{ "+1 (red)", "0 (green)", "-1 (blue)" });
 }
 
 pub fn renderGapStrip(f: File, name_seed: u64, brain_seed: u64, width: u32) !void {
-    compat.fileWriteAll(f,"\x1b[1mname-color vs brain-color gap\x1b[0m\n");
+    compat.fileWriteAll(f, "\x1b[1mname-color vs brain-color gap\x1b[0m\n");
 
     var col: u32 = 0;
     while (col < width) : (col += 1) {
         const c = substrate.colorAt(name_seed, col);
         try filePrint(f, "\x1b[48;2;{};{};{}m ", .{ c.r, c.g, c.b });
     }
-    compat.fileWriteAll(f,"\x1b[0m name\n");
+    compat.fileWriteAll(f, "\x1b[0m name\n");
 
     col = 0;
     while (col < width) : (col += 1) {
         const c = substrate.colorAt(brain_seed, col);
         try filePrint(f, "\x1b[48;2;{};{};{}m ", .{ c.r, c.g, c.b });
     }
-    compat.fileWriteAll(f,"\x1b[0m brain\n");
+    compat.fileWriteAll(f, "\x1b[0m brain\n");
 
     col = 0;
     while (col < width) : (col += 1) {
@@ -113,5 +113,5 @@ pub fn renderGapStrip(f: File, name_seed: u64, brain_seed: u64, width: u32) !voi
         const db = if (n.b > b.b) n.b - b.b else b.b - n.b;
         try filePrint(f, "\x1b[48;2;{};{};{}m ", .{ dr, dg, db });
     }
-    compat.fileWriteAll(f,"\x1b[0m gap\n");
+    compat.fileWriteAll(f, "\x1b[0m gap\n");
 }

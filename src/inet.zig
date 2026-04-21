@@ -107,7 +107,25 @@ pub const Cell = struct {
         var r1: f32 = 0;
         var g1: f32 = 0;
         var b1: f32 = 0;
-        if (h_prime < 1) { r1 = c; g1 = x; } else if (h_prime < 2) { r1 = x; g1 = c; } else if (h_prime < 3) { g1 = c; b1 = x; } else if (h_prime < 4) { g1 = x; b1 = c; } else if (h_prime < 5) { r1 = x; b1 = c; } else { r1 = c; b1 = x; }
+        if (h_prime < 1) {
+            r1 = c;
+            g1 = x;
+        } else if (h_prime < 2) {
+            r1 = x;
+            g1 = c;
+        } else if (h_prime < 3) {
+            g1 = c;
+            b1 = x;
+        } else if (h_prime < 4) {
+            g1 = x;
+            b1 = c;
+        } else if (h_prime < 5) {
+            r1 = x;
+            b1 = c;
+        } else {
+            r1 = c;
+            b1 = x;
+        }
         const m: f32 = 0.28; // 0.55 - c/2
         const r: u8 = @intFromFloat(@max(0, @min(255, (r1 + m) * 255.0)));
         const g: u8 = @intFromFloat(@max(0, @min(255, (g1 + m) * 255.0)));

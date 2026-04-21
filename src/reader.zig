@@ -326,9 +326,7 @@ pub const Reader = struct {
         }
 
         // Attach directly if possible.
-        if (final_target.isObj() and canHoldMeta(final_target.asObj().kind)
-            and meta_map.isObj() and meta_map.asObj().kind == .map)
-        {
+        if (final_target.isObj() and canHoldMeta(final_target.asObj().kind) and meta_map.isObj() and meta_map.asObj().kind == .map) {
             final_target.asObj().meta = meta_map.asObj();
             return final_target;
         }
@@ -607,13 +605,7 @@ pub const Reader = struct {
                 const id = self.gc.internString(name) catch return error.OutOfMemory;
                 return Value.makeString(id);
             }
-            const ch: u8 = if (std.mem.eql(u8, name, "space")) ' '
-                else if (std.mem.eql(u8, name, "newline")) '\n'
-                else if (std.mem.eql(u8, name, "tab")) '\t'
-                else if (std.mem.eql(u8, name, "return")) '\r'
-                else if (std.mem.eql(u8, name, "backspace")) 8
-                else if (std.mem.eql(u8, name, "formfeed")) 12
-                else return error.UnexpectedChar;
+            const ch: u8 = if (std.mem.eql(u8, name, "space")) ' ' else if (std.mem.eql(u8, name, "newline")) '\n' else if (std.mem.eql(u8, name, "tab")) '\t' else if (std.mem.eql(u8, name, "return")) '\r' else if (std.mem.eql(u8, name, "backspace")) 8 else if (std.mem.eql(u8, name, "formfeed")) 12 else return error.UnexpectedChar;
             const buf = [_]u8{ch};
             const id = self.gc.internString(&buf) catch return error.OutOfMemory;
             return Value.makeString(id);
@@ -868,9 +860,7 @@ fn extractMeta(v: Value, gc: *GC) ?*@import("value.zig").Obj {
     if (v.asObj().meta) |m| return m;
     if (v.asObj().kind == .list) {
         const items = v.asObj().data.list.items.items;
-        if (items.len == 3 and items[0].isSymbol()
-            and std.mem.eql(u8, gc.getString(items[0].asSymbolId()), "with-meta"))
-        {
+        if (items.len == 3 and items[0].isSymbol() and std.mem.eql(u8, gc.getString(items[0].asSymbolId()), "with-meta")) {
             if (items[2].isObj() and items[2].asObj().kind == .map) {
                 return items[2].asObj();
             }
