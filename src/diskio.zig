@@ -38,7 +38,7 @@ pub const Handle = struct {
 
     pub fn close(self: *Handle) void {
         if (self.closed) return;
-        if (!is_wasm) _ = std.c.close(self.fd);
+        if (!is_wasm) _ = std.posix.close(self.fd);
         self.closed = true;
     }
 };
@@ -63,7 +63,7 @@ pub const MmapView = struct {
         if (!is_wasm) {
             const aligned: *align(std.heap.page_size_min) anyopaque =
                 @ptrCast(@alignCast(@constCast(self.data.ptr)));
-            _ = std.c.munmap(aligned, self.data.len);
+            std.posix.munmap(aligned[0..self.data.len]);
         }
         self.unmapped = true;
     }
@@ -101,43 +101,40 @@ pub fn openNative(path: []const u8, f: OpenFlags) DiskError!i32 {
     var pbuf: [4096]u8 = undefined;
     const p = pathz(path, &pbuf) orelse return DiskError.InvalidPath;
 
-    var flags: std.c.O = .{};
+    var flags: std.posix.O = .{};
     flags.ACCMODE = if (f.read and f.write) .RDWR else if (f.write) .WRONLY else .RDONLY;
     if (f.create) flags.CREAT = true;
     if (f.truncate) flags.TRUNC = true;
     if (f.append) flags.APPEND = true;
     if (f.excl) flags.EXCL = true;
 
-    const fd = std.c.open(p.ptr, flags, @as(std.c.mode_t, f.mode));
-    if (fd < 0) return DiskError.OpenFailed;
+    const fd = std.posix.openZ(p.ptr, flags, @as(std.posix.mode_t, f.mode)) catch return DiskError.OpenFailed;
     return fd;
 }
 
 pub fn closeNative(fd: i32) void {
-    _ = std.c.close(fd);
+    _ = std.posix.close(fd);
 }
 
 pub fn sizeNative(fd: i32) DiskError!u64 {
-    var st: std.c.Stat = undefined;
-    const rc = std.c.fstat(fd, &st);
-    if (rc != 0) return DiskError.StatFailed;
+    const st = std.posix.fstat(fd) catch return DiskError.StatFailed;
     return @intCast(st.size);
 }
 
 pub fn preadNative(fd: i32, offset: u64, buf: []u8) DiskError!usize {
-    const rc = std.c.pread(fd, buf.ptr, buf.len, @intCast(offset));
+    const rc = std.posix.pread(fd, buf, @intCast(offset)) catch return DiskError.ReadFailed;
     if (rc < 0) return DiskError.ReadFailed;
     return @intCast(rc);
 }
 
 pub fn pwriteNative(fd: i32, offset: u64, buf: []const u8) DiskError!usize {
-    const rc = std.c.pwrite(fd, buf.ptr, buf.len, @intCast(offset));
+    const rc = std.posix.pwrite(fd, buf, @intCast(offset)) catch return DiskError.WriteFailed;
     if (rc < 0) return DiskError.WriteFailed;
     return @intCast(rc);
 }
 
 pub fn fsyncNative(fd: i32) DiskError!void {
-    const rc = std.c.fsync(fd);
+    const rc = std.posix.fsync(fd) catch return DiskError.FsyncFailed;
     if (rc != 0) return DiskError.FsyncFailed;
 }
 
@@ -170,7 +167,7 @@ pub fn atomicSpitNative(path: []const u8, data: []const u8) DiskError!void {
 
     // Build tmp path: <path>.tmp.<pid>
     var tmp_buf: [4160]u8 = undefined;
-    const pid = std.c.getpid();
+    const pid = std.posix.getpid();
     const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path, pid }) catch
         return DiskError.InvalidPath;
 
@@ -183,7 +180,7 @@ pub fn atomicSpitNative(path: []const u8, data: []const u8) DiskError!void {
     // If anything fails after open we want to unlink the tmp and close the fd.
     errdefer {
         var unlink_buf: [4160]u8 = undefined;
-        if (pathz(tmp, &unlink_buf)) |p| _ = std.c.unlink(p.ptr);
+        if (pathz(tmp, &unlink_buf)) |p| _ = std.posix.unlinkZ(p.ptr);
         closeNative(fd);
     }
 
@@ -201,7 +198,7 @@ pub fn atomicSpitNative(path: []const u8, data: []const u8) DiskError!void {
     var new_buf: [4096]u8 = undefined;
     const old_p = pathz(tmp, &old_buf) orelse return DiskError.InvalidPath;
     const new_p = pathz(path, &new_buf) orelse return DiskError.InvalidPath;
-    const rc = std.c.rename(old_p.ptr, new_p.ptr);
+    const rc = std.posix.renameZ(old_p.ptr, new_p.ptr);
     if (rc != 0) return DiskError.RenameFailed;
 }
 
@@ -213,9 +210,9 @@ pub fn mmapReadOnlyNative(path: []const u8) DiskError!MmapView {
     const sz = try sizeNative(fd);
     if (sz == 0) return .{ .data = &[_]u8{}, .unmapped = true };
 
-    const prot: std.c.PROT = .{ .READ = true };
-    const flags: std.c.MAP = .{ .TYPE = .PRIVATE };
-    const ptr = std.c.mmap(null, @intCast(sz), prot, flags, fd, 0);
+    const prot: std.posix.PROT = .{ .READ = true };
+    const flags: std.posix.MAP = .{ .TYPE = .PRIVATE };
+    const ptr = std.posix.mmap(null, @intCast(sz), prot, flags, fd, 0) catch return DiskError.MmapFailed;
     if (@intFromPtr(ptr) == ~@as(usize, 0)) return DiskError.MmapFailed;
     const bytes: [*]const u8 = @ptrCast(ptr);
     return .{ .data = bytes[0..@intCast(sz)], .unmapped = false };
