@@ -264,6 +264,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/flow.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
     const run_flow_tests = b.addRunArtifact(flow_tests);
@@ -277,6 +278,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/flow_value.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
                 .{ .name = "build_options", .module = full_build_options },
