@@ -99,4 +99,5 @@ test {
     _ = tool;
     _ = action;
     _ = telemetry;
+    _ = @import("aor_world_test.zig");
 }

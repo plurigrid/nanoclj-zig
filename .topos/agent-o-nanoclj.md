@@ -38,44 +38,67 @@ The implementation is layered so each rung passes `zig build test` before the
 next one is added.
 
 ```
+Actual shipped state (as of commit cbfc2e90, 64/64 aor tests):
+
 Rung 0  existing primitives  already on main
   propagator.Cell, latticeMerge, scheduler
   refs_agents.{Ref,Agent,Atom}
   datalog (query engine)
 
-Rung 1  agent/agent-node         src/agent.zig          THIS PATCH
-  Agent record: id, name, fn-pointer, state Ref, trace-ptr
-  agent-fn signature: (agent: *Agent, in: Value) Value
-  stateless invoke helper
+Rung 1  Agent primitive         src/aor_agent.zig        8 tests
+  Agent{id, name, body: *fn(ctx, input) !Value, ?state, ?trace_slot}
+  invoke / invokeStateless / withState
 
-Rung 2  trace                    src/agent_trace.zig
-  append-only event log per-invoke-id:
-    {step, agent-id, in, out, ts_mono, tags}
-  replayable; diff-able
+Rung 2  Trace store             src/aor_trace.zig        8 tests
+  TraceEvent{invoke_id, step, agent_id, agent_name, input, ?output,
+             ts_mono, tags}
+  TraceStore.startInvocation / recordStep / completeStep /
+            getInvocation / eventCount
 
-Rung 3  topology + invocation    src/agent_topology.zig
-  AgentNode = wraps an Agent fn + its input/output cells
-  AgentTopology = DAG of AgentNodes via propagator edges
-  invoke(topo, input) -> {output, trace_id}
+Rung 3  Topology + invoke       src/aor_topology.zig     9 tests
+  Topology.newAgent / connect / getAgent
+  invoke(topo, trace, start, input) → {final, invoke_id}
+  synchronous DFS, cycle cap 1024
 
-Rung 4  evaluator                src/agent_eval.zig
-  Individual(score fn):   Value -> f32
-  Comparative(pref fn):   (Value, Value) -> {-1, 0, 1}
-  Summary(agg fn):        []Value -> f32
+Rung 4  Evaluator trio          src/aor_eval.zig         7 tests
+  individual(name, f): Value → f32
+  comparative(name, f): (Value,Value) → {a-better, tie, b-better}
+  summary(name, f): []Value → f32
+  scoreOne / scorePair / scoreMany / scoreInvocationSteps
 
-Rung 5  dataset + experiment     src/agent_dataset.zig
-                                  src/agent_experiment.zig
-  Dataset = EDN/JSON file of {input, expected?, tags}
-  Experiment = (topology, dataset, []evaluator) -> Report
+Rung 5a Dataset                 src/aor_dataset.zig      2 tests
+  Example{input, ?expected, tags}
+  Dataset.init / addExample / len
 
-Rung 6  persistence + streaming  src/agent_store.zig
-                                  src/agent_stream.zig
-  PState-like store over refs + diskio
-  AgentStream for streaming invocation events
+Rung 5b Experiment              src/aor_experiment.zig   4 tests
+  Experiment(topo, trace, dataset, evaluators, start)
+  run() → Report{total, pass_count, fail_count, examples, passRate}
+  Configurable PassFn predicate
 
-Rung 7  human feedback           src/agent_feedback.zig
-  side-channel input queue
-  invocation pauses on `hi-request` cell until feedback Ref writes
+Rung 7  Feedback closure        src/aor_feedback.zig     8 tests
+  cycleUntil(single target, user predicate)
+  cycleUntilMulti(N targets, shared verdict stream)
+  cycleUntilFixedPoint(halt when no agent wants to revise)
+  CycleResult.passRateTrajectory / lastDelta / isDiverging(window)
+
+Rung 8  Tools                   src/aor_tool.zig         5 tests
+  Tool{name, description, invoke: fn(Value) !Value}
+  ToolRegistry.register / get / call / count
+
+Rung 9  Actions + ActionLog     src/aor_action.zig       5 tests
+  Action{name, description, body: fn(RunInfo) !ActionResult}
+  RunInfo{invoke_id, input, output, latency_ns, step_count}
+  ActionLog.forInvocation / runActionsOnInvocation
+
+Rung 10 Telemetry               src/aor_telemetry.zig    6 tests
+  Sample{ts_ns, value, tags} / Series / Aggregate
+  TelemetrySink.record / aggregate(window) / aggregateAll /
+                 ingestVerdicts / ingestRunInfo
+
+Rung 6  persistence + streaming DEFERRED (strictly additive;
+                                          loop closes without it)
+  Would swap in-memory TraceStore/ActionLog/TelemetrySink for
+  disk-backed appenders + streaming subscription hooks.
 ```
 
 ## 3. Wire plumbing
