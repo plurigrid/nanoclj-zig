@@ -42,11 +42,11 @@ pub const VersionId = [16]u8; // 128-bit hash
 pub const Version = struct {
     id: VersionId,
     parents: []const VersionId,
-    form: []const u8,        // S-expression that produced this version
-    result: []const u8,      // printed result
-    env_patch: []const u8,   // Syrup-encoded env delta (new bindings only)
-    trit: i8,                // GF(3) trit of this eval
-    timestamp_ns: i64,       // trit-tick epoch
+    form: []const u8, // S-expression that produced this version
+    result: []const u8, // printed result
+    env_patch: []const u8, // Syrup-encoded env delta (new bindings only)
+    trit: i8, // GF(3) trit of this eval
+    timestamp_ns: i64, // trit-tick epoch
 };
 
 /// SplitMix64 hash of form string → version ID
@@ -276,8 +276,7 @@ pub const BraidRepl = struct {
     }
 
     /// Process an eval and broadcast to subscribers
-    pub fn eval(self: *BraidRepl, form: []const u8, result: []const u8,
-                env_patch_syrup: []const u8) !VersionId {
+    pub fn eval(self: *BraidRepl, form: []const u8, result: []const u8, env_patch_syrup: []const u8) !VersionId {
         const parent = self.log.frontier();
         const id = hashVersion(form, parent);
 
@@ -373,12 +372,9 @@ test "version log GF(3)" {
     defer log.versions.deinit(allocator);
 
     // Append 3 versions with trits that sum to 0
-    try log.append(.{ .id = hashVersion("a", null), .parents = &.{},
-        .form = "a", .result = "1", .env_patch = "", .trit = 1, .timestamp_ns = 0 });
-    try log.append(.{ .id = hashVersion("b", null), .parents = &.{},
-        .form = "b", .result = "2", .env_patch = "", .trit = 0, .timestamp_ns = 0 });
-    try log.append(.{ .id = hashVersion("c", null), .parents = &.{},
-        .form = "c", .result = "3", .env_patch = "", .trit = -1, .timestamp_ns = 0 });
+    try log.append(.{ .id = hashVersion("a", null), .parents = &.{}, .form = "a", .result = "1", .env_patch = "", .trit = 1, .timestamp_ns = 0 });
+    try log.append(.{ .id = hashVersion("b", null), .parents = &.{}, .form = "b", .result = "2", .env_patch = "", .trit = 0, .timestamp_ns = 0 });
+    try log.append(.{ .id = hashVersion("c", null), .parents = &.{}, .form = "c", .result = "3", .env_patch = "", .trit = -1, .timestamp_ns = 0 });
 
     try std.testing.expect(log.gf3Balanced());
     try std.testing.expectEqual(@as(usize, 3), log.versions.items.len);

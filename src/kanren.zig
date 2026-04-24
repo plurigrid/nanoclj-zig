@@ -618,7 +618,7 @@ fn executeGoal(goal: Value, subst: Value, gc: *GC) !Value {
                     try closure.data.vector.items.append(gc.allocator, closure_tag);
                     try closure.data.vector.items.append(gc.allocator, parts[1]); // param
                     try closure.data.vector.items.append(gc.allocator, parts[2]); // body
-                    try closure.data.vector.items.append(gc.allocator, env_val);  // captured env
+                    try closure.data.vector.items.append(gc.allocator, env_val); // captured env
 
                     const s1 = try unify(val, Value.makeObj(closure), subst.asObj(), gc);
                     if (s1) |final| {

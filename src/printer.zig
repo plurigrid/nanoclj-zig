@@ -124,7 +124,7 @@ pub fn prStrInto(buf: *std.ArrayListUnmanaged(u8), val: Value, gc: *GC, readably
             .trace => {
                 try buf.appendSlice(gc.allocator, "#<trace ");
                 var tmp: [32]u8 = undefined;
-                const s = std.fmt.bufPrint(&tmp, "sites={d} w={d}", .{obj.data.trace.len(), obj.data.trace.log_weight}) catch "?";
+                const s = std.fmt.bufPrint(&tmp, "sites={d} w={d}", .{ obj.data.trace.len(), obj.data.trace.log_weight }) catch "?";
                 try buf.appendSlice(gc.allocator, s);
                 try buf.append(gc.allocator, '>');
             },

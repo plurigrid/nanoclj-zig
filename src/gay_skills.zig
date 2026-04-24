@@ -181,8 +181,8 @@ pub const World = struct {
 // ============================================================================
 
 pub const CellState = enum {
-    nothing,     // ⊥ — no information
-    value,       // has a value
+    nothing, // ⊥ — no information
+    value, // has a value
     contradiction, // ⊤ — inconsistent
 };
 
@@ -243,9 +243,12 @@ pub fn worldStepFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Valu
     const hex = "0123456789ABCDEF";
     hex_buf = .{
         '#',
-        hex[c.r >> 4], hex[c.r & 0xF],
-        hex[c.g >> 4], hex[c.g & 0xF],
-        hex[c.b >> 4], hex[c.b & 0xF],
+        hex[c.r >> 4],
+        hex[c.r & 0xF],
+        hex[c.g >> 4],
+        hex[c.g & 0xF],
+        hex[c.b >> 4],
+        hex[c.b & 0xF],
     };
     try result_obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString("color")));
     try result_obj.data.map.vals.append(gc.allocator, Value.makeString(try gc.internString(&hex_buf)));
@@ -327,9 +330,12 @@ pub fn depthColorFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Val
     const hex = "0123456789ABCDEF";
     hex_buf = .{
         '#',
-        hex[c.r >> 4], hex[c.r & 0xF],
-        hex[c.g >> 4], hex[c.g & 0xF],
-        hex[c.b >> 4], hex[c.b & 0xF],
+        hex[c.r >> 4],
+        hex[c.r & 0xF],
+        hex[c.g >> 4],
+        hex[c.g & 0xF],
+        hex[c.b >> 4],
+        hex[c.b & 0xF],
     };
     const obj = try gc.allocObj(.map);
     const kw = struct {
@@ -365,9 +371,12 @@ pub fn colorHexFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value
     const hex = "0123456789ABCDEF";
     const hex_buf: [7]u8 = .{
         '#',
-        hex[r >> 4], hex[r & 0xF],
-        hex[g >> 4], hex[g & 0xF],
-        hex[b >> 4], hex[b & 0xF],
+        hex[r >> 4],
+        hex[r & 0xF],
+        hex[g >> 4],
+        hex[g & 0xF],
+        hex[b >> 4],
+        hex[b & 0xF],
     };
     return Value.makeString(try gc.internString(&hex_buf));
 }
@@ -410,18 +419,18 @@ fn hexVal(c: u8) ?u8 {
 /// Call this from core.zig after initCore.
 pub const skill_table = .{
     // Skills 1-2 already registered as mix64, color-at in substrate
-    .{ "color-hex", &colorHexFn },         // 3
-    .{ "color-trit", &colorTritFn },        // 4
+    .{ "color-hex", &colorHexFn }, // 3
+    .{ "color-trit", &colorTritFn }, // 4
     // Skills 5-8 already registered as gf3-add, gf3-mul, gf3-conserved?, trit-balance
-    .{ "tropical-add", &tropicalAddFn },    // 9
-    .{ "tropical-mul", &tropicalMulFn },    // 10
-    .{ "world-create", &worldCreateFn },    // 11
-    .{ "world-step", &worldStepFn },        // 12
-    .{ "propagate", &propagateFn },         // 13
+    .{ "tropical-add", &tropicalAddFn }, // 9
+    .{ "tropical-mul", &tropicalMulFn }, // 10
+    .{ "world-create", &worldCreateFn }, // 11
+    .{ "world-step", &worldStepFn }, // 12
+    .{ "propagate", &propagateFn }, // 13
     // Skill 14: xor-fingerprint already registered
-    .{ "entropy", &entropyFn },             // 15
-    .{ "depth-color", &depthColorFn },      // 16
-    .{ "bisim?", &bisimCheckFn },           // 17
+    .{ "entropy", &entropyFn }, // 15
+    .{ "depth-color", &depthColorFn }, // 16
+    .{ "bisim?", &bisimCheckFn }, // 17
 };
 
 // ============================================================================

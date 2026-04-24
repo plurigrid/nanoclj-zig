@@ -113,8 +113,8 @@ pub const SplitRng = struct {
         const v = self.next();
         // Trit derived from value — deterministic, GF(3) phase of seed position
         const trit: i8 = switch (@as(u2, @truncate(self.seed % 3))) {
-            0 => 0,  // mechanism
-            1 => 1,  // signal
+            0 => 0, // mechanism
+            1 => 1, // signal
             2 => -1, // act
             else => 0,
         };

@@ -1,10 +1,10 @@
 # nanoclj-zig
 
-A Clojure interpreter in Zig. Single static binary. Zig 0.16 stdlib is the only runtime dependency.
+A Clojure interpreter in Zig. Single static binary. Zig 0.16.0 stdlib is the only runtime dependency.
 
 ## Install
 
-Requires [Zig 0.16](https://ziglang.org/download/).
+Requires [Zig 0.16.0](https://ziglang.org/download/).
 
 ```sh
 git clone https://github.com/plurigrid/nanoclj-zig

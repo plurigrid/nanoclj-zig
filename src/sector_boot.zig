@@ -61,8 +61,7 @@ fn putchar(c: u8) void {
             \\ int $0x10
             :
             : [al] "{al}" (c),
-            : .{ .ah = true }
-        );
+            : .{ .ah = true });
     }
 }
 
@@ -73,8 +72,7 @@ fn getchar() u8 {
             \\ int $0x16
             : [ret] "={al}" (-> u8),
             :
-            : .{ .ah = true }
-        );
+            : .{ .ah = true });
     }
     return 0;
 }

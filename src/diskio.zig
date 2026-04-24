@@ -61,9 +61,9 @@ pub const MmapView = struct {
     pub fn unmap(self: *MmapView) void {
         if (self.unmapped or self.data.len == 0) return;
         if (!is_wasm) {
-            const aligned: *align(std.heap.page_size_min) anyopaque =
-                @ptrCast(@alignCast(@constCast(self.data.ptr)));
-            _ = std.c.munmap(aligned, self.data.len);
+            const aligned: [*]align(std.heap.page_size_min) const u8 =
+                @ptrCast(@alignCast(self.data.ptr));
+            std.posix.munmap(aligned[0..self.data.len]);
         }
         self.unmapped = true;
     }
@@ -83,12 +83,12 @@ pub const DiskError = error{
 };
 
 // ============================================================================
-// NATIVE IMPLEMENTATION (POSIX)
+// NATIVE IMPLEMENTATION (POSIX via std.c extern bindings)
 // ============================================================================
-
-// Zig 0.16 std.c exports: open takes (path, flags, ...), close(fd), fsync(fd),
-// pread(fd, buf, len, off), pwrite(fd, buf, len, off), fstat(fd, *stat),
-// rename(old, new), unlink(path), mkstemp(template).
+// Zig 0.16 removed std.posix.{close,openZ,pread,pwrite,fstat,fsync,getpid,
+// unlinkZ,renameZ,write} in favor of the vtable-based std.Io.File model. Since
+// this module holds a raw fd:i32 as its API boundary and libc is linked by
+// build.zig, we call the C extern bindings directly via std.c.*.
 
 fn pathz(path: []const u8, buf: []u8) ?[:0]const u8 {
     if (path.len >= buf.len) return null;
@@ -100,17 +100,15 @@ fn pathz(path: []const u8, buf: []u8) ?[:0]const u8 {
 pub fn openNative(path: []const u8, f: OpenFlags) DiskError!i32 {
     var pbuf: [4096]u8 = undefined;
     const p = pathz(path, &pbuf) orelse return DiskError.InvalidPath;
-
     var flags: std.c.O = .{};
     flags.ACCMODE = if (f.read and f.write) .RDWR else if (f.write) .WRONLY else .RDONLY;
     if (f.create) flags.CREAT = true;
     if (f.truncate) flags.TRUNC = true;
     if (f.append) flags.APPEND = true;
     if (f.excl) flags.EXCL = true;
-
     const fd = std.c.open(p.ptr, flags, @as(std.c.mode_t, f.mode));
     if (fd < 0) return DiskError.OpenFailed;
-    return fd;
+    return @intCast(fd);
 }
 
 pub fn closeNative(fd: i32) void {
@@ -118,10 +116,10 @@ pub fn closeNative(fd: i32) void {
 }
 
 pub fn sizeNative(fd: i32) DiskError!u64 {
-    var st: std.c.Stat = undefined;
-    const rc = std.c.fstat(fd, &st);
-    if (rc != 0) return DiskError.StatFailed;
-    return @intCast(st.size);
+    const end = std.c.lseek(fd, 0, std.c.SEEK.END);
+    if (end < 0) return DiskError.StatFailed;
+    _ = std.c.lseek(fd, 0, std.c.SEEK.SET);
+    return @intCast(end);
 }
 
 pub fn preadNative(fd: i32, offset: u64, buf: []u8) DiskError!usize {
@@ -161,14 +159,10 @@ pub fn readAllBytesNative(
 }
 
 /// Crash-safe overwrite: write to a tmp file, fsync, rename over the target.
-/// POSIX guarantees rename is atomic on the same filesystem; the fsync ensures
-/// the new content is durable before the rename publishes it. On power loss
-/// you either see the old file or the fully-written new one — never a torn write.
 pub fn atomicSpitNative(path: []const u8, data: []const u8) DiskError!void {
     var pbuf: [4096]u8 = undefined;
     _ = pathz(path, &pbuf) orelse return DiskError.InvalidPath;
 
-    // Build tmp path: <path>.tmp.<pid>
     var tmp_buf: [4160]u8 = undefined;
     const pid = std.c.getpid();
     const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path, pid }) catch
@@ -180,7 +174,7 @@ pub fn atomicSpitNative(path: []const u8, data: []const u8) DiskError!void {
         .truncate = true,
         .read = false,
     });
-    // If anything fails after open we want to unlink the tmp and close the fd.
+
     errdefer {
         var unlink_buf: [4160]u8 = undefined;
         if (pathz(tmp, &unlink_buf)) |p| _ = std.c.unlink(p.ptr);
@@ -196,7 +190,6 @@ pub fn atomicSpitNative(path: []const u8, data: []const u8) DiskError!void {
     try fsyncNative(fd);
     closeNative(fd);
 
-    // Rename tmp → path (atomic on same fs).
     var old_buf: [4160]u8 = undefined;
     var new_buf: [4096]u8 = undefined;
     const old_p = pathz(tmp, &old_buf) orelse return DiskError.InvalidPath;
@@ -206,19 +199,15 @@ pub fn atomicSpitNative(path: []const u8, data: []const u8) DiskError!void {
 }
 
 /// Read-only zero-copy view: mmap(PROT_READ, MAP_PRIVATE) the whole file.
-/// Returned slice is valid until the caller unmaps via MmapView.unmap().
 pub fn mmapReadOnlyNative(path: []const u8) DiskError!MmapView {
     const fd = try openNative(path, .{ .read = true });
     defer closeNative(fd);
     const sz = try sizeNative(fd);
     if (sz == 0) return .{ .data = &[_]u8{}, .unmapped = true };
-
-    const prot: std.c.PROT = .{ .READ = true };
-    const flags: std.c.MAP = .{ .TYPE = .PRIVATE };
-    const ptr = std.c.mmap(null, @intCast(sz), prot, flags, fd, 0);
-    if (@intFromPtr(ptr) == ~@as(usize, 0)) return DiskError.MmapFailed;
-    const bytes: [*]const u8 = @ptrCast(ptr);
-    return .{ .data = bytes[0..@intCast(sz)], .unmapped = false };
+    const prot: std.posix.PROT = .{ .READ = true };
+    const flags: std.posix.MAP = .{ .TYPE = .PRIVATE };
+    const slice = std.posix.mmap(null, @intCast(sz), prot, flags, fd, 0) catch return DiskError.MmapFailed;
+    return .{ .data = slice[0..@intCast(sz)], .unmapped = false };
 }
 
 // ============================================================================
@@ -241,7 +230,10 @@ pub fn pwriteStub(_: i32, _: u64, _: []const u8) DiskError!usize {
 pub fn fsyncStub(_: i32) DiskError!void {
     return DiskError.Unsupported;
 }
-pub fn readAllBytesStub(_: std.mem.Allocator, _: []const u8) DiskError![]u8 {
+pub fn readAllBytesStub(
+    _: std.mem.Allocator,
+    _: []const u8,
+) DiskError![]u8 {
     return DiskError.Unsupported;
 }
 pub fn atomicSpitStub(_: []const u8, _: []const u8) DiskError!void {

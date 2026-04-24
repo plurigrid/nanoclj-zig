@@ -204,7 +204,7 @@ fn benchRep(input: []const u8, env: *Env, gc: *GC, allocator: std.mem.Allocator,
 
     var buf: [512]u8 = undefined;
     const out = std.fmt.bufPrint(&buf, "tree-walk: {s} in {d}ms | bytecode: {s} in {d}ms | speedup: {d:.1}x", .{
-        tw_str, tw_ns / 1_000_000, bc_str, bc_ns / 1_000_000,
+        tw_str,                                                                   tw_ns / 1_000_000, bc_str, bc_ns / 1_000_000,
         @as(f64, @floatFromInt(tw_ns)) / @as(f64, @floatFromInt(@max(bc_ns, 1))),
     }) catch return "Error: format failed";
 

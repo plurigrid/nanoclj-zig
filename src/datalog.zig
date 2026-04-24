@@ -446,7 +446,10 @@ pub const Engine = struct {
                 const r = self.rules[ri].head.rel;
                 var found = false;
                 for (0..rel_count) |k| {
-                    if (derived_rels[k] == r) { found = true; break; }
+                    if (derived_rels[k] == r) {
+                        found = true;
+                        break;
+                    }
                 }
                 if (!found and rel_count < MAX_RULES) {
                     derived_rels[rel_count] = r;
@@ -518,8 +521,12 @@ pub const Engine = struct {
         for (0..self.facts.len) |i| {
             const f = &self.facts.facts[i];
             if (f.rel != rel_id) continue;
-            if (a1_id) |id| { if (f.args[0] != id) continue; }
-            if (a2_id) |id| { if (f.args[1] != id) continue; }
+            if (a1_id) |id| {
+                if (f.args[0] != id) continue;
+            }
+            if (a2_id) |id| {
+                if (f.args[1] != id) continue;
+            }
             result.add(f.*);
         }
         return result;
@@ -656,7 +663,10 @@ pub const Engine = struct {
             var matches = true;
             for (0..MAX_ARGS) |a| {
                 if (query_atom.args[a].is_var) continue; // wildcard
-                if (query_atom.args[a].id != f.args[a]) { matches = false; break; }
+                if (query_atom.args[a].id != f.args[a]) {
+                    matches = false;
+                    break;
+                }
             }
             if (matches) {
                 match_count += 1;

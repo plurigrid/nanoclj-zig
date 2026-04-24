@@ -33,8 +33,8 @@ pub const Scope = struct {
     parent: ?*Scope,
 
     const BindInfo = struct {
-        port: Port,   // where the variable's value is available
-        uses: u16,    // how many times referenced (for dup/erase)
+        port: Port, // where the variable's value is available
+        uses: u16, // how many times referenced (for dup/erase)
     };
 
     pub fn init(allocator: std.mem.Allocator, parent: ?*Scope) Scope {

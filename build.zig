@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .cwd_relative = syrup_path },
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     const full_build_options = addBuildOptions(b, target, optimize, .full);
@@ -41,6 +42,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
                 .{ .name = "build_options", .module = full_build_options },
@@ -62,6 +64,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/mcp_tool.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
@@ -83,6 +86,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/gorj_mcp.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
@@ -104,6 +108,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/strip_main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
     b.installArtifact(strip);
@@ -121,6 +126,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/world.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
@@ -222,6 +228,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = .ReleaseSmall,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
                 .{ .name = "build_options", .module = embed_safe_options },
@@ -257,6 +264,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/flow.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
     const run_flow_tests = b.addRunArtifact(flow_tests);
@@ -270,6 +278,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/flow_value.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
                 .{ .name = "build_options", .module = full_build_options },

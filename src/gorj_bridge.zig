@@ -50,8 +50,8 @@ const compat = @import("compat.zig");
 // Trit accumulator uses index mod 3 — deterministic from position alone.
 const GOLDEN = 0x9e3779b97f4a7c15;
 
-var root_seed: u64 = 0;          // set once from world seed via initSession
-var invocation_index: u64 = 0;   // monotonic, but only for ordering — not state
+var root_seed: u64 = 0; // set once from world seed via initSession
+var invocation_index: u64 = 0; // monotonic, but only for ordering — not state
 var trit_accumulator: i32 = 0;
 
 /// SplitMix64 — canonical bijection, same constants as Gay.jl/substrate.zig
@@ -215,25 +215,25 @@ pub fn gorjToolsFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Valu
     _ = args;
     const tool_names = [_][]const u8{
         // Core eval + pipeline
-        "gorj_eval",           "gorj_pipe",           "gorj_encode",
-        "gorj_decode",         "gorj_version",        "gorj_tools",
-        "gorj_trit_tick",      "gorj_generate_ticks", "gorj_partition_by_trit",
-        "gorj_spi_verify",     "gorj_color",          "gorj_substrate",
-        "gorj_compile",        "gorj_spacetime",      "gorj_peval",
-        "gorj_atom",           "gorj_session",        "gorj_fuel",
+        "gorj_eval",            "gorj_pipe",            "gorj_encode",
+        "gorj_decode",          "gorj_version",         "gorj_tools",
+        "gorj_trit_tick",       "gorj_generate_ticks",  "gorj_partition_by_trit",
+        "gorj_spi_verify",      "gorj_color",           "gorj_substrate",
+        "gorj_compile",         "gorj_spacetime",       "gorj_peval",
+        "gorj_atom",            "gorj_session",         "gorj_fuel",
         // Convergence bridge (OCapN/CapTP + MCP proxy + inet)
-        "gorj_captp_bootstrap","gorj_captp_introduce","gorj_captp_deliver",
-        "gorj_captp_abort",    "gorj_inet_reduce",    "gorj_mcp_proxy",
+        "gorj_captp_bootstrap", "gorj_captp_introduce", "gorj_captp_deliver",
+        "gorj_captp_abort",     "gorj_inet_reduce",     "gorj_mcp_proxy",
         "gorj_convergence",
         // String diagram tools (v0.3.0)
-        "gorj_string_diagram", "gorj_diagram_reduce",  "gorj_diagram_compose",
-        "gorj_diagram_parse",  "gorj_diagram_kernel",
+            "gorj_string_diagram",  "gorj_diagram_reduce",
+        "gorj_diagram_compose", "gorj_diagram_parse",   "gorj_diagram_kernel",
         // Dialect bridges
-        "gorj_bb",             "gorj_jank",           "gorj_cljw",
-        "gorj_squint",         "gorj_dart",           "gorj_basilisp",
-        "gorj_glojure",        "gorj_joker",          "gorj_nbb",
-        "gorj_scittle",        "gorj_clr",            "gorj_cherry",
-        "gorj_cream",          "gorj_clojerl",        "gorj_dialects",
+        "gorj_bb",              "gorj_jank",            "gorj_cljw",
+        "gorj_squint",          "gorj_dart",            "gorj_basilisp",
+        "gorj_glojure",         "gorj_joker",           "gorj_nbb",
+        "gorj_scittle",         "gorj_clr",             "gorj_cherry",
+        "gorj_cream",           "gorj_clojerl",         "gorj_dialects",
     };
     const obj = try gc.allocObj(.vector);
     for (tool_names) |name| {

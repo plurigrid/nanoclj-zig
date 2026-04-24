@@ -5,7 +5,7 @@ const Value = value.Value;
 const GC = @import("gc.zig").GC;
 
 pub fn nanoclj_to_syrup(v: Value, gc: *GC, alloc: std.mem.Allocator) !syrup.Value {
-    if (v.isNil()) return syrup.Value{ .@"null" = {} };
+    if (v.isNil()) return syrup.Value{ .null = {} };
     if (v.isBool()) return syrup.Value.fromBool(v.asBool());
     if (v.isInt()) return syrup.Value.fromInteger(@as(i64, v.asInt()));
     if (v.isFloat()) return syrup.Value{ .float = v.asFloat() };
@@ -55,7 +55,7 @@ pub fn nanoclj_to_syrup(v: Value, gc: *GC, alloc: std.mem.Allocator) !syrup.Valu
             else => return syrup.Value.fromString("<fn>"),
         }
     }
-    return syrup.Value{ .@"null" = {} };
+    return syrup.Value{ .null = {} };
 }
 
 pub fn encode_to_bytes(v: Value, gc: *GC, alloc: std.mem.Allocator) ![]const u8 {
@@ -65,7 +65,7 @@ pub fn encode_to_bytes(v: Value, gc: *GC, alloc: std.mem.Allocator) ![]const u8 
 
 pub fn syrup_to_nanoclj(sv: syrup.Value, gc: *GC) !Value {
     switch (sv) {
-        .@"null" => return Value.makeNil(),
+        .null => return Value.makeNil(),
         .bool => |b| return Value.makeBool(b),
         .integer => |i| return Value.makeInt(@intCast(@min(i, std.math.maxInt(i48)))),
         .float => |f| return Value.makeFloat(f),

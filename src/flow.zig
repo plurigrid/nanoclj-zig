@@ -116,10 +116,10 @@ pub fn Block(comptime V: type) type {
         in_ports: []const []const u8 = &.{"in"},
 
         pub const Body = union(enum) {
-            seed: V,                              // static value
+            seed: V, // static value
             compute: *const fn (inputs: []const V) V, // pure function over gathered inputs
-            compute_ctx: ComputeCtx,              // closure: ctx-carrying call (bridge to Value/eval)
-            terminal,                             // :sink / exit marker
+            compute_ctx: ComputeCtx, // closure: ctx-carrying call (bridge to Value/eval)
+            terminal, // :sink / exit marker
         };
 
         pub const ComputeCtx = struct {
@@ -494,7 +494,10 @@ pub fn Flow(comptime V: type) type {
                         var n: usize = 0;
                         var can_fire = true;
                         for (b.in_ports) |p| {
-                            if (n >= in_buf.len) { can_fire = false; break; }
+                            if (n >= in_buf.len) {
+                                can_fire = false;
+                                break;
+                            }
                             var found = false;
                             for (spec.connections, 0..) |c, i| {
                                 if (std.mem.eql(u8, c.dst, b.id) and std.mem.eql(u8, c.port, p) and queues[i].items.len > 0) {
@@ -504,7 +507,10 @@ pub fn Flow(comptime V: type) type {
                                     break;
                                 }
                             }
-                            if (!found) { can_fire = false; break; }
+                            if (!found) {
+                                can_fire = false;
+                                break;
+                            }
                         }
                         if (!can_fire) continue;
 
@@ -552,7 +558,10 @@ pub fn Flow(comptime V: type) type {
             var trits: [64]i8 = undefined;
             var tn: usize = 0;
             for (spec.block_trits) |bt| {
-                if (tn < trits.len) { trits[tn] = bt.trit; tn += 1; }
+                if (tn < trits.len) {
+                    trits[tn] = bt.trit;
+                    tn += 1;
+                }
                 sum = spec.law.compose(sum, bt.trit);
             }
             const conserved = spec.law.check(trits[0..tn]);
@@ -577,27 +586,31 @@ pub fn Flow(comptime V: type) type {
 // ============================================================================
 // Smoke — reference world: 10 → double → inc → sink ⇒ 21
 // ============================================================================
-fn double(inputs: []const i64) i64 { return inputs[0] * 2; }
-fn incFn(inputs: []const i64) i64 { return inputs[0] + 1; }
+fn double(inputs: []const i64) i64 {
+    return inputs[0] * 2;
+}
+fn incFn(inputs: []const i64) i64 {
+    return inputs[0] + 1;
+}
 
 test "flow: 10 → double → inc → sink = 21" {
     const V = i64;
     const spec = FlowSpec(V){
         .blocks = &.{
-            .{ .id = "seed",   .body = .{ .seed = 10 } },
+            .{ .id = "seed", .body = .{ .seed = 10 } },
             .{ .id = "double", .body = .{ .compute = &double } },
-            .{ .id = "inc",    .body = .{ .compute = &incFn } },
-            .{ .id = "sink",   .body = .terminal },
+            .{ .id = "inc", .body = .{ .compute = &incFn } },
+            .{ .id = "sink", .body = .terminal },
         },
         .connections = &.{
-            .{ .src = "seed",   .dst = "double" },
+            .{ .src = "seed", .dst = "double" },
             .{ .src = "double", .dst = "inc" },
-            .{ .src = "inc",    .dst = "sink" },
+            .{ .src = "inc", .dst = "sink" },
         },
         .exit = "sink",
         .block_trits = &.{
             .{ .id = "double", .trit = 1 },
-            .{ .id = "inc",    .trit = -1 },
+            .{ .id = "inc", .trit = -1 },
         },
     };
     const r = try Flow(V).inhabit(std.testing.allocator, spec);
@@ -610,10 +623,20 @@ test "flow: 10 → double → inc → sink = 21" {
 // ============================================================================
 // Registry — W1..W5b, block-for-block port of worlds.clj
 // ============================================================================
-fn idFn(xs: []const i64) i64 { return xs[0]; }
-fn loopInc(xs: []const i64) i64 { return xs[0] + 1; }
-fn isNumberPred(v: i64) bool { _ = v; return true; }
-fn alwaysFalse(v: i64) bool { _ = v; return false; } // simulate W3 schema violation
+fn idFn(xs: []const i64) i64 {
+    return xs[0];
+}
+fn loopInc(xs: []const i64) i64 {
+    return xs[0] + 1;
+}
+fn isNumberPred(v: i64) bool {
+    _ = v;
+    return true;
+}
+fn alwaysFalse(v: i64) bool {
+    _ = v;
+    return false;
+} // simulate W3 schema violation
 
 test "W4 void: fuel exhaustion halts safely" {
     // seed 1 → loop(inc) self-feeds → fuel 5 runs out
@@ -641,16 +664,16 @@ test "W5a nash: 1+1+1 ≡ 0 (mod 3) conserved" {
     const spec = FlowSpec(V){
         .blocks = &.{
             .{ .id = "seed", .body = .{ .seed = 3 } },
-            .{ .id = "a",    .body = .{ .compute = &idFn } },
-            .{ .id = "b",    .body = .{ .compute = &idFn } },
-            .{ .id = "c",    .body = .{ .compute = &idFn } },
+            .{ .id = "a", .body = .{ .compute = &idFn } },
+            .{ .id = "b", .body = .{ .compute = &idFn } },
+            .{ .id = "c", .body = .{ .compute = &idFn } },
             .{ .id = "sink", .body = .terminal },
         },
         .connections = &.{
             .{ .src = "seed", .dst = "a" },
-            .{ .src = "a",    .dst = "b" },
-            .{ .src = "b",    .dst = "c" },
-            .{ .src = "c",    .dst = "sink" },
+            .{ .src = "a", .dst = "b" },
+            .{ .src = "b", .dst = "c" },
+            .{ .src = "c", .dst = "sink" },
         },
         .exit = "sink",
         .block_trits = &.{
@@ -669,14 +692,14 @@ test "W5b isac: 1+1 ≢ 0 (mod 3) violated" {
     const spec = FlowSpec(V){
         .blocks = &.{
             .{ .id = "seed", .body = .{ .seed = 3 } },
-            .{ .id = "a",    .body = .{ .compute = &idFn } },
-            .{ .id = "b",    .body = .{ .compute = &idFn } },
+            .{ .id = "a", .body = .{ .compute = &idFn } },
+            .{ .id = "b", .body = .{ .compute = &idFn } },
             .{ .id = "sink", .body = .terminal },
         },
         .connections = &.{
             .{ .src = "seed", .dst = "a" },
-            .{ .src = "a",    .dst = "b" },
-            .{ .src = "b",    .dst = "sink" },
+            .{ .src = "a", .dst = "b" },
+            .{ .src = "b", .dst = "sink" },
         },
         .exit = "sink",
         .block_trits = &.{
@@ -784,13 +807,19 @@ test "linear: (linear 5 sq inc halve) pumps through three stages" {
     const V = i64;
     const allocator = std.testing.allocator;
     const sq = struct {
-        fn f(xs: []const V) V { return xs[0] * xs[0]; }
+        fn f(xs: []const V) V {
+            return xs[0] * xs[0];
+        }
     }.f;
     const inc = struct {
-        fn f(xs: []const V) V { return xs[0] + 1; }
+        fn f(xs: []const V) V {
+            return xs[0] + 1;
+        }
     }.f;
     const halve = struct {
-        fn f(xs: []const V) V { return @divTrunc(xs[0], 2); }
+        fn f(xs: []const V) V {
+            return @divTrunc(xs[0], 2);
+        }
     }.f;
 
     var lin = try linear(V, allocator, 5, &.{ &sq, &inc, &halve });
@@ -835,7 +864,9 @@ test "Rama PState ledger: inhabit records every block's output" {
 test "Rama partitioned edge: even→left branch, odd→right branch" {
     const V = i64;
     const Route = struct {
-        fn parity(v: V) usize { return if (@mod(v, 2) == 0) 0 else 1; }
+        fn parity(v: V) usize {
+            return if (@mod(v, 2) == 0) 0 else 1;
+        }
     };
     const dsts: []const struct { id: []const u8, port: []const u8 = "in" } = &.{
         .{ .id = "evens" },
@@ -845,9 +876,9 @@ test "Rama partitioned edge: even→left branch, odd→right branch" {
     // seed 7 (odd) → should land in "odds", not "evens"
     const spec = FlowSpec(V){
         .blocks = &.{
-            .{ .id = "s",     .body = .{ .seed = 7 } },
+            .{ .id = "s", .body = .{ .seed = 7 } },
             .{ .id = "evens", .body = .terminal },
-            .{ .id = "odds",  .body = .terminal },
+            .{ .id = "odds", .body = .terminal },
         },
         .connections = &.{
             .{ .src = "s", .dst = "evens" },
@@ -1002,14 +1033,14 @@ test "flow: compute_ctx closes over factor state" {
     const spec = FlowSpec(V){
         .blocks = &.{
             .{ .id = "seed", .body = .{ .seed = 2 } },
-            .{ .id = "m3",   .body = .{ .compute_ctx = .{ .ctx = &mul3, .call = &MultiplyCtx.call } } },
-            .{ .id = "m7",   .body = .{ .compute_ctx = .{ .ctx = &mul7, .call = &MultiplyCtx.call } } },
+            .{ .id = "m3", .body = .{ .compute_ctx = .{ .ctx = &mul3, .call = &MultiplyCtx.call } } },
+            .{ .id = "m7", .body = .{ .compute_ctx = .{ .ctx = &mul7, .call = &MultiplyCtx.call } } },
             .{ .id = "sink", .body = .terminal },
         },
         .connections = &.{
             .{ .src = "seed", .dst = "m3" },
-            .{ .src = "m3",   .dst = "m7" },
-            .{ .src = "m7",   .dst = "sink" },
+            .{ .src = "m3", .dst = "m7" },
+            .{ .src = "m7", .dst = "sink" },
         },
         .exit = "sink",
     };
@@ -1022,12 +1053,12 @@ test "W3 isac: schema violation captured, not thrown" {
     const spec = FlowSpec(V){
         .blocks = &.{
             .{ .id = "seed", .body = .{ .seed = 10 } },
-            .{ .id = "bad",  .body = .{ .compute = &idFn } },
+            .{ .id = "bad", .body = .{ .compute = &idFn } },
             .{ .id = "sink", .body = .terminal },
         },
         .connections = &.{
             .{ .src = "seed", .dst = "bad" },
-            .{ .src = "bad",  .dst = "sink" },
+            .{ .src = "bad", .dst = "sink" },
         },
         .exit = "sink",
         .block_schemas = &.{
