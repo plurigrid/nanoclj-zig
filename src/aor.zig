@@ -16,6 +16,7 @@ pub const dataset = @import("aor_dataset.zig");
 pub const experiment = @import("aor_experiment.zig");
 pub const feedback = @import("aor_feedback.zig");
 pub const tool = @import("aor_tool.zig");
+pub const action = @import("aor_action.zig");
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -68,6 +69,15 @@ pub const ToolFn = tool.ToolFn;
 pub const ToolRegistry = tool.ToolRegistry;
 pub const ToolError = tool.ToolError;
 
+/// Rung 9: Action + ActionLog (the side-effect side of the invocation hook).
+pub const Action = action.Action;
+pub const ActionFn = action.ActionFn;
+pub const ActionResult = action.ActionResult;
+pub const ActionLog = action.ActionLog;
+pub const RunInfo = action.RunInfo;
+pub const runAction = action.runAction;
+pub const runActionsOnInvocation = action.runActionsOnInvocation;
+
 // Rung 6 (persistence + streaming) remains as follow-up; the feedback loop
 // does not require it — intermediate state lives in-process on Agent.state.
 
@@ -80,4 +90,5 @@ test {
     _ = experiment;
     _ = feedback;
     _ = tool;
+    _ = action;
 }
