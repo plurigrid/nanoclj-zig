@@ -57,7 +57,9 @@ pub const PassFn = experiment.PassFn;
 pub const CycleResult = feedback.CycleResult;
 pub const ReviseFn = feedback.ReviseFn;
 pub const StopFn = feedback.StopFn;
+pub const TargetRevision = feedback.TargetRevision;
 pub const cycleUntil = feedback.cycleUntil;
+pub const cycleUntilMulti = feedback.cycleUntilMulti;
 
 /// Rung 8: Tool + ToolRegistry (agent-o-rama's function-calling primitive).
 pub const Tool = tool.Tool;

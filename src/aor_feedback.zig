@@ -338,6 +338,169 @@ test "lastDelta reports final change; isDiverging false on converging run" {
     try std.testing.expect(result.lastDelta() >= 0.0);
 }
 
+/// A named agent + its revise function. The world's ultimate feedback loop
+/// takes many of these at once: each agent in the topology reads the shared
+/// verdict set and rewrites its own state accordingly.
+pub const TargetRevision = struct {
+    agent_name: []const u8,
+    revise: ReviseFn,
+};
+
+/// Like `cycleUntil` but multi-target: every iteration, all named agents
+/// have their state revised from the same verdict set. Agents not listed
+/// keep their state unchanged. This is the actual world-shape — one
+/// verdict stream, many agents each adjusting in their own way.
+pub fn cycleUntilMulti(
+    allocator: std.mem.Allocator,
+    experiment: *Experiment,
+    targets: []const TargetRevision,
+    stop: StopFn,
+    max_iters: u32,
+) FeedbackError!CycleResult {
+    if (max_iters == 0) return error.FeedbackFailed;
+
+    // Resolve each target name → agent pointer up front so we fail fast on
+    // misnamed targets.
+    var resolved: std.ArrayListUnmanaged(*aor_agent.Agent) = .empty;
+    defer resolved.deinit(allocator);
+    try resolved.ensureTotalCapacity(allocator, targets.len);
+    for (targets) |t| {
+        const a = experiment.topology.getAgent(t.agent_name) orelse return error.TargetAgentMissing;
+        try resolved.append(allocator, a);
+    }
+
+    var reports: std.ArrayListUnmanaged(Report) = .empty;
+    errdefer {
+        for (reports.items) |*r| r.deinit();
+        reports.deinit(allocator);
+    }
+
+    var stopped: bool = false;
+    var i: u32 = 0;
+    while (i < max_iters) : (i += 1) {
+        var report = experiment.run() catch |e| switch (e) {
+            error.AgentNotFound => return error.AgentNotFound,
+            error.DuplicateAgent => return error.DuplicateAgent,
+            error.CycleDetected => return error.CycleDetected,
+            error.ExperimentFailed => return error.ExperimentFailed,
+            error.EvalFailed => return error.EvalFailed,
+            error.Invoke => return error.Invoke,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+
+        var all_verdicts: std.ArrayListUnmanaged(Verdict) = .empty;
+        defer all_verdicts.deinit(allocator);
+        for (report.examples) |ex| {
+            for (ex.verdicts) |v| {
+                all_verdicts.append(allocator, v) catch |e| {
+                    report.deinit();
+                    return e;
+                };
+            }
+        }
+
+        if (stop(&report)) {
+            stopped = true;
+            try reports.append(allocator, report);
+            break;
+        }
+
+        // Apply every target's revise to the shared verdict set.
+        for (targets, 0..) |t, idx| {
+            resolved.items[idx].state = t.revise(resolved.items[idx].state, all_verdicts.items);
+        }
+        try reports.append(allocator, report);
+    }
+
+    const iters = @as(u32, @intCast(reports.items.len));
+    return CycleResult{
+        .allocator = allocator,
+        .iterations = iters,
+        .reports = try reports.toOwnedSlice(allocator),
+        .stopped_on_predicate = stopped,
+    };
+}
+
+// Multi-target feedback test helpers.
+
+fn biasedDoubleBody(ctx: *aor_agent.Agent, in: Value) error{Invoke}!Value {
+    const bias: i48 = if (ctx.state) |s| s.asInt() else 0;
+    // Double then add bias, so a "negative" bias counter-acts the double.
+    return Value.makeInt(in.asInt() * 2 + bias);
+}
+
+fn nudgeDown(prior: ?Value, verdicts: []const Verdict) ?Value {
+    var any_nonpos = false;
+    for (verdicts) |v| if (v.score <= 0.0) {
+        any_nonpos = true;
+        break;
+    };
+    if (!any_nonpos) return prior;
+    const cur: i48 = if (prior) |p| p.asInt() else 0;
+    return Value.makeInt(cur - 1);
+}
+
+test "cycleUntilMulti: two targets with opposing revisions both converge" {
+    var topo = aor_topology.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("biased_inc", biasedIncBody);
+    _ = try topo.newAgent("biased_dbl", biasedDoubleBody);
+    try topo.connect("biased_inc", "biased_dbl");
+
+    // Input -5 chained: (-5 + 1 + bias_inc) * 2 + bias_dbl.
+    // With bias_inc = 0, bias_dbl = 0: output = -8 (fails, score ≤ 0).
+    // nudgeUp raises bias_inc; nudgeDown lowers bias_dbl — both try to push
+    // the chained output into positive. Converges.
+    var ds = aor_dataset.Dataset.init(std.testing.allocator, "multi");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(-5), null, "");
+    try ds.addExample(Value.makeInt(-2), null, "");
+
+    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    var exp = Experiment.init(
+        std.testing.allocator,
+        "multi",
+        &topo,
+        &trace_store,
+        &ds,
+        &evs,
+        "biased_inc",
+    );
+
+    const targets = [_]TargetRevision{
+        .{ .agent_name = "biased_inc", .revise = nudgeUp },
+        .{ .agent_name = "biased_dbl", .revise = nudgeDown },
+    };
+    var result = try cycleUntilMulti(std.testing.allocator, &exp, &targets, stopAllPass, 50);
+    defer result.deinit();
+    try std.testing.expect(result.stopped_on_predicate);
+    try std.testing.expectEqual(@as(usize, 0), result.last().fail_count);
+}
+
+test "cycleUntilMulti: unresolved target name errors at dispatch" {
+    var topo = aor_topology.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("real", biasedIncBody);
+    var ds = aor_dataset.Dataset.init(std.testing.allocator, "x");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(0), null, "");
+    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    var exp = Experiment.init(std.testing.allocator, "e", &topo, &trace_store, &ds, &evs, "real");
+
+    const targets = [_]TargetRevision{
+        .{ .agent_name = "real", .revise = nudgeUp },
+        .{ .agent_name = "ghost", .revise = nudgeUp }, // not in topology
+    };
+    try std.testing.expectError(
+        FeedbackError.TargetAgentMissing,
+        cycleUntilMulti(std.testing.allocator, &exp, &targets, stopAllPass, 5),
+    );
+}
+
 test "cycleUntil: max_iters=0 errors" {
     var topo = aor_topology.Topology.init(std.testing.allocator);
     defer topo.deinit();
