@@ -132,7 +132,112 @@ pub const TelemetrySink = struct {
         try self.record("latency.ns", @as(f32, @floatFromInt(info.latency_ns)), "");
         try self.record("step-count", @as(f32, @floatFromInt(info.step_count)), "");
     }
+
+    /// Rung 6 — append one line per Sample across all series:
+    ///   series_name|ts_ns|value|tags
+    /// Grammar matches TraceStore/ActionLog (escape '\|\n\\').
+    pub fn writeJsonl(
+        self: *const TelemetrySink,
+        out: *std.ArrayListUnmanaged(u8),
+        alloc: std.mem.Allocator,
+        scratch_alloc: std.mem.Allocator,
+    ) !void {
+        var tmp: [64]u8 = undefined;
+        var it = self.series.iterator();
+        while (it.next()) |kv| {
+            const name = kv.key_ptr.*;
+            const series = kv.value_ptr.*;
+            for (series.samples.items) |s| {
+                const name_esc = try escapeField(scratch_alloc, name);
+                defer scratch_alloc.free(name_esc);
+                const tags_esc = try escapeField(scratch_alloc, s.tags);
+                defer scratch_alloc.free(tags_esc);
+
+                try out.appendSlice(alloc, name_esc);
+                try out.append(alloc, '|');
+                try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{s.ts_ns}));
+                try out.append(alloc, '|');
+                try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{s.value}));
+                try out.append(alloc, '|');
+                try out.appendSlice(alloc, tags_esc);
+                try out.append(alloc, '\n');
+            }
+        }
+    }
+
+    pub fn loadJsonl(self: *TelemetrySink, data: []const u8) !void {
+        var it = std.mem.splitScalar(u8, data, '\n');
+        while (it.next()) |line| {
+            if (line.len == 0) continue;
+            var parts: [4][]const u8 = undefined;
+            var idx: usize = 0;
+            var cursor: usize = 0;
+            var field_start: usize = 0;
+            while (cursor < line.len and idx < 4) : (cursor += 1) {
+                if (line[cursor] == '\\' and cursor + 1 < line.len) {
+                    cursor += 1;
+                    continue;
+                }
+                if (line[cursor] == '|') {
+                    parts[idx] = line[field_start..cursor];
+                    idx += 1;
+                    field_start = cursor + 1;
+                }
+            }
+            if (idx != 3) return error.ParseError;
+            parts[3] = line[field_start..];
+
+            const name_owned = try unescapeField(self.allocator, parts[0]);
+            defer self.allocator.free(name_owned);
+            const ts_ns = try std.fmt.parseInt(u64, parts[1], 10);
+            const v = try std.fmt.parseFloat(f32, parts[2]);
+            const tags_owned = try unescapeField(self.allocator, parts[3]);
+
+            // record() will dupe the name internally; free the temp copy.
+            try self.record(name_owned, v, tags_owned);
+            // Manually stamp the timestamp onto the just-appended sample
+            // so ts_ns survives the reload (record() writes current mono).
+            const entry = self.series.getEntry(name_owned).?;
+            const last_idx = entry.value_ptr.samples.items.len - 1;
+            entry.value_ptr.samples.items[last_idx].ts_ns = ts_ns;
+        }
+    }
 };
+
+fn escapeField(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out = try std.ArrayListUnmanaged(u8).initCapacity(allocator, s.len);
+    errdefer out.deinit(allocator);
+    for (s) |c| {
+        switch (c) {
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '|' => try out.appendSlice(allocator, "\\|"),
+            else => try out.append(allocator, c),
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn unescapeField(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out = try std.ArrayListUnmanaged(u8).initCapacity(allocator, s.len);
+    errdefer out.deinit(allocator);
+    var i: usize = 0;
+    while (i < s.len) {
+        if (s[i] == '\\' and i + 1 < s.len) {
+            switch (s[i + 1]) {
+                '\\' => try out.append(allocator, '\\'),
+                'n' => try out.append(allocator, '\n'),
+                '|' => try out.append(allocator, '|'),
+                else => try out.append(allocator, s[i + 1]),
+            }
+            i += 2;
+        } else {
+            try out.append(allocator, s[i]);
+            i += 1;
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
 
 fn emptyAggregate() Aggregate {
     return .{ .count = 0, .sum = 0.0, .min = 0.0, .max = 0.0 };
@@ -218,6 +323,39 @@ test "window filtering in aggregate" {
     const a_all = sink.aggregate("m", 0, std.math.maxInt(u64));
     try std.testing.expectEqual(@as(usize, 2), a_all.count);
     try std.testing.expectEqual(@as(f32, 3.0), a_all.sum);
+}
+
+test "TelemetrySink writeJsonl → loadJsonl roundtrip preserves values + timestamps" {
+    var sink = TelemetrySink.init(std.testing.allocator);
+    defer sink.deinit();
+    try sink.record("latency.ns", 1_000_000.0, "");
+    try sink.record("latency.ns", 2_500_000.0, "");
+    try sink.record("eval.score", 0.8, "");
+
+    // Snapshot timestamps before write for exact comparison after load.
+    const lat_series = sink.getSeries("latency.ns").?;
+    const ts0 = lat_series.samples.items[0].ts_ns;
+    const ts1 = lat_series.samples.items[1].ts_ns;
+
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    try sink.writeJsonl(&buf, std.testing.allocator, std.testing.allocator);
+
+    var sink2 = TelemetrySink.init(std.testing.allocator);
+    defer sink2.deinit();
+    try sink2.loadJsonl(buf.items);
+
+    const lat_agg = sink2.aggregateAll("latency.ns");
+    const score_agg = sink2.aggregateAll("eval.score");
+    try std.testing.expectEqual(@as(usize, 2), lat_agg.count);
+    try std.testing.expectEqual(@as(usize, 1), score_agg.count);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.8), score_agg.mean(), 0.0001);
+
+    // Timestamps preserved exactly (loadJsonl overwrites the record()'s
+    // monoNs() with the loaded ts_ns).
+    const lat2 = sink2.getSeries("latency.ns").?;
+    try std.testing.expectEqual(ts0, lat2.samples.items[0].ts_ns);
+    try std.testing.expectEqual(ts1, lat2.samples.items[1].ts_ns);
 }
 
 test "multiple series are kept independent" {
