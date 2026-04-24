@@ -135,6 +135,25 @@ pub const TraceStore = struct {
     pub fn eventCount(self: *const TraceStore) usize {
         return self.events.items.len;
     }
+
+    /// Rung 6 — serialize to a caller-provided ArrayList. Stable
+    /// pipe-delimited format; appends one line per event. `scratch_alloc`
+    /// is used for temporary escape buffers and freed per-event.
+    pub fn writeJsonl(
+        self: *const TraceStore,
+        out: *std.ArrayListUnmanaged(u8),
+        alloc: std.mem.Allocator,
+        scratch_alloc: std.mem.Allocator,
+    ) !void {
+        return writeJsonlImpl(self, out, alloc, scratch_alloc);
+    }
+
+    /// Rung 6 — replace events from previously-written data. Strings (agent
+    /// name, tags) are allocated from `intern_alloc` and live as long as
+    /// the store; typically `intern_alloc == self.allocator`.
+    pub fn loadJsonl(self: *TraceStore, data: []const u8, intern_alloc: std.mem.Allocator) !void {
+        return loadJsonlImpl(self, data, intern_alloc);
+    }
 };
 
 fn monoNs() u64 {
@@ -143,6 +162,144 @@ fn monoNs() u64 {
     var ts: std.c.timespec = undefined;
     _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC_RAW, &ts);
     return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
+}
+
+// Rung 6 — minimal persistence. A compact textual format so traces can
+// survive process death and be replayed in another nanoclj session.
+//
+// Format: one line per event, pipe-separated fields:
+//   invoke_id|step|agent_id|agent_name|input_bits|output_bits|ts_mono|tags
+// output_bits is "-" when output is null, otherwise the u64 bit pattern.
+// agent_name and tags are escaped: '\n' → '\\n', '|' → '\\|', '\\' → '\\\\'.
+
+fn escapeField(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out = try std.ArrayListUnmanaged(u8).initCapacity(allocator, s.len);
+    errdefer out.deinit(allocator);
+    for (s) |c| {
+        switch (c) {
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '|' => try out.appendSlice(allocator, "\\|"),
+            else => try out.append(allocator, c),
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn unescapeField(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out = try std.ArrayListUnmanaged(u8).initCapacity(allocator, s.len);
+    errdefer out.deinit(allocator);
+    var i: usize = 0;
+    while (i < s.len) {
+        if (s[i] == '\\' and i + 1 < s.len) {
+            const next = s[i + 1];
+            switch (next) {
+                '\\' => try out.append(allocator, '\\'),
+                'n' => try out.append(allocator, '\n'),
+                '|' => try out.append(allocator, '|'),
+                else => try out.append(allocator, next),
+            }
+            i += 2;
+        } else {
+            try out.append(allocator, s[i]);
+            i += 1;
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn writeJsonlImpl(
+    self: *const TraceStore,
+    out: *std.ArrayListUnmanaged(u8),
+    alloc: std.mem.Allocator,
+    scratch_alloc: std.mem.Allocator,
+) !void {
+    var tmp: [64]u8 = undefined;
+    for (self.events.items) |ev| {
+        const name_escaped = try escapeField(scratch_alloc, ev.agent_name);
+        defer scratch_alloc.free(name_escaped);
+        const tags_escaped = try escapeField(scratch_alloc, ev.tags);
+        defer scratch_alloc.free(tags_escaped);
+
+        try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{ev.invoke_id}));
+        try out.append(alloc, '|');
+        try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{ev.step}));
+        try out.append(alloc, '|');
+        try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{ev.agent_id}));
+        try out.append(alloc, '|');
+        try out.appendSlice(alloc, name_escaped);
+        try out.append(alloc, '|');
+        try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{ev.input.bits}));
+        try out.append(alloc, '|');
+        if (ev.output) |o| {
+            try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{o.bits}));
+        } else {
+            try out.append(alloc, '-');
+        }
+        try out.append(alloc, '|');
+        try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{ev.ts_mono}));
+        try out.append(alloc, '|');
+        try out.appendSlice(alloc, tags_escaped);
+        try out.append(alloc, '\n');
+    }
+}
+
+fn loadJsonlImpl(self: *TraceStore, data: []const u8, intern_alloc: std.mem.Allocator) !void {
+    self.events.clearRetainingCapacity();
+    self.next_step_by_invoke.clearRetainingCapacity();
+    var max_invoke: InvokeId = 0;
+
+    var line_it = std.mem.splitScalar(u8, data, '\n');
+    while (line_it.next()) |line| {
+        if (line.len == 0) continue;
+        var parts: [8][]const u8 = undefined;
+        var idx: usize = 0;
+        var cursor: usize = 0;
+        var field_start: usize = 0;
+        while (cursor < line.len and idx < 8) : (cursor += 1) {
+            if (line[cursor] == '\\' and cursor + 1 < line.len) {
+                cursor += 1;
+                continue;
+            }
+            if (line[cursor] == '|') {
+                parts[idx] = line[field_start..cursor];
+                idx += 1;
+                field_start = cursor + 1;
+            }
+        }
+        if (idx != 7) return error.ParseError;
+        parts[7] = line[field_start..];
+
+        const iid = try std.fmt.parseInt(InvokeId, parts[0], 10);
+        const step = try std.fmt.parseInt(u32, parts[1], 10);
+        const agent_id = try std.fmt.parseInt(u32, parts[2], 10);
+        const name = try unescapeField(intern_alloc, parts[3]);
+        const input_bits = try std.fmt.parseInt(u64, parts[4], 10);
+        const output = if (std.mem.eql(u8, parts[5], "-"))
+            @as(?Value, null)
+        else blk: {
+            const ob = try std.fmt.parseInt(u64, parts[5], 10);
+            break :blk @as(?Value, Value{ .bits = ob });
+        };
+        const ts_mono = try std.fmt.parseInt(u64, parts[6], 10);
+        const tags = try unescapeField(intern_alloc, parts[7]);
+
+        try self.events.append(self.allocator, .{
+            .invoke_id = iid,
+            .step = step,
+            .agent_id = agent_id,
+            .agent_name = name,
+            .input = Value{ .bits = input_bits },
+            .output = output,
+            .ts_mono = ts_mono,
+            .tags = tags,
+        });
+        if (iid > max_invoke) max_invoke = iid;
+        const gop = try self.next_step_by_invoke.getOrPut(self.allocator, iid);
+        if (!gop.found_existing) gop.value_ptr.* = 0;
+        if (step + 1 > gop.value_ptr.*) gop.value_ptr.* = step + 1;
+    }
+    if (max_invoke >= self.next_invoke_id) self.next_invoke_id = max_invoke + 1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -243,6 +400,57 @@ test "getInvocation isolates events by invoke_id" {
     try std.testing.expectEqual(@as(usize, 2), trace_b.events.len);
     try std.testing.expectEqual(@as(i48, 1), trace_a.events[0].input.asInt());
     try std.testing.expectEqual(@as(i48, 10), trace_b.events[0].input.asInt());
+}
+
+test "writeJsonl → loadJsonl roundtrips all event fields" {
+    var store = TraceStore.init(std.testing.allocator);
+    defer store.deinit();
+    var agent_a = aor_agent.Agent.init("alpha", echoBody);
+    var agent_b = aor_agent.Agent.init("beta|with|pipes", echoBody);
+    agent_a.id = 1;
+    agent_b.id = 2;
+
+    const inv = store.startInvocation();
+    _ = try store.recordStep(inv, &agent_a, Value.makeInt(10), Value.makeInt(11), "plain");
+    _ = try store.recordStep(inv, &agent_b, Value.makeInt(42), null, "retry,\\backslash,\nnewline");
+
+    var buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer buffer.deinit(std.testing.allocator);
+    try store.writeJsonl(&buffer, std.testing.allocator, std.testing.allocator);
+
+    // Rehydrate into a fresh store.
+    var store2 = TraceStore.init(std.testing.allocator);
+    defer {
+        // Free owned strings before deinit.
+        for (store2.events.items) |ev| {
+            std.testing.allocator.free(ev.agent_name);
+            std.testing.allocator.free(ev.tags);
+        }
+        store2.deinit();
+    }
+    try store2.loadJsonl(buffer.items, std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), store2.eventCount());
+    try std.testing.expectEqual(@as(InvokeId, inv), store2.events.items[0].invoke_id);
+    try std.testing.expectEqual(@as(u32, 0), store2.events.items[0].step);
+    try std.testing.expectEqualStrings("alpha", store2.events.items[0].agent_name);
+    try std.testing.expectEqual(@as(i48, 10), store2.events.items[0].input.asInt());
+    try std.testing.expectEqual(@as(i48, 11), store2.events.items[0].output.?.asInt());
+
+    try std.testing.expectEqual(@as(u32, 1), store2.events.items[1].step);
+    try std.testing.expectEqualStrings("beta|with|pipes", store2.events.items[1].agent_name);
+    try std.testing.expect(store2.events.items[1].output == null);
+    try std.testing.expectEqualStrings("retry,\\backslash,\nnewline", store2.events.items[1].tags);
+
+    // next_invoke_id advanced past the restored max.
+    try std.testing.expect(store2.next_invoke_id > inv);
+}
+
+test "loadJsonl on empty input produces empty store" {
+    var store = TraceStore.init(std.testing.allocator);
+    defer store.deinit();
+    try store.loadJsonl("", std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 0), store.eventCount());
 }
 
 test "tags pass through to events" {
