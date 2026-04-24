@@ -82,6 +82,91 @@ fn telemetryAction(info: aor.action.RunInfo) aor.action.ActionError!aor.action.A
     };
 }
 
+test "world survives: dump → reload → query loaded invariants" {
+    // Phase 1 — run a small amount of activity in "process A".
+    var sink = aor.TelemetrySink.init(std.testing.allocator);
+    defer sink.deinit();
+    var log = aor.ActionLog.init(std.testing.allocator);
+    defer log.deinit();
+    var trace_store = aor.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+
+    var topo = aor.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    _ = try topo.newAgent("inc", struct {
+        fn body(_: *aor.Agent, in: Value) error{Invoke}!Value {
+            return Value.makeInt(in.asInt() + 1);
+        }
+    }.body);
+
+    _ = try aor.topology.invoke(&topo, &trace_store, "inc", Value.makeInt(10));
+    _ = try aor.topology.invoke(&topo, &trace_store, "inc", Value.makeInt(20));
+
+    try sink.record("latency.ns", 1_500_000.0, "");
+    try sink.record("eval.score", 0.9, "");
+    try log.results.append(log.allocator, .{
+        .invoke_id = 1,
+        .action_name = "telemetry",
+        .data = Value.makeInt(11),
+        .tags = "ok",
+    });
+
+    // Phase 2 — serialize.
+    var trace_buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer trace_buf.deinit(std.testing.allocator);
+    try trace_store.writeJsonl(&trace_buf, std.testing.allocator, std.testing.allocator);
+
+    var action_buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer action_buf.deinit(std.testing.allocator);
+    try log.writeJsonl(&action_buf, std.testing.allocator, std.testing.allocator);
+
+    var telem_buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer telem_buf.deinit(std.testing.allocator);
+    try sink.writeJsonl(&telem_buf, std.testing.allocator, std.testing.allocator);
+
+    // Phase 3 — simulate process B: fresh structs, load all three logs.
+    var sink2 = aor.TelemetrySink.init(std.testing.allocator);
+    defer sink2.deinit();
+    var log2 = aor.ActionLog.init(std.testing.allocator);
+    defer {
+        for (log2.results.items) |rr| {
+            std.testing.allocator.free(rr.action_name);
+            std.testing.allocator.free(rr.tags);
+        }
+        log2.deinit();
+    }
+    var trace_store2 = aor.TraceStore.init(std.testing.allocator);
+    defer {
+        for (trace_store2.events.items) |ev| {
+            std.testing.allocator.free(ev.agent_name);
+            std.testing.allocator.free(ev.tags);
+        }
+        trace_store2.deinit();
+    }
+    try trace_store2.loadJsonl(trace_buf.items, std.testing.allocator);
+    try log2.loadJsonl(action_buf.items, std.testing.allocator);
+    try sink2.loadJsonl(telem_buf.items);
+
+    // Phase 4 — loaded state is query-equivalent to pre-dump state.
+    try std.testing.expectEqual(trace_store.eventCount(), trace_store2.eventCount());
+    try std.testing.expectEqual(log.count(), log2.count());
+    try std.testing.expectEqual(
+        sink.aggregateAll("latency.ns").count,
+        sink2.aggregateAll("latency.ns").count,
+    );
+    try std.testing.expectApproxEqAbs(
+        sink.aggregateAll("eval.score").mean(),
+        sink2.aggregateAll("eval.score").mean(),
+        0.0001,
+    );
+
+    // Phase 5 — resume invariant: next_invoke_id advanced past the loaded max,
+    //   so a subsequent invocation would not collide. Check this by probing
+    //   the field directly (a live invoke would taint ownership; see earlier
+    //   variant of this test removed).
+    try std.testing.expect(trace_store2.next_invoke_id > 2);
+}
+
 test "world composes: 10 rungs through one scenario" {
     // ─── Rung 8: tools ──────────────────────────────────────────────
     var registry = aor.ToolRegistry.init(std.testing.allocator);
