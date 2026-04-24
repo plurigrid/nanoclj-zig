@@ -87,469 +87,483 @@ pub fn initCore(env: *Env, gc: *GC) !void {
     }
 
     const builtins = .{
-        .{ "+", &add },                                                               .{ "-", &sub },
-        .{ "*", &mul },                                                               .{ "/", &div_fn },
-        .{ "=", &eql },                                                               .{ "<", &lt },
-        .{ ">", &gt },                                                                .{ "<=", &lte },
-        .{ ">=", &gte },                                                              .{ "list", &listFn },
-        .{ "vector", &vectorFn },                                                     .{ "hash-map", &hashMapFn },
-        .{ "first", &first },                                                         .{ "rest", &rest },
-        .{ "cons", &cons },                                                           .{ "count", &count },
-        .{ "nth", &nth },                                                             .{ "get", &getFn },
-        .{ "assoc", &assoc },                                                         .{ "conj", &conj },
-        .{ "nil?", &isNilP },                                                         .{ "number?", &isNumberP },
-        .{ "string?", &isStringP },                                                   .{ "keyword?", &isKeywordP },
-        .{ "symbol?", &isSymbolP },                                                   .{ "list?", &isListP },
-        .{ "vector?", &isVectorP },                                                   .{ "map?", &isMapP },
-        .{ "record?", &isRecordP },                                                   .{ "record-type", &recordTypeFn },
-        .{ "instance?", &instanceP },                                                 .{ "fn?", &isFnP },
-        .{ "println", &printlnFn },                                                   .{ "pr-str", &prStrFn },
-        .{ "read-string", &readStringFn },                                            .{ "load-file", &loadFileFn },
-        .{ "str", &strFn },                                                           .{ "subs", &subsFn },
-        .{ "split", &splitFn },                                                       .{ "join", &joinFn },
-        .{ "replace", &replaceFn },                                                   .{ "index-of", &indexOfFn },
-        .{ "starts-with?", &startsWithFn },                                           .{ "ends-with?", &endsWithFn },
-        .{ "trim", &trimFn },                                                         .{ "upper-case", &upperCaseFn },
-        .{ "lower-case", &lowerCaseFn },                                              .{ "char-at", &charAtFn },
-        .{ "string-length", &stringLengthFn },                                        .{ "not", &notFn },
-        .{ "mod", &modFn },                                                           .{ "inc", &incFn },
-        .{ "dec", &decFn },                                                           .{ "zero?", &isZeroP },
-        .{ "apply", &applyFn },                                                       .{ "take", &takeFn },
-        .{ "drop", &dropFn },                                                         .{ "reduce", &reduceFn },
-        .{ "range", &rangeFn },                                                       .{ "map", &mapFn },
-        .{ "filter", &filterFn },                                                     .{ "concat", &concatFn },
-        .{ "reverse", &reverseFn },                                                   .{ "empty?", &isEmptyP },
-        .{ "into", &intoFn },                                                         .{ "set?", &isSetP },
-        .{ "seq?", &isSeqP },                                                         .{ "sequential?", &isSequentialP },
+        .{ "+", &add },                                                    .{ "-", &sub },
+        .{ "*", &mul },                                                    .{ "/", &div_fn },
+        .{ "=", &eql },                                                    .{ "<", &lt },
+        .{ ">", &gt },                                                     .{ "<=", &lte },
+        .{ ">=", &gte },                                                   .{ "list", &listFn },
+        .{ "vector", &vectorFn },                                          .{ "hash-map", &hashMapFn },
+        .{ "first", &first },                                              .{ "rest", &rest },
+        .{ "cons", &cons },                                                .{ "count", &count },
+        .{ "nth", &nth },                                                  .{ "get", &getFn },
+        .{ "assoc", &assoc },                                              .{ "conj", &conj },
+        .{ "nil?", &isNilP },                                              .{ "number?", &isNumberP },
+        .{ "string?", &isStringP },                                        .{ "keyword?", &isKeywordP },
+        .{ "symbol?", &isSymbolP },                                        .{ "list?", &isListP },
+        .{ "vector?", &isVectorP },                                        .{ "map?", &isMapP },
+        .{ "record?", &isRecordP },                                        .{ "record-type", &recordTypeFn },
+        .{ "instance?", &instanceP },
+        .{ "fn?", &isFnP },                                                .{ "println", &printlnFn },
+        .{ "pr-str", &prStrFn },                                           .{ "read-string", &readStringFn },
+        .{ "load-file", &loadFileFn },                                     .{ "str", &strFn },
+        .{ "subs", &subsFn },                                              .{ "split", &splitFn },
+        .{ "join", &joinFn },                                              .{ "replace", &replaceFn },
+        .{ "index-of", &indexOfFn },                                       .{ "starts-with?", &startsWithFn },
+        .{ "ends-with?", &endsWithFn },                                    .{ "trim", &trimFn },
+        .{ "upper-case", &upperCaseFn },                                   .{ "lower-case", &lowerCaseFn },
+        .{ "char-at", &charAtFn },                                         .{ "string-length", &stringLengthFn },
+        .{ "not", &notFn },                                                .{ "mod", &modFn },
+        .{ "inc", &incFn },                                                .{ "dec", &decFn },
+        .{ "zero?", &isZeroP },                                            .{ "apply", &applyFn },
+        .{ "take", &takeFn },                                              .{ "drop", &dropFn },
+        .{ "reduce", &reduceFn },                                          .{ "range", &rangeFn },
+        .{ "map", &mapFn },                                                .{ "filter", &filterFn },
+        .{ "concat", &concatFn },                                          .{ "reverse", &reverseFn },
+        .{ "empty?", &isEmptyP },                                          .{ "into", &intoFn },
+        .{ "set?", &isSetP },                                              .{ "seq?", &isSeqP },
+        .{ "sequential?", &isSequentialP },
         // Trit-tick time quantum builtins
-        .{ "trit-phase", &tritPhaseFn },                                              .{ "frames->trit-ticks", &framesToTritTicksFn },
-        .{ "samples->trit-ticks", &samplesToTritTicksFn },                            .{ "trit-ticks-per-sec", &tritTicksPerSecFn },
-        .{ "flicks-per-sec", &flicksPerSecFn },                                       .{ "glimpses-per-tick", &glimpsesPerTickFn },
-        .{ "cognitive-jerk", &cognitiveJerkFn },                                      .{ "p-adic", &padicFn },
-        .{ "p-adic-depth", &padicDepthFn },
+                                       .{ "trit-phase", &tritPhaseFn },
+        .{ "frames->trit-ticks", &framesToTritTicksFn },                   .{ "samples->trit-ticks", &samplesToTritTicksFn },
+        .{ "trit-ticks-per-sec", &tritTicksPerSecFn },                     .{ "flicks-per-sec", &flicksPerSecFn },
+        .{ "glimpses-per-tick", &glimpsesPerTickFn },                      .{ "cognitive-jerk", &cognitiveJerkFn },
+        .{ "p-adic", &padicFn },                                           .{ "p-adic-depth", &padicDepthFn },
         // Information spacetime builtins
-                                                  .{ "separation", &separationFn },
-        .{ "cone-volume", &coneVolumeFn },                                            .{ "info-density", &infoDensityFn },
-        .{ "causal-depth", &causalDepthFn },                                          .{ "padic-cones", &padicConesFn },
+        .{ "separation", &separationFn },                                  .{ "cone-volume", &coneVolumeFn },
+        .{ "info-density", &infoDensityFn },                               .{ "causal-depth", &causalDepthFn },
+        .{ "padic-cones", &padicConesFn },
         // Jepsen builtins
-        .{ "jepsen/nemesis!", &jepsenNemesisFn },                                     .{ "jepsen/gen", &jepsenGenFn },
-        .{ "jepsen/record!", &jepsenRecordFn },                                       .{ "jepsen/check", &jepsenCheckFn },
-        .{ "jepsen/reset!", &jepsenResetFn },                                         .{ "jepsen/history", &jepsenHistoryFn },
-        .{ "jepsen/check-unique-ids", &jepsenCheckUniqueIdsFn },                      .{ "jepsen/check-counter", &jepsenCheckCounterFn },
-        .{ "jepsen/check-cas-register", &jepsenCheckCasRegisterFn },
+                                        .{ "jepsen/nemesis!", &jepsenNemesisFn },
+        .{ "jepsen/gen", &jepsenGenFn },                                   .{ "jepsen/record!", &jepsenRecordFn },
+        .{ "jepsen/check", &jepsenCheckFn },                               .{ "jepsen/reset!", &jepsenResetFn },
+        .{ "jepsen/history", &jepsenHistoryFn },                           .{ "jepsen/check-unique-ids", &jepsenCheckUniqueIdsFn },
+        .{ "jepsen/check-counter", &jepsenCheckCounterFn },                .{ "jepsen/check-cas-register", &jepsenCheckCasRegisterFn },
         // Gay Color builtins
-                         .{ "color-at", &substrate.colorAtFn },
-        .{ "color-seed", &substrate.colorSeedFn },                                    .{ "colors", &substrate.colorsFn },
-        .{ "hue-to-trit", &substrate.hueToTritFn },                                   .{ "mix64", &substrate.mix64Fn },
-        .{ "xor-fingerprint", &substrate.xorFingerprintFn },
+        .{ "color-at", &substrate.colorAtFn },                             .{ "color-seed", &substrate.colorSeedFn },
+        .{ "colors", &substrate.colorsFn },                                .{ "hue-to-trit", &substrate.hueToTritFn },
+        .{ "mix64", &substrate.mix64Fn },                                  .{ "xor-fingerprint", &substrate.xorFingerprintFn },
         // Universal index-addressed primitive
-                                 .{ "at", &atFn },
-        .{ "trit-at", &tritAtFn },                                                    .{ "trit-sum", &tritSumFn },
-        .{ "find-balancer", &findBalancerFn },                                        .{ "trit-of", &tritOfContentFn },
+        .{ "at", &atFn },                                                  .{ "trit-at", &tritAtFn },
+        .{ "trit-sum", &tritSumFn },                                       .{ "find-balancer", &findBalancerFn },
+        .{ "trit-of", &tritOfContentFn },
         // Pattern matching: 6 engines (3 regexp + 3 PEG)
-        .{ "re-match", &reMatchFn },                                                  .{ "peg-match", &pegMatchFn },
-        .{ "match-all", &matchAllFn },
+                                         .{ "re-match", &reMatchFn },
+        .{ "peg-match", &pegMatchFn },                                     .{ "match-all", &matchAllFn },
         // Splittable RNG builtins
-                                                       .{ "split-rng", &splitRngFn },
-        .{ "rng-next", &rngNextFn },                                                  .{ "rng-split", &rngSplitFn },
-        .{ "rng-trit", &rngTritFn },
+        .{ "split-rng", &splitRngFn },                                     .{ "rng-next", &rngNextFn },
+        .{ "rng-split", &rngSplitFn },                                     .{ "rng-trit", &rngTritFn },
         // GF(3) builtins
-                                                         .{ "gf3-add", &substrate.gf3AddFn },
-        .{ "gf3-mul", &substrate.gf3MulFn },                                          .{ "gf3-conserved?", &substrate.gf3ConservedFn },
-        .{ "trit-balance", &substrate.tritBalanceFn },
+        .{ "gf3-add", &substrate.gf3AddFn },                               .{ "gf3-mul", &substrate.gf3MulFn },
+        .{ "gf3-conserved?", &substrate.gf3ConservedFn },                  .{ "trit-balance", &substrate.tritBalanceFn },
         // BCI builtins
-                                       .{ "bci-channels", &substrate.bciChannelsFn },
-        .{ "bci-read", &substrate.bciReadFn },                                        .{ "bci-trit", &substrate.bciTritFn },
-        .{ "bci-entropy", &substrate.bciEntropyFn },
+        .{ "bci-channels", &substrate.bciChannelsFn },                     .{ "bci-read", &substrate.bciReadFn },
+        .{ "bci-trit", &substrate.bciTritFn },                             .{ "bci-entropy", &substrate.bciEntropyFn },
         // Brainfloj builtins
-                                         .{ "brainfloj-parse", &brainfloj.brainflojParseFn },
-        .{ "brainfloj-read", &brainfloj.brainflojReadFn },                            .{ "brainfloj-serial", &brainfloj.brainflojSerialFn },
+        .{ "brainfloj-parse", &brainfloj.brainflojParseFn },               .{ "brainfloj-read", &brainfloj.brainflojReadFn },
+        .{ "brainfloj-serial", &brainfloj.brainflojSerialFn },
         // CGX protocol builtins
-        .{ "cgx-serial", &cgx.cgxSerialFn },                                          .{ "cgx-parse", &cgx.cgxParseFn },
+                    .{ "cgx-serial", &cgx.cgxSerialFn },
+        .{ "cgx-parse", &cgx.cgxParseFn },
         // HolyZig builtins
-        .{ "holy-eval", &holy.holyEvalFn },                                           .{ "holy-converge", &holy.holyConvergeFn },
-        .{ "holy-converge-trace", &holy.holyConvergeTraceFn },                        .{ "holy-converge-summary", &holy.holyConvergeSummaryFn },
-        .{ "congrunet-summary", &congrunet.congrunetSummaryFn },                      .{ "congrunet-trace", &congrunet.congrunetTraceFn },
-        .{ "congrunet-presheaf", &congrunet.congrunetPresheafFn },
+                                        .{ "holy-eval", &holy.holyEvalFn },
+        .{ "holy-converge", &holy.holyConvergeFn },                        .{ "holy-converge-trace", &holy.holyConvergeTraceFn },
+        .{ "holy-converge-summary", &holy.holyConvergeSummaryFn },         .{ "congrunet-summary", &congrunet.congrunetSummaryFn },
+        .{ "congrunet-trace", &congrunet.congrunetTraceFn },               .{ "congrunet-presheaf", &congrunet.congrunetPresheafFn },
         // nREPL superstructure — gated by profile.enable_nrepl (see below)
-                           .{ "behavior-lattice", &plural.behaviorLatticeFn },
-        .{ "behavioral-equivalence", &plural.behavioralEquivalenceFn },               .{ "behavioral-dominance", &plural.behavioralDominanceFn },
-        .{ "behavior-compare", &plural.behaviorCompareFn },                           .{ "behavior-profile", &plural.behaviorProfileFn },
-        .{ "plural-profile", &plural.pluralProfileFn },                               .{ "logical-world", &plural.logicWorldFn },
-        .{ "logic-mode", &plural.logicWorldFn },                                      .{ "set-logic!", &plural.setLogicFn },
-        .{ "cross-logic-eval", &plural.crossLogicEvalFn },                            .{ "logic-dominance", &plural.logicDominanceFn },
-        .{ "plural-proof", &plural.pluralProofFn },                                   .{ "juvix-encode", &juvix_bridge.juvixEncodeFn },
-        .{ "juvix-decode", &juvix_bridge.juvixDecodeFn },                             .{ "juvix-bridge-profile", &juvix_bridge.juvixBridgeProfileFn },
-        .{ "juvix-print", &juvix_bridge.juvixPrintFn },                               .{ "juvix-parse", &juvix_bridge.juvixParseFn },
-        .{ "juvix-read", &juvix_bridge.juvixReadFn },                                 .{ "juvix-lambda", &juvix_bridge.juvixLambdaFn },
-        .{ "juvix-apply", &juvix_bridge.juvixApplyFn },                               .{ "juvix-ctor", &juvix_bridge.juvixCtorFn },
-        .{ "juvix-let", &juvix_bridge.juvixLetFn },                                   .{ "juvix-ann", &juvix_bridge.juvixAnnFn },
-        .{ "juvix-match", &juvix_bridge.juvixMatchFn },                               .{ "juvix-pat-var", &juvix_bridge.juvixPatVarFn },
-        .{ "juvix-pat-wildcard", &juvix_bridge.juvixPatWildcardFn },                  .{ "juvix-pat-ctor", &juvix_bridge.juvixPatCtorFn },
+        .{ "behavior-lattice", &plural.behaviorLatticeFn },                .{ "behavioral-equivalence", &plural.behavioralEquivalenceFn },
+        .{ "behavioral-dominance", &plural.behavioralDominanceFn },        .{ "behavior-compare", &plural.behaviorCompareFn },
+        .{ "behavior-profile", &plural.behaviorProfileFn },                .{ "plural-profile", &plural.pluralProfileFn },
+        .{ "logical-world", &plural.logicWorldFn },                        .{ "logic-mode", &plural.logicWorldFn },
+        .{ "set-logic!", &plural.setLogicFn },                             .{ "cross-logic-eval", &plural.crossLogicEvalFn },
+        .{ "logic-dominance", &plural.logicDominanceFn },                  .{ "plural-proof", &plural.pluralProofFn },
+        .{ "juvix-encode", &juvix_bridge.juvixEncodeFn },                  .{ "juvix-decode", &juvix_bridge.juvixDecodeFn },
+        .{ "juvix-bridge-profile", &juvix_bridge.juvixBridgeProfileFn },   .{ "juvix-print", &juvix_bridge.juvixPrintFn },
+        .{ "juvix-parse", &juvix_bridge.juvixParseFn },                    .{ "juvix-read", &juvix_bridge.juvixReadFn },
+        .{ "juvix-lambda", &juvix_bridge.juvixLambdaFn },                  .{ "juvix-apply", &juvix_bridge.juvixApplyFn },
+        .{ "juvix-ctor", &juvix_bridge.juvixCtorFn },                      .{ "juvix-let", &juvix_bridge.juvixLetFn },
+        .{ "juvix-ann", &juvix_bridge.juvixAnnFn },                        .{ "juvix-match", &juvix_bridge.juvixMatchFn },
+        .{ "juvix-pat-var", &juvix_bridge.juvixPatVarFn },                 .{ "juvix-pat-wildcard", &juvix_bridge.juvixPatWildcardFn },
+        .{ "juvix-pat-ctor", &juvix_bridge.juvixPatCtorFn },
         // Substrate traversal
-        .{ "substrate", &substrate.substrateFn },                                     .{ "traverse", &substrate.traverseFn },
+                      .{ "substrate", &substrate.substrateFn },
+        .{ "traverse", &substrate.traverseFn },
         // Gay Skills 3,4,9-13,15-17 (1-2,5-8,14 already above)
-        .{ "color-hex", &gay_skills.colorHexFn },                                     .{ "color-trit", &gay_skills.colorTritFn },
-        .{ "tropical-add", &gay_skills.tropicalAddFn },                               .{ "tropical-mul", &gay_skills.tropicalMulFn },
-        .{ "world-create", &gay_skills.worldCreateFn },                               .{ "world-step", &gay_skills.worldStepFn },
-        .{ "propagate", &gay_skills.propagateFn },                                    .{ "entropy", &gay_skills.entropyFn },
-        .{ "depth-color", &gay_skills.depthColorFn },                                 .{ "bisim?", &gay_skills.bisimCheckFn },
+                                   .{ "color-hex", &gay_skills.colorHexFn },
+        .{ "color-trit", &gay_skills.colorTritFn },                        .{ "tropical-add", &gay_skills.tropicalAddFn },
+        .{ "tropical-mul", &gay_skills.tropicalMulFn },                    .{ "world-create", &gay_skills.worldCreateFn },
+        .{ "world-step", &gay_skills.worldStepFn },                        .{ "propagate", &gay_skills.propagateFn },
+        .{ "entropy", &gay_skills.entropyFn },                             .{ "depth-color", &gay_skills.depthColorFn },
+        .{ "bisim?", &gay_skills.bisimCheckFn },
         // Tree VFS builtins (horse/ Forester forest)
-        .{ "tree-read", &tree_vfs.treeReadFn },                                       .{ "tree-title", &tree_vfs.treeTitleFn },
-        .{ "tree-transcluded", &tree_vfs.treeTranscludedFn },                         .{ "tree-transcluders", &tree_vfs.treeTranscludersFn },
-        .{ "tree-ids", &tree_vfs.treeIdsFn },                                         .{ "tree-isolated", &tree_vfs.treeIsolatedFn },
-        .{ "tree-chain", &tree_vfs.treeChainFn },                                     .{ "tree-taxon", &tree_vfs.treeTaxonFn },
-        .{ "tree-author", &tree_vfs.treeAuthorFn },                                   .{ "tree-meta", &tree_vfs.treeMetaFn },
-        .{ "tree-imports", &tree_vfs.treeImportsFn },                                 .{ "tree-by-taxon", &tree_vfs.treeByTaxonFn },
+                                  .{ "tree-read", &tree_vfs.treeReadFn },
+        .{ "tree-title", &tree_vfs.treeTitleFn },                          .{ "tree-transcluded", &tree_vfs.treeTranscludedFn },
+        .{ "tree-transcluders", &tree_vfs.treeTranscludersFn },            .{ "tree-ids", &tree_vfs.treeIdsFn },
+        .{ "tree-isolated", &tree_vfs.treeIsolatedFn },                    .{ "tree-chain", &tree_vfs.treeChainFn },
+        .{ "tree-taxon", &tree_vfs.treeTaxonFn },                          .{ "tree-author", &tree_vfs.treeAuthorFn },
+        .{ "tree-meta", &tree_vfs.treeMetaFn },                            .{ "tree-imports", &tree_vfs.treeImportsFn },
+        .{ "tree-by-taxon", &tree_vfs.treeByTaxonFn },
         // Interaction net builtins — gated by profile.enable_inet (see below)
         // Partial evaluation — gated by profile.enable_peval (see below)
         // HTTP fetch
-        .{ "http-fetch", &http_fetch.httpFetchFn },
+                            .{ "http-fetch", &http_fetch.httpFetchFn },
         // IBC denom (bmorphism/shitcoin geodesic)
-                                          .{ "ibc-denom", &ibc_denom.ibcDenomFn },
-        .{ "ibc-trit", &ibc_denom.ibcTritFn },                                        .{ "noble-usdc-on", &ibc_denom.nobleUsdcOnFn },
-        .{ "noble-precompute", &ibc_denom.noblePrecomputeFn },                        .{ "noble-channels", &ibc_denom.nobleChannelsFn },
-        .{ "noble-collisions", &ibc_denom.nobleCollisionsFn },                        .{ "noble-census", &ibc_denom.nobleCensusFn },
-        .{ "ibc-auth-denom", &ibc_denom.ibcAuthDenomFn },
+        .{ "ibc-denom", &ibc_denom.ibcDenomFn },                           .{ "ibc-trit", &ibc_denom.ibcTritFn },
+        .{ "noble-usdc-on", &ibc_denom.nobleUsdcOnFn },                    .{ "noble-precompute", &ibc_denom.noblePrecomputeFn },
+        .{ "noble-channels", &ibc_denom.nobleChannelsFn },                 .{ "noble-collisions", &ibc_denom.nobleCollisionsFn },
+        .{ "noble-census", &ibc_denom.nobleCensusFn },                     .{ "ibc-auth-denom", &ibc_denom.ibcAuthDenomFn },
         // Church-Turing ill-posedness witness
-                                    .{ "ill-posed", &church_turing.illPosedFn },
+        .{ "ill-posed", &church_turing.illPosedFn },
         // Decidability hierarchy
-        .{ "decidable?", &church_turing.decidableFn },                                .{ "semi-decide", &church_turing.semiDecideFn },
-        .{ "halting-witness", &church_turing.haltingWitnessFn },                      .{ "epochal-witness", &church_turing.epochalWitnessFn },
-        .{ "primitive-recursive", &church_turing.primitiveRecursiveFn },
+                              .{ "decidable?", &church_turing.decidableFn },
+        .{ "semi-decide", &church_turing.semiDecideFn },                   .{ "halting-witness", &church_turing.haltingWitnessFn },
+        .{ "epochal-witness", &church_turing.epochalWitnessFn },           .{ "primitive-recursive", &church_turing.primitiveRecursiveFn },
         // miniKanren — gated by profile.enable_kanren (see below)
         // gorj bridge — collapsed loops (no hex roundtrip, fused eval pipeline)
-                     .{ "gorj-pipe", &gorj_bridge.gorjPipeFn },
-        .{ "gorj-eval", &gorj_bridge.gorjEvalFn },                                    .{ "gorj-encode", &gorj_bridge.gorjEncodeFn },
-        .{ "gorj-decode", &gorj_bridge.gorjDecodeFn },                                .{ "gorj-version", &gorj_bridge.gorjVersionFn },
-        .{ "gorj-tools", &gorj_bridge.gorjToolsFn },
+        .{ "gorj-pipe", &gorj_bridge.gorjPipeFn },                         .{ "gorj-eval", &gorj_bridge.gorjEvalFn },
+        .{ "gorj-encode", &gorj_bridge.gorjEncodeFn },                     .{ "gorj-decode", &gorj_bridge.gorjDecodeFn },
+        .{ "gorj-version", &gorj_bridge.gorjVersionFn },                   .{ "gorj-tools", &gorj_bridge.gorjToolsFn },
         // Computable sets, reductions, Weihrauch degrees, guideline auditor
-                                         .{ "computable-set", &computable_sets.computableSetFn },
-        .{ "set-density", &computable_sets.setDensityFn },                            .{ "reduce-verify", &computable_sets.reduceVerifyFn },
-        .{ "weihrauch-degree", &computable_sets.weihrauchDegreeFn },                  .{ "audit-guideline", &computable_sets.auditGuidelineFn },
-        .{ "audit-all-guidelines", &computable_sets.auditAllGuidelinesFn },
+        .{ "computable-set", &computable_sets.computableSetFn },           .{ "set-density", &computable_sets.setDensityFn },
+        .{ "reduce-verify", &computable_sets.reduceVerifyFn },             .{ "weihrauch-degree", &computable_sets.weihrauchDegreeFn },
+        .{ "audit-guideline", &computable_sets.auditGuidelineFn },         .{ "audit-all-guidelines", &computable_sets.auditAllGuidelinesFn },
         // Arithmetical hierarchy
-                  .{ "classify-problem", &computable_sets.classifyProblemFn },
-        .{ "detect-morphism", &computable_sets.detectMorphismFn },                    .{ "list-problems", &computable_sets.listProblemsFn },
+        .{ "classify-problem", &computable_sets.classifyProblemFn },       .{ "detect-morphism", &computable_sets.detectMorphismFn },
+        .{ "list-problems", &computable_sets.listProblemsFn },
         // Möbius inversion & realizability
-        .{ "mobius", &computable_sets.mobiusBuiltinFn },                              .{ "mertens", &computable_sets.mertensBuiltinFn },
-        .{ "moebius-boundary", &computable_sets.moebiusBoundaryFn },                  .{ "flip-primes", &computable_sets.flipPrimesFn },
-        .{ "morphism-graph", &computable_sets.morphismGraphFn },
+                    .{ "mobius", &computable_sets.mobiusBuiltinFn },
+        .{ "mertens", &computable_sets.mertensBuiltinFn },                 .{ "moebius-boundary", &computable_sets.moebiusBoundaryFn },
+        .{ "flip-primes", &computable_sets.flipPrimesFn },                 .{ "morphism-graph", &computable_sets.morphismGraphFn },
         // Gorard ordinal tower
-                             .{ "gorard-tower", &computable_sets.gorardTowerFn },
-        .{ "gorard-trit-sum", &computable_sets.gorardTritSumFn },
+        .{ "gorard-tower", &computable_sets.gorardTowerFn },               .{ "gorard-trit-sum", &computable_sets.gorardTritSumFn },
         // stopthrowingrocks blog concepts
-                            .{ "simulation-fuel", &computable_sets.simulationFuelFn },
-        .{ "simulation-escape?", &computable_sets.simulationEscapeFn },               .{ "matrix-derivation", &computable_sets.matrixDerivationFn },
-        .{ "matrix-derivation-trace", &computable_sets.matrixDerivationTraceFn },     .{ "gromov-matrix", &computable_sets.gromovMatrixFn },
-        .{ "color-sort-trit-sum", &computable_sets.colorSortTritSumFn },              .{ "turn-state", &computable_sets.turnStateFn },
-        .{ "consensus-classify", &computable_sets.consensusClassifyFn },
+        .{ "simulation-fuel", &computable_sets.simulationFuelFn },         .{ "simulation-escape?", &computable_sets.simulationEscapeFn },
+        .{ "matrix-derivation", &computable_sets.matrixDerivationFn },     .{ "matrix-derivation-trace", &computable_sets.matrixDerivationTraceFn },
+        .{ "gromov-matrix", &computable_sets.gromovMatrixFn },             .{ "color-sort-trit-sum", &computable_sets.colorSortTritSumFn },
+        .{ "turn-state", &computable_sets.turnStateFn },                   .{ "consensus-classify", &computable_sets.consensusClassifyFn },
         // Stacks Project
-                     .{ "stacks-tags", &computable_sets.stacksTagsFn },
-        .{ "stacks-trit-sum", &computable_sets.stacksTritSumFn },                     .{ "stacks-lookup", &computable_sets.stacksLookupFn },
+        .{ "stacks-tags", &computable_sets.stacksTagsFn },                 .{ "stacks-trit-sum", &computable_sets.stacksTritSumFn },
+        .{ "stacks-lookup", &computable_sets.stacksLookupFn },
         // Matter lamp (IKEA VARMBLIXT + BILRESA)
-        .{ "matter-lamp", &computable_sets.matterLampFn },                            .{ "bilresa-commands", &computable_sets.bilresaCommandsFn },
-        .{ "bilresa-trit-sum", &computable_sets.bilresaTritSumFn },                   .{ "matter-scene", &computable_sets.matterSceneFn },
+                    .{ "matter-lamp", &computable_sets.matterLampFn },
+        .{ "bilresa-commands", &computable_sets.bilresaCommandsFn },       .{ "bilresa-trit-sum", &computable_sets.bilresaTritSumFn },
+        .{ "matter-scene", &computable_sets.matterSceneFn },
         // Chromatic observer: colorblind detection game
-        .{ "cone-probe", &computable_sets.coneProbeFn },                              .{ "observer-triad", &computable_sets.observerTriadFn },
-        .{ "all-triads", &computable_sets.allTriadsFn },                              .{ "detection-theorem", &computable_sets.detectionTheoremFn },
-        .{ "cone-cardinal", &computable_sets.coneCardinalFn },                        .{ "cone-ordinal", &computable_sets.coneOrdinalFn },
+                      .{ "cone-probe", &computable_sets.coneProbeFn },
+        .{ "observer-triad", &computable_sets.observerTriadFn },           .{ "all-triads", &computable_sets.allTriadsFn },
+        .{ "detection-theorem", &computable_sets.detectionTheoremFn },     .{ "cone-cardinal", &computable_sets.coneCardinalFn },
+        .{ "cone-ordinal", &computable_sets.coneOrdinalFn },
         // Buddy state: monotonic propagator cell for companion rarity
-        .{ "buddy-state", &computable_sets.buddyStateFn },                            .{ "buddy-witness", &computable_sets.buddyWitnessFn },
+                      .{ "buddy-state", &computable_sets.buddyStateFn },
+        .{ "buddy-witness", &computable_sets.buddyWitnessFn },
         // Diophantine equations
-        .{ "pythagorean-triples", &computable_sets.pythagoreanTriplesFn },            .{ "pell-solve", &computable_sets.pellSolveFn },
-        .{ "markov-triples", &computable_sets.markovTriplesFn },                      .{ "rh-check", &computable_sets.rhCheckFn },
+                    .{ "pythagorean-triples", &computable_sets.pythagoreanTriplesFn },
+        .{ "pell-solve", &computable_sets.pellSolveFn },                   .{ "markov-triples", &computable_sets.markovTriplesFn },
+        .{ "rh-check", &computable_sets.rhCheckFn },
         // Avalon integration API sample spec
-        .{ "avalon-api-spec", &avalon_api_example.avalonApiSpecFn },                  .{ "avalon-api-example", &avalon_api_example.avalonApiExampleFn },
+                              .{ "avalon-api-spec", &avalon_api_example.avalonApiSpecFn },
+        .{ "avalon-api-example", &avalon_api_example.avalonApiExampleFn },
         // Ergodic bridge (Gay.jl ergodic_bridge.jl)
-        .{ "wall-clock-bridge", &ergodic_bridge.wallClockBridgeFn },                  .{ "color-bandwidth", &ergodic_bridge.colorBandwidthFn },
-        .{ "ergodic-measure", &ergodic_bridge.ergodicMeasureFn },                     .{ "detect-obstructions", &ergodic_bridge.detectObstructionsFn },
+        .{ "wall-clock-bridge", &ergodic_bridge.wallClockBridgeFn },
+        .{ "color-bandwidth", &ergodic_bridge.colorBandwidthFn },          .{ "ergodic-measure", &ergodic_bridge.ergodicMeasureFn },
+        .{ "detect-obstructions", &ergodic_bridge.detectObstructionsFn },
         // Concept tensor (Gay.jl concept_tensor.jl)
-        .{ "concept-lattice", &concept_tensor.conceptLatticeFn },                     .{ "concept-at", &concept_tensor.conceptAtFn },
-        .{ "lattice-magnetization", &concept_tensor.latticeMagnetizationFn },         .{ "verify-monoid", &concept_tensor.verifyMonoidFn },
-        .{ "lattice-step", &concept_tensor.latticeStepFn },
+         .{ "concept-lattice", &concept_tensor.conceptLatticeFn },
+        .{ "concept-at", &concept_tensor.conceptAtFn },                    .{ "lattice-magnetization", &concept_tensor.latticeMagnetizationFn },
+        .{ "verify-monoid", &concept_tensor.verifyMonoidFn },              .{ "lattice-step", &concept_tensor.latticeStepFn },
         // Chromatic propagator (Gay.jl chromatic_propagator.jl)
-                                  .{ "chromatic-env", &chromatic_propagator.chromaticEnvFn },
-        .{ "chromatic-define", &chromatic_propagator.chromaticDefineFn },             .{ "chromatic-tell", &chromatic_propagator.chromaticTellFn },
-        .{ "chromatic-conservation", &chromatic_propagator.chromaticConservationFn },
+        .{ "chromatic-env", &chromatic_propagator.chromaticEnvFn },        .{ "chromatic-define", &chromatic_propagator.chromaticDefineFn },
+        .{ "chromatic-tell", &chromatic_propagator.chromaticTellFn },      .{ "chromatic-conservation", &chromatic_propagator.chromaticConservationFn },
         // Colored Monte Carlo (Gay.jl gaymc.jl)
-        .{ "mc-context", &gaymc.mcContextFn },
-        .{ "mc-sweep", &gaymc.mcSweepFn },                                            .{ "mc-metropolis", &gaymc.mcMetropolisFn },
-        .{ "mc-ladder", &gaymc.mcLadderFn },                                          .{ "mc-replica", &gaymc.mcReplicaFn },
+        .{ "mc-context", &gaymc.mcContextFn },                             .{ "mc-sweep", &gaymc.mcSweepFn },
+        .{ "mc-metropolis", &gaymc.mcMetropolisFn },                       .{ "mc-ladder", &gaymc.mcLadderFn },
+        .{ "mc-replica", &gaymc.mcReplicaFn },
         // Hyperdoctrine (Gay.jl hyperdoctrine.jl)
-        .{ "heyting-and", &hyperdoctrine.heytingAndFn },                              .{ "heyting-or", &hyperdoctrine.heytingOrFn },
-        .{ "heyting-not", &hyperdoctrine.heytingNotFn },                              .{ "heyting-implies", &hyperdoctrine.heytingImpliesFn },
-        .{ "beck-chevalley", &hyperdoctrine.beckChevalleyFn },
+                                    .{ "heyting-and", &hyperdoctrine.heytingAndFn },
+        .{ "heyting-or", &hyperdoctrine.heytingOrFn },                     .{ "heyting-not", &hyperdoctrine.heytingNotFn },
+        .{ "heyting-implies", &hyperdoctrine.heytingImpliesFn },           .{ "beck-chevalley", &hyperdoctrine.beckChevalleyFn },
         // Monoidal diagram kernel
-                               .{ "diagram-id", &monoidal_diagram.diagramIdFn },
-        .{ "diagram-box", &monoidal_diagram.diagramBoxFn },                           .{ "diagram-spider", &monoidal_diagram.diagramSpiderFn },
-        .{ "diagram-swap", &monoidal_diagram.diagramSwapFn },                         .{ "diagram-seq", &monoidal_diagram.diagramSeqFn },
-        .{ "diagram-tensor", &monoidal_diagram.diagramTensorFn },                     .{ "diagram-normalize", &monoidal_diagram.diagramNormalizeFn },
-        .{ "diagram-well-typed?", &monoidal_diagram.diagramWellTypedFn },             .{ "diagram-summary", &monoidal_diagram.diagramSummaryFn },
+        .{ "diagram-id", &monoidal_diagram.diagramIdFn },                  .{ "diagram-box", &monoidal_diagram.diagramBoxFn },
+        .{ "diagram-spider", &monoidal_diagram.diagramSpiderFn },          .{ "diagram-swap", &monoidal_diagram.diagramSwapFn },
+        .{ "diagram-seq", &monoidal_diagram.diagramSeqFn },                .{ "diagram-tensor", &monoidal_diagram.diagramTensorFn },
+        .{ "diagram-normalize", &monoidal_diagram.diagramNormalizeFn },    .{ "diagram-well-typed?", &monoidal_diagram.diagramWellTypedFn },
+        .{ "diagram-summary", &monoidal_diagram.diagramSummaryFn },
         // Open-game runtime on top of the monoidal diagram kernel
-        .{ "open-game-profile", &open_game.openGameProfileFn },                       .{ "open-game-parity", &open_game.openGameParityFn },
-        .{ "open-game-decision", &open_game.openGameDecisionFn },                     .{ "open-game-decision-no-obs", &open_game.openGameDecisionNoObsFn },
-        .{ "open-game-dependent-decision", &open_game.openGameDependentDecisionFn },  .{ "open-game-forward-function", &open_game.openGameForwardFunctionFn },
-        .{ "open-game-backward-function", &open_game.openGameBackwardFunctionFn },    .{ "open-game-from-functions", &open_game.openGameFromFunctionsFn },
-        .{ "open-game-nature", &open_game.openGameNatureFn },                         .{ "open-game-lift-stochastic", &open_game.openGameLiftStochasticFn },
-        .{ "open-game-discount", &open_game.openGameDiscountFn },                     .{ "open-game-add-payoffs", &open_game.openGameAddPayoffsFn },
-        .{ "open-game-seq", &open_game.openGameSeqFn },                               .{ "open-game-tensor", &open_game.openGameTensorFn },
-        .{ "open-game-sequential", &open_game.openGameSequentialFn },                 .{ "open-game-simultaneous", &open_game.openGameSimultaneousFn },
-        .{ "open-game-diagnostics", &open_game.openGameDiagnosticsFn },               .{ "open-game-is-equilibrium?", &open_game.openGameIsEquilibriumFn },
-        .{ "play", &open_game.playFn },                                               .{ "evaluate", &open_game.evaluateFn },
+        .{ "open-game-profile", &open_game.openGameProfileFn },
+        .{ "open-game-parity", &open_game.openGameParityFn },
+        .{ "open-game-decision", &open_game.openGameDecisionFn },
+        .{ "open-game-decision-no-obs", &open_game.openGameDecisionNoObsFn },
+        .{ "open-game-dependent-decision", &open_game.openGameDependentDecisionFn },
+        .{ "open-game-forward-function", &open_game.openGameForwardFunctionFn },
+        .{ "open-game-backward-function", &open_game.openGameBackwardFunctionFn },
+        .{ "open-game-from-functions", &open_game.openGameFromFunctionsFn },
+        .{ "open-game-nature", &open_game.openGameNatureFn },
+        .{ "open-game-lift-stochastic", &open_game.openGameLiftStochasticFn },
+        .{ "open-game-discount", &open_game.openGameDiscountFn },
+        .{ "open-game-add-payoffs", &open_game.openGameAddPayoffsFn },
+        .{ "open-game-seq", &open_game.openGameSeqFn },
+        .{ "open-game-tensor", &open_game.openGameTensorFn },
+        .{ "open-game-sequential", &open_game.openGameSequentialFn },
+        .{ "open-game-simultaneous", &open_game.openGameSimultaneousFn },
+        .{ "open-game-diagnostics", &open_game.openGameDiagnosticsFn },
+        .{ "open-game-is-equilibrium?", &open_game.openGameIsEquilibriumFn },
+        .{ "play", &open_game.playFn },
+        .{ "evaluate", &open_game.evaluateFn },
         // 12-layer SPI tower (Gay.jl tower.jl)
-        .{ "tower-run", &tower.towerRunFn },                                          .{ "tower-layer", &tower.towerLayerFn },
-        .{ "tower-trit-sum", &tower.towerTritSumFn },
+               .{ "tower-run", &tower.towerRunFn },
+        .{ "tower-layer", &tower.towerLayerFn },                           .{ "tower-trit-sum", &tower.towerTritSumFn },
         // Marsaglia-Bumpus SPI audit (Gay.jl marsaglia_bumpus_tests.jl)
-                                        .{ "spi-audit", &marsaglia_bumpus.spiAuditFn },
-        .{ "runs-test", &marsaglia_bumpus.runsTestFn },                               .{ "split-tree", &marsaglia_bumpus.splitTreeFn },
+        .{ "spi-audit", &marsaglia_bumpus.spiAuditFn },                    .{ "runs-test", &marsaglia_bumpus.runsTestFn },
+        .{ "split-tree", &marsaglia_bumpus.splitTreeFn },
         // Scoped propagators (Gay.jl scoped_propagators.jl)
-        .{ "ancestry-acset", &scoped_propagators.ancestryAcsetFn },                   .{ "materialize", &scoped_propagators.materializeFn },
-        .{ "propagate-strategy", &scoped_propagators.propagateStrategyFn },
+                         .{ "ancestry-acset", &scoped_propagators.ancestryAcsetFn },
+        .{ "materialize", &scoped_propagators.materializeFn },             .{ "propagate-strategy", &scoped_propagators.propagateStrategyFn },
         // Core data ops
-                  .{ "dissoc", &dissocFn },
-        .{ "update", &updateFn },                                                     .{ "merge", &mergeFn },
-        .{ "select-keys", &selectKeysFn },                                            .{ "keys", &keysFn },
-        .{ "vals", &valsFn },                                                         .{ "contains?", &containsFn },
+        .{ "dissoc", &dissocFn },                                          .{ "update", &updateFn },
+        .{ "merge", &mergeFn },                                            .{ "select-keys", &selectKeysFn },
+        .{ "keys", &keysFn },                                              .{ "vals", &valsFn },
+        .{ "contains?", &containsFn },
         // Sequence extras
-        .{ "second", &secondFn },                                                     .{ "last", &lastFn },
-        .{ "some", &someFn },                                                         .{ "every?", &everyFn },
-        .{ "not-any?", &notAnyFn },                                                   .{ "sort", &sortFn },
-        .{ "sort-by", &sortByFn },                                                    .{ "distinct", &distinctFn },
-        .{ "flatten", &flattenFn },                                                   .{ "mapcat", &mapcatFn },
-        .{ "interleave", &interleaveFn },                                             .{ "interpose", &interposeFn },
-        .{ "partition", &partitionFn },                                               .{ "frequencies", &frequenciesFn },
-        .{ "group-by", &groupByFn },
+                                            .{ "second", &secondFn },
+        .{ "last", &lastFn },                                              .{ "some", &someFn },
+        .{ "every?", &everyFn },                                           .{ "not-any?", &notAnyFn },
+        .{ "sort", &sortFn },                                              .{ "sort-by", &sortByFn },
+        .{ "distinct", &distinctFn },                                      .{ "flatten", &flattenFn },
+        .{ "mapcat", &mapcatFn },                                          .{ "interleave", &interleaveFn },
+        .{ "interpose", &interposeFn },                                    .{ "partition", &partitionFn },
+        .{ "frequencies", &frequenciesFn },                                .{ "group-by", &groupByFn },
         // Type ops
-                                                         .{ "name", &nameFn },
-        .{ "keyword", &keywordFn },                                                   .{ "symbol", &symbolFn },
-        .{ "type", &typeFn },                                                         .{ "identity", &identityFn },
+        .{ "name", &nameFn },                                              .{ "keyword", &keywordFn },
+        .{ "symbol", &symbolFn },                                          .{ "type", &typeFn },
+        .{ "identity", &identityFn },
         // Atom / reference types
-        .{ "atom", &atomFn },                                                         .{ "deref", &derefFn },
-        .{ "swap!", &swapFn },                                                        .{ "reset!", &resetFn },
-        .{ "compare-and-set!", &compareAndSetFn },                                    .{ "set-validator!", &setValidatorFn },
-        .{ "get-validator", &getValidatorFn },
+                                             .{ "atom", &atomFn },
+        .{ "deref", &derefFn },                                            .{ "swap!", &swapFn },
+        .{ "reset!", &resetFn },                                           .{ "compare-and-set!", &compareAndSetFn },
+        .{ "set-validator!", &setValidatorFn },                            .{ "get-validator", &getValidatorFn },
         // Refs + STM (single-threaded semantics: see refs_agents.zig)
-                                               .{ "ref", &refs_agents.refFn },
-        .{ "alter", &refs_agents.alterFn },                                           .{ "commute", &refs_agents.alterFn },
+        .{ "ref", &refs_agents.refFn },                                    .{ "alter", &refs_agents.alterFn },
+        .{ "commute", &refs_agents.alterFn },
         // Agents (clojure.core/agent)
-        .{ "agent", &agentFn },                                                       .{ "send", &sendFn },
-        .{ "send-off", &sendOffFn },                                                  .{ "await", &awaitFn },
-        .{ "agent-error", &agentErrorFn },                                            .{ "restart-agent", &restartAgentFn },
-        .{ "set-error-handler!", &setErrorHandlerFn },                                .{ "error-handler", &errorHandlerFn },
+        .{ "agent", &agentFn },                                            .{ "send", &sendFn },
+        .{ "send-off", &sendOffFn },                                       .{ "await", &awaitFn },
+        .{ "agent-error", &agentErrorFn },                                 .{ "restart-agent", &restartAgentFn },
+        .{ "set-error-handler!", &setErrorHandlerFn },                     .{ "error-handler", &errorHandlerFn },
         .{ "history", &historyFn },
         // Fuel (Barton reflexivity: expressions aware of their own cost).
         // `meter` is a special form in transduction.zig; `fuel` is a builtin.
-                                                          .{ "fuel", &fuelFn },
-        .{ "charge", &chargeFn },                                                     .{ "depth", &depthFn },
+        .{ "fuel", &fuelFn },
+        .{ "charge", &chargeFn },
+        .{ "depth", &depthFn },
+        .{ "max-depth", &maxDepthFn },
         // IO
-        .{ "slurp", &slurpFn },                                                       .{ "spit", &spitFn },
-        .{ "read-line", &readLineFn },                                                .{ "shell", &shellFn },
+        .{ "slurp", &slurpFn },                                            .{ "spit", &spitFn },
+        .{ "read-line", &readLineFn },                                     .{ "shell", &shellFn },
         .{ "sh", &shellFn },
         // Disk I/O (Zig-unique: positional, fsync-exposed, crash-safe atomic-spit)
-                                                                 .{ "file/open", &fileOpenFn },
-        .{ "file/close!", &fileCloseFn },                                             .{ "file/size", &fileSizeFn },
-        .{ "file/pread", &filePreadFn },                                              .{ "file/pwrite!", &filePwriteFn },
-        .{ "file/fsync!", &fileFsyncFn },                                             .{ "file/read-all-bytes", &fileReadAllBytesFn },
-        .{ "file/atomic-spit!", &fileAtomicSpitFn },                                  .{ "file/mmap-ro", &fileMmapRoFn },
-        .{ "file/munmap!", &fileMunmapFn },                                           .{ "mmap/count", &mmapCountFn },
-        .{ "mmap/str", &mmapStrFn },                                                  .{ "bytes/count", &bytesCountFn },
-        .{ "bytes/str", &bytesStrFn },                                                .{ "str/bytes", &strBytesFn },
+        .{ "file/open", &fileOpenFn },                                     .{ "file/close!", &fileCloseFn },
+        .{ "file/size", &fileSizeFn },                                     .{ "file/pread", &filePreadFn },
+        .{ "file/pwrite!", &filePwriteFn },                                .{ "file/fsync!", &fileFsyncFn },
+        .{ "file/read-all-bytes", &fileReadAllBytesFn },                   .{ "file/atomic-spit!", &fileAtomicSpitFn },
+        .{ "file/mmap-ro", &fileMmapRoFn },                                .{ "file/munmap!", &fileMunmapFn },
+        .{ "file/flock!", &fileFlockFn },                                  .{ "file/funlock!", &fileFunlockFn },
+        .{ "mmap/count", &mmapCountFn },                                   .{ "mmap/str", &mmapStrFn },
+        .{ "bytes/count", &bytesCountFn },                                 .{ "bytes/str", &bytesStrFn },
+        .{ "str/bytes", &strBytesFn },
         // Math extras
-        .{ "abs", &absFn },                                                           .{ "min", &minFn },
-        .{ "max", &maxFn },                                                           .{ "rand", &randFn },
-        .{ "rand-int", &randIntFn },
+                                                      .{ "abs", &absFn },
+        .{ "min", &minFn },                                                .{ "max", &maxFn },
+        .{ "rand", &randFn },                                              .{ "rand-int", &randIntFn },
         // Bitwise
-                                                         .{ "bit-and", &bitAndFn },
-        .{ "bit-or", &bitOrFn },                                                      .{ "bit-xor", &bitXorFn },
-        .{ "bit-shift-left", &bitShiftLeftFn },                                       .{ "bit-shift-right", &bitShiftRightFn },
+        .{ "bit-and", &bitAndFn },                                         .{ "bit-or", &bitOrFn },
+        .{ "bit-xor", &bitXorFn },                                         .{ "bit-shift-left", &bitShiftLeftFn },
+        .{ "bit-shift-right", &bitShiftRightFn },
         // String extras (SIMD-backed)
-        .{ "re-find", &reFindFn },                                                    .{ "count-str", &countStrFn },
+                                 .{ "re-find", &reFindFn },
+        .{ "count-str", &countStrFn },
         // Transcendental idealism (Kantian categories)
-        .{ "judge", &transcendental.judgeFn },                                        .{ "categories", &transcendental.categoriesFn },
-        .{ "antinomy", &transcendental.antinomyFn },                                  .{ "phenomenon", &transcendental.phenomenonFn },
-        .{ "noumenon", &transcendental.noumenonFn },
+                                            .{ "judge", &transcendental.judgeFn },
+        .{ "categories", &transcendental.categoriesFn },                   .{ "antinomy", &transcendental.antinomyFn },
+        .{ "phenomenon", &transcendental.phenomenonFn },                   .{ "noumenon", &transcendental.noumenonFn },
         // HOF combinators (using partial_fn ObjKind)
-                                         .{ "partial", &partialFn },
-        .{ "comp", &compFn },                                                         .{ "juxt", &juxtFn },
-        .{ "complement", &complementFn },                                             .{ "constantly", &constantlyFn },
+        .{ "partial", &partialFn },                                        .{ "comp", &compFn },
+        .{ "juxt", &juxtFn },                                              .{ "complement", &complementFn },
+        .{ "constantly", &constantlyFn },
         // Lazy sequences
-        .{ "lazy-seq", &lazySeqFn },                                                  .{ "iterate", &iterateFn },
-        .{ "repeat", &repeatFn },                                                     .{ "repeatedly", &repeatedlyFn },
-        .{ "take-while", &takeWhileFn },                                              .{ "drop-while", &dropWhileFn },
-        .{ "zipmap", &zipmapFn },
+                                         .{ "lazy-seq", &lazySeqFn },
+        .{ "iterate", &iterateFn },                                        .{ "repeat", &repeatFn },
+        .{ "repeatedly", &repeatedlyFn },                                  .{ "take-while", &takeWhileFn },
+        .{ "drop-while", &dropWhileFn },                                   .{ "zipmap", &zipmapFn },
         // Additional predicates
-                                                            .{ "realized?", &realizedFn },
-        .{ "integer?", &isIntegerP },                                                 .{ "float?", &isFloatP },
-        .{ "pos?", &isPosP },                                                         .{ "neg?", &isNegP },
-        .{ "even?", &isEvenP },                                                       .{ "odd?", &isOddP },
+        .{ "realized?", &realizedFn },                                     .{ "integer?", &isIntegerP },
+        .{ "float?", &isFloatP },                                          .{ "pos?", &isPosP },
+        .{ "neg?", &isNegP },                                              .{ "even?", &isEvenP },
+        .{ "odd?", &isOddP },
         // Test framework
-        .{ "is", &isFn },                                                             .{ "is=", &isEqualFn },
-        .{ "run-tests", &runTestsFn },
+                                                     .{ "is", &isFn },
+        .{ "is=", &isEqualFn },                                            .{ "run-tests", &runTestsFn },
         // Namespace ops
-                                                       .{ "*ns*", &currentNsFn },
-        .{ "ns-name", &nsNameFn },                                                    .{ "all-ns", &allNsFn },
-        .{ "require", &requireFn },
+        .{ "*ns*", &currentNsFn },                                         .{ "ns-name", &nsNameFn },
+        .{ "all-ns", &allNsFn },                                           .{ "require", &requireFn },
         // Colorspace ops
-                                                          .{ "*cs*", &currentCsFn },
-        .{ "cs-color", &csColorFn },                                                  .{ "cs-complement", &csComplementFn },
-        .{ "cs-distance", &csDistanceFn },                                            .{ "cs-hue", &csHueFn },
-        .{ "cs-chroma", &csChromaFn },                                                .{ "cs-resolve", &csResolveFn },
-        .{ "cs-radius", &csRadiusFn },
+        .{ "*cs*", &currentCsFn },                                         .{ "cs-color", &csColorFn },
+        .{ "cs-complement", &csComplementFn },                             .{ "cs-distance", &csDistanceFn },
+        .{ "cs-hue", &csHueFn },                                           .{ "cs-chroma", &csChromaFn },
+        .{ "cs-resolve", &csResolveFn },                                   .{ "cs-radius", &csRadiusFn },
         // First-class color ops
-                                                       .{ "color", &colorCtorFn },
-        .{ "color?", &colorPredFn },                                                  .{ "color-blend", &colorBlendFn },
-        .{ "color-complement", &colorComplementFn },                                  .{ "color-analogous", &colorAnalogousFn },
-        .{ "color-triadic", &colorTriadicFn },                                        .{ "color-distance", &colorDistanceFn },
-        .{ "color-hue", &colorHueFn },                                                .{ "color-chroma", &colorChromaFn },
-        .{ "color-L", &colorLFn },                                                    .{ "color-a", &colorAFn },
-        .{ "color-b", &colorBFn },                                                    .{ "color-alpha", &colorAlphaFn },
+        .{ "color", &colorCtorFn },                                        .{ "color?", &colorPredFn },
+        .{ "color-blend", &colorBlendFn },                                 .{ "color-complement", &colorComplementFn },
+        .{ "color-analogous", &colorAnalogousFn },                         .{ "color-triadic", &colorTriadicFn },
+        .{ "color-distance", &colorDistanceFn },                           .{ "color-hue", &colorHueFn },
+        .{ "color-chroma", &colorChromaFn },                               .{ "color-L", &colorLFn },
+        .{ "color-a", &colorAFn },                                         .{ "color-b", &colorBFn },
+        .{ "color-alpha", &colorAlphaFn },
         // Regex
-        .{ "re-pattern", &rePatternFn },                                              .{ "re-matches", &reMatchesFn },
-        .{ "re-seq", &reSeqFn },                                                      .{ "re-matcher", &reMatcherFn },
-        .{ "re-matcher-find", &reMatcherFindFn },                                     .{ "re-groups", &reGroupsFn },
+                                        .{ "re-pattern", &rePatternFn },
+        .{ "re-matches", &reMatchesFn },                                   .{ "re-seq", &reSeqFn },
+        .{ "re-matcher", &reMatcherFn },                                   .{ "re-matcher-find", &reMatcherFindFn },
+        .{ "re-groups", &reGroupsFn },
         // Nested map ops
-        .{ "get-in", &getInFn },                                                      .{ "assoc-in", &assocInFn },
-        .{ "update-in", &updateInFn },                                                .{ "reduce-kv", &reduceKvFn },
+        .{ "get-in", &getInFn },                                           .{ "assoc-in", &assocInFn },
+        .{ "update-in", &updateInFn },                                     .{ "reduce-kv", &reduceKvFn },
         // Transients
-        .{ "transient", &transientFn },                                               .{ "persistent!", &persistentBangFn },
-        .{ "conj!", &conjBangFn },                                                    .{ "assoc!", &assocBangFn },
-        .{ "dissoc!", &dissocBangFn },                                                .{ "transient?", &isTransientFn },
+        .{ "transient", &transientFn },                                    .{ "persistent!", &persistentBangFn },
+        .{ "conj!", &conjBangFn },                                         .{ "assoc!", &assocBangFn },
+        .{ "dissoc!", &dissocBangFn },                                     .{ "transient?", &isTransientFn },
         // Core sequence ops
-        .{ "seq", &seqFn },                                                           .{ "vec", &vecFn },
-        .{ "next", &nextFn },                                                         .{ "butlast", &butlastFn },
-        .{ "ffirst", &ffirstFn },                                                     .{ "fnext", &fnextFn },
-        .{ "peek", &peekFn },                                                         .{ "pop", &popFn },
-        .{ "disj", &disjFn },                                                         .{ "empty", &emptyFn },
+        .{ "seq", &seqFn },                                                .{ "vec", &vecFn },
+        .{ "next", &nextFn },                                              .{ "butlast", &butlastFn },
+        .{ "ffirst", &ffirstFn },                                          .{ "fnext", &fnextFn },
+        .{ "peek", &peekFn },                                              .{ "pop", &popFn },
+        .{ "disj", &disjFn },                                              .{ "empty", &emptyFn },
         .{ "not-empty", &notEmptyFn },
         // Math
-                                                       .{ "rem", &remFn },
-        .{ "quot", &quotFn },                                                         .{ "hash", &hashFn },
+                                            .{ "rem", &remFn },
+        .{ "quot", &quotFn },                                              .{ "hash", &hashFn },
         // Type coercion
-        .{ "char", &charFn },                                                         .{ "int", &intFn },
-        .{ "long", &longFn },                                                         .{ "double", &doubleFn },
-        .{ "byte", &byteFn },                                                         .{ "num", &numFn },
+        .{ "char", &charFn },                                              .{ "int", &intFn },
+        .{ "long", &longFn },                                              .{ "double", &doubleFn },
+        .{ "byte", &byteFn },                                              .{ "num", &numFn },
         // Additional predicates
-        .{ "true?", &isTrueP },                                                       .{ "false?", &isFalseP },
-        .{ "coll?", &isCollP },                                                       .{ "boolean?", &isBoolP },
-        .{ "char?", &isCharP },                                                       .{ "int?", &isIntP },
-        .{ "identical?", &identicalP },                                               .{ "compare", &compareFn },
+        .{ "true?", &isTrueP },                                            .{ "false?", &isFalseP },
+        .{ "coll?", &isCollP },                                            .{ "boolean?", &isBoolP },
+        .{ "char?", &isCharP },                                            .{ "int?", &isIntP },
+        .{ "identical?", &identicalP },                                    .{ "compare", &compareFn },
         .{ "format", &formatFn },
         // Batch 2: predicates + ops for 69% coverage
-                                                            .{ "not=", &notEqFn },
-        .{ "any?", &anyP },                                                           .{ "some?", &someP },
-        .{ "nan?", &nanP },                                                           .{ "double?", &isDoubleP },
-        .{ "seqable?", &seqableP },                                                   .{ "counted?", &countedP },
-        .{ "associative?", &associativeP },                                           .{ "ident?", &identP },
-        .{ "ifn?", &ifnP },                                                           .{ "qualified-ident?", &qualIdentP },
-        .{ "qualified-keyword?", &qualKeywordP },                                     .{ "qualified-symbol?", &qualSymbolP },
-        .{ "simple-ident?", &simpleIdentP },                                          .{ "simple-keyword?", &simpleKeywordP },
-        .{ "simple-symbol?", &simpleSymbolP },                                        .{ "neg-int?", &negIntP },
-        .{ "pos-int?", &posIntP },                                                    .{ "nat-int?", &natIntP },
-        .{ "special-symbol?", &specialSymbolP },                                      .{ "var?", &varP },
-        .{ "ratio?", &ratioP },                                                       .{ "rational?", &rationalP },
-        .{ "decimal?", &decimalP },                                                   .{ "uuid?", &uuidP },
-        .{ "reversible?", &reversibleP },                                             .{ "sorted?", &sortedP },
+                                                 .{ "not=", &notEqFn },
+        .{ "any?", &anyP },                                                .{ "some?", &someP },
+        .{ "nan?", &nanP },                                                .{ "double?", &isDoubleP },
+        .{ "seqable?", &seqableP },                                        .{ "counted?", &countedP },
+        .{ "associative?", &associativeP },                                .{ "ident?", &identP },
+        .{ "ifn?", &ifnP },                                                .{ "qualified-ident?", &qualIdentP },
+        .{ "qualified-keyword?", &qualKeywordP },                          .{ "qualified-symbol?", &qualSymbolP },
+        .{ "simple-ident?", &simpleIdentP },                               .{ "simple-keyword?", &simpleKeywordP },
+        .{ "simple-symbol?", &simpleSymbolP },                             .{ "neg-int?", &negIntP },
+        .{ "pos-int?", &posIntP },                                         .{ "nat-int?", &natIntP },
+        .{ "special-symbol?", &specialSymbolP },                           .{ "var?", &varP },
+        .{ "ratio?", &ratioP },                                            .{ "rational?", &rationalP },
+        .{ "decimal?", &decimalP },                                        .{ "uuid?", &uuidP },
+        .{ "reversible?", &reversibleP },                                  .{ "sorted?", &sortedP },
         // Sequence ops
-        .{ "nfirst", &nfirstFn },                                                     .{ "nnext", &nnextFn },
-        .{ "nthnext", &nthnextFn },                                                   .{ "nthrest", &nthrestFn },
-        .{ "find", &findFn },                                                         .{ "key", &keyFn },
-        .{ "val", &valFn2 },                                                          .{ "subvec", &subvecFn },
-        .{ "take-last", &takeLastFn },                                                .{ "take-nth", &takeNthFn },
-        .{ "drop-last", &dropLastFn },                                                .{ "cycle", &cycleFn },
-        .{ "shuffle", &shuffleFn },                                                   .{ "rand-nth", &randNthFn },
-        .{ "min-key", &minKeyFn },                                                    .{ "max-key", &maxKeyFn },
-        .{ "some-fn", &someFnFn },                                                    .{ "fnil", &fnilFn },
-        .{ "hash-set", &hashSetFn },                                                  .{ "namespace", &namespaceFn },
-        .{ "parse-long", &parseLongFn },                                              .{ "parse-double", &parseDoubleFn },
+        .{ "nfirst", &nfirstFn },                                          .{ "nnext", &nnextFn },
+        .{ "nthnext", &nthnextFn },                                        .{ "nthrest", &nthrestFn },
+        .{ "find", &findFn },                                              .{ "key", &keyFn },
+        .{ "val", &valFn2 },                                               .{ "subvec", &subvecFn },
+        .{ "take-last", &takeLastFn },                                     .{ "take-nth", &takeNthFn },
+        .{ "drop-last", &dropLastFn },                                     .{ "cycle", &cycleFn },
+        .{ "shuffle", &shuffleFn },                                        .{ "rand-nth", &randNthFn },
+        .{ "min-key", &minKeyFn },                                         .{ "max-key", &maxKeyFn },
+        .{ "some-fn", &someFnFn },                                         .{ "fnil", &fnilFn },
+        .{ "hash-set", &hashSetFn },                                       .{ "namespace", &namespaceFn },
+        .{ "parse-long", &parseLongFn },                                   .{ "parse-double", &parseDoubleFn },
         .{ "parse-boolean", &parseBooleanFn },
         // Bitwise extras
-                                               .{ "bit-not", &bitNotFn },
-        .{ "bit-test", &bitTestFn },                                                  .{ "bit-set", &bitSetFn },
-        .{ "bit-clear", &bitClearFn },                                                .{ "bit-flip", &bitFlipFn },
-        .{ "bit-and-not", &bitAndNotFn },                                             .{ "unsigned-bit-shift-right", &unsignedBitShiftRightFn },
+                                    .{ "bit-not", &bitNotFn },
+        .{ "bit-test", &bitTestFn },                                       .{ "bit-set", &bitSetFn },
+        .{ "bit-clear", &bitClearFn },                                     .{ "bit-flip", &bitFlipFn },
+        .{ "bit-and-not", &bitAndNotFn },                                  .{ "unsigned-bit-shift-right", &unsignedBitShiftRightFn },
         // Metadata
-        .{ "meta", &metaFn },                                                         .{ "with-meta", &withMetaFn },
+        .{ "meta", &metaFn },                                              .{ "with-meta", &withMetaFn },
         .{ "vary-meta", &varyMetaFn },
         // Sequence ops
-                                                       .{ "mapv", &mapvFn },
-        .{ "filterv", &filtervFn },                                                   .{ "remove", &removeFn },
-        .{ "keep", &keepFn },                                                         .{ "keep-indexed", &keepIndexedFn },
+                                            .{ "mapv", &mapvFn },
+        .{ "filterv", &filtervFn },                                        .{ "remove", &removeFn },
+        .{ "keep", &keepFn },                                              .{ "keep-indexed", &keepIndexedFn },
         .{ "map-indexed", &mapIndexedFn },
         // I/O
-                                                   .{ "print", &printFn },
-        .{ "pr", &prFn },                                                             .{ "prn", &prnFn },
+                                        .{ "print", &printFn },
+        .{ "pr", &prFn },                                                  .{ "prn", &prnFn },
         .{ "newline", &newlineFn },
         // Mutable refs
-                                                          .{ "volatile!", &volatileBangFn },
-        .{ "vswap!", &vswapBangFn },                                                  .{ "vreset!", &vresetBangFn },
+                                               .{ "volatile!", &volatileBangFn },
+        .{ "vswap!", &vswapBangFn },                                       .{ "vreset!", &vresetBangFn },
         // Reduce
-        .{ "reductions", &reductionsFn },                                             .{ "reduced", &reducedFn },
-        .{ "reduced?", &isReducedP },                                                 .{ "unreduced", &unreducedFn },
+        .{ "reductions", &reductionsFn },                                  .{ "reduced", &reducedFn },
+        .{ "reduced?", &isReducedP },                                      .{ "unreduced", &unreducedFn },
         .{ "transduce", &transduceFn },
         // Misc
-                                                      .{ "delay", &delayFn },
-        .{ "force", &forceFn },                                                       .{ "add-watch", &addWatchFn },
-        .{ "remove-watch", &removeWatchFn },                                          .{ "memoize", &memoizeFn },
-        .{ "trampoline", &trampolineFn },                                             .{ "sorted-set", &sorted.sortedSetFn },
-        .{ "sorted-set-by", &sorted.sortedSetByFn },                                  .{ "sorted-map", &sorted.sortedMapFn },
-        .{ "sorted-map-by", &sorted.sortedMapByFn },
+                                           .{ "delay", &delayFn },
+        .{ "force", &forceFn },                                            .{ "add-watch", &addWatchFn },
+        .{ "remove-watch", &removeWatchFn },                               .{ "memoize", &memoizeFn },
+        .{ "trampoline", &trampolineFn },
+        .{ "sorted-set", &sorted.sortedSetFn },                            .{ "sorted-set-by", &sorted.sortedSetByFn },
+        .{ "sorted-map", &sorted.sortedMapFn },                            .{ "sorted-map-by", &sorted.sortedMapByFn },
         // Pluralism — oppositional worlding
-                                         .{ "set-world!", &pluralism.setWorldFn },
-        .{ "current-world", &pluralism.currentWorldFn },                              .{ "plural-equal?", &pluralism.pluralEqualFn },
-        .{ "plural-compare", &pluralism.pluralCompareFn },                            .{ "trit", &pluralism.tritFn },
+                                      .{ "set-world!", &pluralism.setWorldFn },
+        .{ "current-world", &pluralism.currentWorldFn },                   .{ "plural-equal?", &pluralism.pluralEqualFn },
+        .{ "plural-compare", &pluralism.pluralCompareFn },                 .{ "trit", &pluralism.tritFn },
         .{ "plural-hash", &pluralism.pluralHashFn },
         // Dense f64 (Neanderthal-compatible)
-                                         .{ "fv", &fvFn },
-        .{ "fv-get", &fvGetFn },                                                      .{ "fv-set!", &fvSetBangFn },
-        .{ "fv-dot", &fvDotFn },                                                      .{ "fv-norm", &fvNormFn },
-        .{ "fv-axpy!", &fvAxpyBangFn },                                               .{ "fv-count", &fvCountFn },
+                              .{ "fv", &fvFn },
+        .{ "fv-get", &fvGetFn },                                           .{ "fv-set!", &fvSetBangFn },
+        .{ "fv-dot", &fvDotFn },                                           .{ "fv-norm", &fvNormFn },
+        .{ "fv-axpy!", &fvAxpyBangFn },                                    .{ "fv-count", &fvCountFn },
         // Clojure array API (backed by dense_f64; char/long coerce to f64)
-        .{ "make-array", &makeArrayFn },                                              .{ "aget", &agetFn },
-        .{ "aset", &asetFn },                                                         .{ "aset-long", &asetLongFn },
-        .{ "aset-char", &asetCharFn },                                                .{ "alength", &alengthFn },
+        .{ "make-array", &makeArrayFn },                                   .{ "aget", &agetFn },
+        .{ "aset", &asetFn },                                              .{ "aset-long", &asetLongFn },
+        .{ "aset-char", &asetCharFn },                                     .{ "alength", &alengthFn },
         // Trace (Anglican-compatible)
-        .{ "make-trace", &makeTraceFn },                                              .{ "trace-observe!", &traceObserveBangFn },
-        .{ "trace-log-weight", &traceLogWeightFn },                                   .{ "trace-sites", &traceSitesFn },
+        .{ "make-trace", &makeTraceFn },                                   .{ "trace-observe!", &traceObserveBangFn },
+        .{ "trace-log-weight", &traceLogWeightFn },                        .{ "trace-sites", &traceSitesFn },
         // Rational numbers (exact arithmetic)
-        .{ "rational", &rationalFn },                                                 .{ "numerator", &numeratorFn },
-        .{ "denominator", &denominatorFn },                                           .{ "rationalize", &rationalizeFn },
+        .{ "rational", &rationalFn },                                      .{ "numerator", &numeratorFn },
+        .{ "denominator", &denominatorFn },                                .{ "rationalize", &rationalizeFn },
         .{ "rational?", &isRationalObjP },
         // Skill inet (Agent Skills progressive disclosure via interaction nets)
-                                                   .{ "skill-register", &skill_inet.skillRegisterFn },
-        .{ "skill-activate", &skill_inet.skillActivateFn },                           .{ "skill-list", &skill_inet.skillListFn },
-        .{ "skill-load", &skill_inet.skillLoadFn },                                   .{ "skill-parse-file", &skill_inet.skillParseFileFn },
-        .{ "skill-net-stats", &skill_inet.skillNetStatsFn },                          .{ "skill-watch", &skill_inet.skillWatchFn },
-        .{ "skill-watch-all", &skill_inet.skillWatchAllFn },                          .{ "skill-transclude", &skill_inet.skillTranscludeFn },
-        .{ "skill-cache-stats", &skill_inet.skillCacheStatsFn },                      .{ "skill-invalidate", &skill_inet.skillInvalidateFn },
+                                        .{ "skill-register", &skill_inet.skillRegisterFn },
+        .{ "skill-activate", &skill_inet.skillActivateFn },                .{ "skill-list", &skill_inet.skillListFn },
+        .{ "skill-load", &skill_inet.skillLoadFn },                        .{ "skill-parse-file", &skill_inet.skillParseFileFn },
+        .{ "skill-net-stats", &skill_inet.skillNetStatsFn },               .{ "skill-watch", &skill_inet.skillWatchFn },
+        .{ "skill-watch-all", &skill_inet.skillWatchAllFn },               .{ "skill-transclude", &skill_inet.skillTranscludeFn },
+        .{ "skill-cache-stats", &skill_inet.skillCacheStatsFn },           .{ "skill-invalidate", &skill_inet.skillInvalidateFn },
         // Structured decompositions + sheaves
-        .{ "decompose", &decomp.decomposeFn },                                        .{ "decomp-bags", &decomp.decompBagsFn },
-        .{ "decomp-width", &decomp.decompWidthFn },                                   .{ "decomp-glue", &decomp.decompGlueFn },
-        .{ "decomp-map", &decomp.decompMapFn },                                       .{ "decomp-decide", &decomp.decompDecideFn },
-        .{ "decomp-skeleton", &decomp.decompSkeletonFn },                             .{ "decomp-adhesions", &decomp.decompAdhesionsFn },
-        .{ "sheaf", &decomp.sheafFn },                                                .{ "section", &decomp.sectionFn },
-        .{ "restrict", &decomp.restrictFn },                                          .{ "extend-section", &decomp.extendSectionFn },
-        .{ "trit-trajectory", &decomp.tritTrajectoryFn },                             .{ "decomp-gf3", &decomp.decompGf3Fn },
+        .{ "decompose", &decomp.decomposeFn },                             .{ "decomp-bags", &decomp.decompBagsFn },
+        .{ "decomp-width", &decomp.decompWidthFn },                        .{ "decomp-glue", &decomp.decompGlueFn },
+        .{ "decomp-map", &decomp.decompMapFn },                            .{ "decomp-decide", &decomp.decompDecideFn },
+        .{ "decomp-skeleton", &decomp.decompSkeletonFn },                  .{ "decomp-adhesions", &decomp.decompAdhesionsFn },
+        .{ "sheaf", &decomp.sheafFn },                                     .{ "section", &decomp.sectionFn },
+        .{ "restrict", &decomp.restrictFn },                               .{ "extend-section", &decomp.extendSectionFn },
+        .{ "trit-trajectory", &decomp.tritTrajectoryFn },                  .{ "decomp-gf3", &decomp.decompGf3Fn },
         // Zipf's law — power-law rank-frequency distributions
-        .{ "zipf-rank", &zipf.zipfRankFn },                                           .{ "zipf-pmf", &zipf.zipfPmfFn },
-        .{ "zipf-harmonic", &zipf.zipfHarmonicFn },                                   .{ "zipf-top-share", &zipf.zipfTopShareFn },
-        .{ "zipf-sample", &zipf.zipfSampleFn },                                       .{ "zipf-taper", &zipf.zipfTaperFn },
+        .{ "zipf-rank", &zipf.zipfRankFn },                                .{ "zipf-pmf", &zipf.zipfPmfFn },
+        .{ "zipf-harmonic", &zipf.zipfHarmonicFn },                        .{ "zipf-top-share", &zipf.zipfTopShareFn },
+        .{ "zipf-sample", &zipf.zipfSampleFn },                            .{ "zipf-taper", &zipf.zipfTaperFn },
         .{ "zipf-mandelbrot", &zipf.zipfMandelbrotFn },
         // CSP channels (core.async-style)
-                                      .{ "chan", &channel.chanFn },
-        .{ "chan?", &channel.chanPredFn },                                            .{ "chan!", &channel.chanPutFn },
-        .{ "<!", &channel.chanTakeFn },                                               .{ "close!", &channel.chanCloseFn },
-        .{ "closed?", &channel.chanClosedPredFn },                                    .{ "chan-count", &channel.chanCountFn },
-        .{ "offer!", &channel.chanOfferFn },                                          .{ "poll!", &channel.chanPollFn },
+                           .{ "chan", &channel.chanFn },
+        .{ "chan?", &channel.chanPredFn },                                 .{ "chan!", &channel.chanPutFn },
+        .{ "<!", &channel.chanTakeFn },                                    .{ "close!", &channel.chanCloseFn },
+        .{ "closed?", &channel.chanClosedPredFn },                         .{ "chan-count", &channel.chanCountFn },
+        .{ "offer!", &channel.chanOfferFn },                               .{ "poll!", &channel.chanPollFn },
         // Time units — temporal ontology as conversion lattice
-        .{ "time-units", &time_units.timeUnitsFn },                                   .{ "time-unit", &time_units.timeUnitFn },
-        .{ "convert-time", &time_units.convertTimeFn },                               .{ "nice-ratios", &time_units.niceRatiosFn },
-        .{ "trice-per-sec", &time_units.tricePerSecFn },                              .{ "glimpses-per-sec", &time_units.glimpsesPerSecFn },
-        .{ "time-tower", &time_units.timeTowerFn },                                   .{ "hyperreal-time", &time_units.hyperrealTimeFn },
+        .{ "time-units", &time_units.timeUnitsFn },                        .{ "time-unit", &time_units.timeUnitFn },
+        .{ "convert-time", &time_units.convertTimeFn },                    .{ "nice-ratios", &time_units.niceRatiosFn },
+        .{ "trice-per-sec", &time_units.tricePerSecFn },                   .{ "glimpses-per-sec", &time_units.glimpsesPerSecFn },
+        .{ "time-tower", &time_units.timeTowerFn },                        .{ "hyperreal-time", &time_units.hyperrealTimeFn },
         .{ "surreal-birthday", &time_units.surrealBirthdayFn },
         // nREPL port allocation by color entropy
-                              .{ "nrepl-port-for", &time_units.nreplPortForFn },
-        .{ "nrepl-color", &time_units.nreplColorFn },                                 .{ "nrepl-spread", &time_units.nreplSpreadFn },
+                   .{ "nrepl-port-for", &time_units.nreplPortForFn },
+        .{ "nrepl-color", &time_units.nreplColorFn },                      .{ "nrepl-spread", &time_units.nreplSpreadFn },
     };
 
     inline for (builtins) |b| {
@@ -3106,6 +3120,14 @@ fn depthFn(args: []Value, _: *GC, _: *Env, res: *Resources) anyerror!Value {
     return Value.makeInt(@intCast(res.depth));
 }
 
+/// (max-depth) — high-water recursion depth reached so far. Monotone; a
+/// witness of the deepest the computation has gone, not the current position.
+fn maxDepthFn(args: []Value, _: *GC, _: *Env, res: *Resources) anyerror!Value {
+    if (args.len != 0) return error.ArityError;
+    return Value.makeInt(@intCast(res.max_depth_seen));
+}
+
+
 // ============================================================================
 // I/O
 // ============================================================================
@@ -3113,18 +3135,10 @@ fn depthFn(args: []Value, _: *GC, _: *Env, res: *Resources) anyerror!Value {
 // I/O functions: on WASM, filesystem/shell are unavailable
 const io_impl = if (is_wasm) struct {
     // WASM stubs — no filesystem, no shell, no stdin
-    fn slurpFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
-        return Value.makeNil();
-    }
-    fn spitFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
-        return Value.makeNil();
-    }
-    fn readLineFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
-        return Value.makeNil();
-    }
-    fn shellFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
-        return Value.makeNil();
-    }
+    fn slurpFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeNil(); }
+    fn spitFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeNil(); }
+    fn readLineFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeNil(); }
+    fn shellFn(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value { return Value.makeNil(); }
 } else struct {
     fn cFopen(path: []const u8, mode: [*c]const u8) ?*std.c.FILE {
         var pbuf: [4096]u8 = undefined;
@@ -3239,7 +3253,12 @@ fn readFlagsMap(m: *value.Obj, gc: *GC) diskio.OpenFlags {
         else
             continue;
         const b = vals[i].isBool() and vals[i].asBool();
-        if (std.mem.eql(u8, name, "read")) f.read = b else if (std.mem.eql(u8, name, "write")) f.write = b else if (std.mem.eql(u8, name, "create")) f.create = b else if (std.mem.eql(u8, name, "truncate")) f.truncate = b else if (std.mem.eql(u8, name, "append")) f.append = b else if (std.mem.eql(u8, name, "excl")) f.excl = b;
+        if (std.mem.eql(u8, name, "read")) f.read = b
+        else if (std.mem.eql(u8, name, "write")) f.write = b
+        else if (std.mem.eql(u8, name, "create")) f.create = b
+        else if (std.mem.eql(u8, name, "truncate")) f.truncate = b
+        else if (std.mem.eql(u8, name, "append")) f.append = b
+        else if (std.mem.eql(u8, name, "excl")) f.excl = b;
     }
     // If write+create but no explicit read, allow read-false default
     if (f.write and !f.read) f.read = false;
@@ -3370,6 +3389,38 @@ fn strBytesFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
     const s = gc.getString(args[0].asStringId());
     const copy = try gc.allocator.dupe(u8, s);
     return makeBytes(gc, copy);
+}
+
+fn fileFlockFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len < 1 or args.len > 2) return error.ArityError;
+    const o = try requireFileHandle(args[0]);
+    if (o.data.file_handle.closed) return error.ValueError;
+    var shared = false;
+    var nonblocking = false;
+    if (args.len == 2) {
+        if (!args[1].isObj() or args[1].asObj().kind != .map) return error.TypeError;
+        const m = args[1].asObj();
+        for (m.data.map.keys.items, m.data.map.vals.items) |k, v| {
+            if (!k.isKeyword()) continue;
+            const kname = gc.getString(k.asKeywordId());
+            if (std.mem.eql(u8, kname, "shared")) shared = v.isTruthy();
+            if (std.mem.eql(u8, kname, "nonblocking")) nonblocking = v.isTruthy();
+        }
+    }
+    const mode: diskio.LockMode = if (shared) .shared else .exclusive;
+    diskio.flock(o.data.file_handle.fd, mode, nonblocking) catch |e| {
+        if (e == diskio.DiskError.LockWouldBlock) return Value.makeKeyword(try gc.internString("would-block"));
+        return Value.makeNil();
+    };
+    return Value.makeBool(true);
+}
+
+fn fileFunlockFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    const o = try requireFileHandle(args[0]);
+    if (o.data.file_handle.closed) return error.ValueError;
+    diskio.flock(o.data.file_handle.fd, .unlock, false) catch return Value.makeNil();
+    return Value.makeBool(true);
 }
 
 fn fileMmapRoFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
