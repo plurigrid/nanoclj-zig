@@ -96,7 +96,117 @@ pub const ActionLog = struct {
         }
         return out.toOwnedSlice(allocator);
     }
+
+    /// Rung 6 — append one line per ActionResult:
+    ///   invoke_id|action_name|data_bits|tags
+    /// data_bits is "-" for null. action_name and tags escape '\|\n\\'.
+    pub fn writeJsonl(
+        self: *const ActionLog,
+        out: *std.ArrayListUnmanaged(u8),
+        alloc: std.mem.Allocator,
+        scratch_alloc: std.mem.Allocator,
+    ) !void {
+        var tmp: [64]u8 = undefined;
+        for (self.results.items) |r| {
+            const name_esc = try escapeField(scratch_alloc, r.action_name);
+            defer scratch_alloc.free(name_esc);
+            const tags_esc = try escapeField(scratch_alloc, r.tags);
+            defer scratch_alloc.free(tags_esc);
+
+            try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{r.invoke_id}));
+            try out.append(alloc, '|');
+            try out.appendSlice(alloc, name_esc);
+            try out.append(alloc, '|');
+            if (r.data) |d| {
+                try out.appendSlice(alloc, try std.fmt.bufPrint(&tmp, "{d}", .{d.bits}));
+            } else {
+                try out.append(alloc, '-');
+            }
+            try out.append(alloc, '|');
+            try out.appendSlice(alloc, tags_esc);
+            try out.append(alloc, '\n');
+        }
+    }
+
+    pub fn loadJsonl(self: *ActionLog, data: []const u8, intern_alloc: std.mem.Allocator) !void {
+        self.results.clearRetainingCapacity();
+        var it = std.mem.splitScalar(u8, data, '\n');
+        while (it.next()) |line| {
+            if (line.len == 0) continue;
+            var parts: [4][]const u8 = undefined;
+            var idx: usize = 0;
+            var cursor: usize = 0;
+            var field_start: usize = 0;
+            while (cursor < line.len and idx < 4) : (cursor += 1) {
+                if (line[cursor] == '\\' and cursor + 1 < line.len) {
+                    cursor += 1;
+                    continue;
+                }
+                if (line[cursor] == '|') {
+                    parts[idx] = line[field_start..cursor];
+                    idx += 1;
+                    field_start = cursor + 1;
+                }
+            }
+            if (idx != 3) return error.ParseError;
+            parts[3] = line[field_start..];
+
+            const iid = try std.fmt.parseInt(InvokeId, parts[0], 10);
+            const name = try unescapeField(intern_alloc, parts[1]);
+            const data_opt = if (std.mem.eql(u8, parts[2], "-"))
+                @as(?Value, null)
+            else blk: {
+                const bits = try std.fmt.parseInt(u64, parts[2], 10);
+                break :blk @as(?Value, Value{ .bits = bits });
+            };
+            const tags = try unescapeField(intern_alloc, parts[3]);
+
+            try self.results.append(self.allocator, .{
+                .invoke_id = iid,
+                .action_name = name,
+                .data = data_opt,
+                .tags = tags,
+            });
+        }
+    }
 };
+
+// Escape helpers shared between write/load. Identical grammar to
+// aor_trace.zig so a single codec covers trace + action logs.
+fn escapeField(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out = try std.ArrayListUnmanaged(u8).initCapacity(allocator, s.len);
+    errdefer out.deinit(allocator);
+    for (s) |c| {
+        switch (c) {
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '|' => try out.appendSlice(allocator, "\\|"),
+            else => try out.append(allocator, c),
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn unescapeField(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out = try std.ArrayListUnmanaged(u8).initCapacity(allocator, s.len);
+    errdefer out.deinit(allocator);
+    var i: usize = 0;
+    while (i < s.len) {
+        if (s[i] == '\\' and i + 1 < s.len) {
+            switch (s[i + 1]) {
+                '\\' => try out.append(allocator, '\\'),
+                'n' => try out.append(allocator, '\n'),
+                '|' => try out.append(allocator, '|'),
+                else => try out.append(allocator, s[i + 1]),
+            }
+            i += 2;
+        } else {
+            try out.append(allocator, s[i]);
+            i += 1;
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
 
 /// Compute `RunInfo` from a completed invocation trace.
 pub fn runInfoFromTrace(trace: InvocationTrace) RunInfo {
@@ -253,6 +363,45 @@ test "failing action still produces a 'failed' log entry (no silent drop)" {
     try std.testing.expectEqual(@as(usize, 2), log.count());
     try std.testing.expectEqualStrings("failed", log.results.items[1].tags);
     try std.testing.expect(log.results.items[1].data == null);
+}
+
+test "ActionLog writeJsonl → loadJsonl roundtrip" {
+    var log = ActionLog.init(std.testing.allocator);
+    defer log.deinit();
+    try log.results.append(log.allocator, .{
+        .invoke_id = 7,
+        .action_name = "alpha",
+        .data = Value.makeInt(99),
+        .tags = "ok",
+    });
+    try log.results.append(log.allocator, .{
+        .invoke_id = 8,
+        .action_name = "b|eta",
+        .data = null,
+        .tags = "fail\nweird",
+    });
+
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    try log.writeJsonl(&buf, std.testing.allocator, std.testing.allocator);
+
+    var log2 = ActionLog.init(std.testing.allocator);
+    defer {
+        for (log2.results.items) |r| {
+            std.testing.allocator.free(r.action_name);
+            std.testing.allocator.free(r.tags);
+        }
+        log2.deinit();
+    }
+    try log2.loadJsonl(buf.items, std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), log2.count());
+    try std.testing.expectEqual(@as(InvokeId, 7), log2.results.items[0].invoke_id);
+    try std.testing.expectEqualStrings("alpha", log2.results.items[0].action_name);
+    try std.testing.expectEqual(@as(i48, 99), log2.results.items[0].data.?.asInt());
+    try std.testing.expectEqualStrings("ok", log2.results.items[0].tags);
+    try std.testing.expectEqualStrings("b|eta", log2.results.items[1].action_name);
+    try std.testing.expect(log2.results.items[1].data == null);
+    try std.testing.expectEqualStrings("fail\nweird", log2.results.items[1].tags);
 }
 
 test "forInvocation filters results by invoke_id" {
