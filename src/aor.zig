@@ -12,6 +12,8 @@ pub const agent = @import("aor_agent.zig");
 pub const trace = @import("aor_trace.zig");
 pub const topology = @import("aor_topology.zig");
 pub const eval = @import("aor_eval.zig");
+pub const dataset = @import("aor_dataset.zig");
+pub const experiment = @import("aor_experiment.zig");
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -41,12 +43,21 @@ pub const individualEvaluator = eval.individual;
 pub const comparativeEvaluator = eval.comparative;
 pub const summaryEvaluator = eval.summary;
 
-// Rungs 5–7: see .topos/agent-o-nanoclj.md §2 — dataset, experiment, store,
-// feedback.
+/// Rung 5: Dataset + Experiment.
+pub const Example = dataset.Example;
+pub const Dataset = dataset.Dataset;
+pub const Experiment = experiment.Experiment;
+pub const ExampleResult = experiment.ExampleResult;
+pub const Report = experiment.Report;
+pub const PassFn = experiment.PassFn;
+
+// Rungs 6–7: see .topos/agent-o-nanoclj.md §2 — store, feedback.
 
 test {
     _ = agent;
     _ = trace;
     _ = topology;
     _ = eval;
+    _ = dataset;
+    _ = experiment;
 }
