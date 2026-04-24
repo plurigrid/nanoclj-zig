@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone zig-syrup sibling
-        run: git clone --depth 1 -b radical/zig-0.16.0-native https://github.com/plurigrid/zig-syrup.git ../zig-syrup
+        run: git clone --depth 1 https://github.com/plurigrid/zig-syrup.git ../zig-syrup
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
