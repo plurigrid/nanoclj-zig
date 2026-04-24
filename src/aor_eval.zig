@@ -99,6 +99,27 @@ pub fn scoreMany(eval: Evaluator, outputs: []const Value) EvalError!Verdict {
     };
 }
 
+// agent-o-rama-named convenience aliases for ad-hoc evaluator testing.
+// Upstream exposes these as try-evaluator / try-comparative-evaluator /
+// try-summary-evaluator on their Clojure API; mirror the naming so ported
+// code reads the same way.
+pub const tryEvaluator = scoreOne;
+pub const tryComparative = scorePair;
+pub const trySummary = scoreMany;
+
+/// Kind-dispatching try: pick the right call by the evaluator's own kind.
+/// Input shapes:
+///   individual  → pass the single Value as `a`; `b`/`xs` ignored
+///   comparative → pass `a` and `b`; `xs` ignored
+///   summary     → pass `xs`; `a`/`b` ignored
+pub fn tryAny(eval: Evaluator, a: Value, b: Value, xs: []const Value) EvalError!Verdict {
+    return switch (eval.kind()) {
+        .individual => scoreOne(eval, a),
+        .comparative => scorePair(eval, a, b),
+        .summary => scoreMany(eval, xs),
+    };
+}
+
 /// Apply an individual evaluator to each completed event of an invocation
 /// and return a slice of verdicts (one per completed step). Caller owns the
 /// returned slice.
@@ -192,6 +213,36 @@ test "scoreMany on empty slice returns 0" {
     const xs = [_]Value{};
     const v = try scoreMany(e, &xs);
     try std.testing.expectEqual(@as(f32, 0.0), v.score);
+}
+
+test "tryEvaluator / tryComparative / trySummary are aliases" {
+    const ei = individual("id", lenScorer);
+    const v1 = try tryEvaluator(ei, Value.makeInt(7));
+    try std.testing.expectEqual(@as(f32, 7.0), v1.score);
+
+    const ec = comparative("cmp", biggerIsBetter);
+    const v2 = try tryComparative(ec, Value.makeInt(10), Value.makeInt(5));
+    try std.testing.expectEqual(@as(f32, 1.0), v2.score);
+
+    const es = summary("mean", meanAgg);
+    const xs = [_]Value{ Value.makeInt(2), Value.makeInt(4) };
+    const v3 = try trySummary(es, &xs);
+    try std.testing.expectEqual(@as(f32, 3.0), v3.score);
+}
+
+test "tryAny dispatches by evaluator kind" {
+    const e_ind = individual("s", lenScorer);
+    const v_ind = try tryAny(e_ind, Value.makeInt(42), Value.makeInt(0), &.{});
+    try std.testing.expectEqual(@as(f32, 42.0), v_ind.score);
+
+    const e_cmp = comparative("c", biggerIsBetter);
+    const v_cmp = try tryAny(e_cmp, Value.makeInt(2), Value.makeInt(5), &.{});
+    try std.testing.expectEqual(@as(f32, -1.0), v_cmp.score);
+
+    const e_sum = summary("m", meanAgg);
+    const xs = [_]Value{ Value.makeInt(10), Value.makeInt(20), Value.makeInt(30) };
+    const v_sum = try tryAny(e_sum, Value.makeInt(0), Value.makeInt(0), &xs);
+    try std.testing.expectEqual(@as(f32, 20.0), v_sum.score);
 }
 
 test "scoreInvocationSteps scores each completed step" {

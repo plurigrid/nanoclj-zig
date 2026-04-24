@@ -46,6 +46,10 @@ pub const Verdict = eval.Verdict;
 pub const individualEvaluator = eval.individual;
 pub const comparativeEvaluator = eval.comparative;
 pub const summaryEvaluator = eval.summary;
+pub const tryEvaluator = eval.tryEvaluator;
+pub const tryComparative = eval.tryComparative;
+pub const trySummary = eval.trySummary;
+pub const tryAny = eval.tryAny;
 
 /// Rung 5: Dataset + Experiment.
 pub const Example = dataset.Example;
