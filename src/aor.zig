@@ -18,6 +18,7 @@ pub const feedback = @import("aor_feedback.zig");
 pub const tool = @import("aor_tool.zig");
 pub const action = @import("aor_action.zig");
 pub const telemetry = @import("aor_telemetry.zig");
+pub const checkpoint = @import("aor_checkpoint.zig");
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -89,6 +90,10 @@ pub const Series = telemetry.Series;
 pub const Aggregate = telemetry.Aggregate;
 pub const TelemetrySink = telemetry.TelemetrySink;
 
+/// Rung 6+: unified world checkpoint across trace + action + telemetry.
+pub const Checkpoint = checkpoint.Checkpoint;
+pub const CheckpointError = checkpoint.CheckpointError;
+
 // Rung 6 (persistence + streaming) remains as follow-up; the feedback loop
 // does not require it — intermediate state lives in-process on Agent.state.
 
@@ -103,5 +108,6 @@ test {
     _ = tool;
     _ = action;
     _ = telemetry;
+    _ = checkpoint;
     _ = @import("aor_world_test.zig");
 }
