@@ -185,6 +185,10 @@ fn encodeValue(val: Value, gc: *GC) !Value {
         .dense_f64 => return try makeOpaqueKind(gc, "dense-f64"),
         .trace => return try makeOpaqueKind(gc, "trace"),
         .channel => return try makeOpaqueKind(gc, "channel"),
+        .agent => return try makeOpaqueKind(gc, "agent"),
+        .file_handle => return try makeOpaqueKind(gc, "file"),
+        .bytes => return try makeOpaqueKind(gc, "bytes"),
+        .mmap_view => return try makeOpaqueKind(gc, "mmap"),
     }
 }
 
@@ -288,13 +292,14 @@ pub fn juvixBridgeProfileFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anye
     const exact = try makeVector(gc);
     const reflective = try makeVector(gc);
     const exact_names = [_][]const u8{
-        "unit", "bool", "int", "double", "string", "symbol", "keyword",
-        "list", "vector", "map", "set", "rational", "color",
+        "unit", "bool",   "int", "double", "string",   "symbol", "keyword",
+        "list", "vector", "map", "set",    "rational", "color",
     };
     const reflective_names = [_][]const u8{
-        "builtin", "function", "macro", "atom", "bytecode-closure", "lazy-seq",
-        "partial-fn", "multimethod", "protocol", "dense-f64", "trace", "channel",
-        "lambda", "apply", "constructor", "let", "ann", "match", "pat-var", "pat-ctor", "pat-wildcard",
+        "builtin",    "function",    "macro",        "atom",      "bytecode-closure", "lazy-seq",
+        "partial-fn", "multimethod", "protocol",     "dense-f64", "trace",            "channel",
+        "lambda",     "apply",       "constructor",  "let",       "ann",              "match",
+        "pat-var",    "pat-ctor",    "pat-wildcard",
     };
     for (exact_names) |name| try exact.data.vector.items.append(gc.allocator, try str(gc, name));
     for (reflective_names) |name| try reflective.data.vector.items.append(gc.allocator, try str(gc, name));
@@ -1040,12 +1045,12 @@ test "juvix source parse/print preserves lambda apply ctor terms" {
     var ctor_args = [_]Value{ try str(&gc, "Just"), Value.makeInt(9) };
     const ctor = try juvixCtorFn(ctor_args[0..], &gc, &env, &res);
 
-    var print_args = [_]Value{ app };
+    var print_args = [_]Value{app};
     const app_src = try juvixPrintFn(print_args[0..], &gc, &env, &res);
     try std.testing.expect(app_src.isString());
     try std.testing.expect(std.mem.indexOf(u8, gc.getString(app_src.asStringId()), "Apply(") != null);
 
-    var parse_args = [_]Value{ app_src };
+    var parse_args = [_]Value{app_src};
     const parsed = try juvixParseFn(parse_args[0..], &gc, &env, &res);
     try std.testing.expect(parsed.isObj());
     try std.testing.expect(getMapValueByKeyword(&gc, parsed, "juvix/tag") != null);
@@ -1103,7 +1108,7 @@ test "juvix source parse/print preserves first-class match patterns" {
 
     var pat_ctor_args = [_]Value{ try str(&gc, "Succ"), Value.makeObj(try makeTaggedTerm(&gc, "pat-wildcard")) };
     const pat_ctor = try juvixPatCtorFn(pat_ctor_args[0..], &gc, &env, &res);
-    var pat_var_args = [_]Value{ try str(&gc, "n") };
+    var pat_var_args = [_]Value{try str(&gc, "n")};
     const pat_var = try juvixPatVarFn(pat_var_args[0..], &gc, &env, &res);
 
     const cases = try gc.allocObj(.vector);

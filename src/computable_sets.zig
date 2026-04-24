@@ -170,14 +170,14 @@ fn verifyReduction(
 
 /// Position in the Weihrauch lattice — fine-grained non-computability.
 pub const WeihrauchDegree = enum(u8) {
-    computable,     // id: always solvable
-    lpo,            // Limited Principle of Omniscience
-    llpo,           // Lesser LPO
-    ivt,            // Intermediate Value Theorem
-    wkl,            // Weak König's Lemma
-    bwt,            // Bolzano-Weierstrass
-    halt,           // Halting problem
-    beyond_halt,    // Σ⁰₂ and above
+    computable, // id: always solvable
+    lpo, // Limited Principle of Omniscience
+    llpo, // Lesser LPO
+    ivt, // Intermediate Value Theorem
+    wkl, // Weak König's Lemma
+    bwt, // Bolzano-Weierstrass
+    halt, // Halting problem
+    beyond_halt, // Σ⁰₂ and above
 
     pub fn description(self: WeihrauchDegree) []const u8 {
         return switch (self) {
@@ -392,18 +392,11 @@ pub fn reduceVerifyFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!V
     const target_name = gc.getString(args[1].asStringId());
     const bound = args[2].asInt();
 
-    const source_kind: ComputableSetKind = if (std.mem.eql(u8, source_name, "evens")) .evens
-        else if (std.mem.eql(u8, source_name, "primes")) .primes
-        else if (std.mem.eql(u8, source_name, "squares")) .squares
-        else .odds;
+    const source_kind: ComputableSetKind = if (std.mem.eql(u8, source_name, "evens")) .evens else if (std.mem.eql(u8, source_name, "primes")) .primes else if (std.mem.eql(u8, source_name, "squares")) .squares else .odds;
 
-    const target_kind: ComputableSetKind = if (std.mem.eql(u8, target_name, "evens")) .evens
-        else if (std.mem.eql(u8, target_name, "squares")) .squares
-        else .odds;
+    const target_kind: ComputableSetKind = if (std.mem.eql(u8, target_name, "evens")) .evens else if (std.mem.eql(u8, target_name, "squares")) .squares else .odds;
 
-    const reduction: ReductionKind = if (target_kind == .evens) .to_evens
-        else if (target_kind == .squares) .to_squares
-        else .identity;
+    const reduction: ReductionKind = if (target_kind == .evens) .to_evens else if (target_kind == .squares) .to_squares else .identity;
 
     return Value.makeBool(verifyReduction(source_kind, 0, target_kind, 0, reduction, bound));
 }
@@ -416,16 +409,7 @@ pub fn weihrauchDegreeFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerro
 
     const name = gc.getString(args[0].asStringId());
 
-    const degree: WeihrauchDegree = if (std.mem.eql(u8, name, "even-membership")) .computable
-        else if (std.mem.eql(u8, name, "prime-membership")) .computable
-        else if (std.mem.eql(u8, name, "ivt")) .ivt
-        else if (std.mem.eql(u8, name, "wkl")) .wkl
-        else if (std.mem.eql(u8, name, "halting")) .halt
-        else if (std.mem.eql(u8, name, "spectral-gap")) .halt
-        else if (std.mem.eql(u8, name, "alignment")) .halt
-        else if (std.mem.eql(u8, name, "tiling")) .halt
-        else if (std.mem.eql(u8, name, "channel-capacity")) .halt
-        else .computable;
+    const degree: WeihrauchDegree = if (std.mem.eql(u8, name, "even-membership")) .computable else if (std.mem.eql(u8, name, "prime-membership")) .computable else if (std.mem.eql(u8, name, "ivt")) .ivt else if (std.mem.eql(u8, name, "wkl")) .wkl else if (std.mem.eql(u8, name, "halting")) .halt else if (std.mem.eql(u8, name, "spectral-gap")) .halt else if (std.mem.eql(u8, name, "alignment")) .halt else if (std.mem.eql(u8, name, "tiling")) .halt else if (std.mem.eql(u8, name, "channel-capacity")) .halt else .computable;
 
     const obj = try gc.allocObj(.map);
     const kw = struct {
@@ -459,15 +443,7 @@ pub fn auditGuidelineFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror
 
     const name = gc.getString(args[0].asStringId());
 
-    const claim: GuidelineClaim = if (std.mem.eql(u8, name, "universal-semantic")) .universal_semantic_property
-        else if (std.mem.eql(u8, name, "permanent")) .permanent_completeness
-        else if (std.mem.eql(u8, name, "compliance")) .universal_compliance_check
-        else if (std.mem.eql(u8, name, "coverage")) .total_coverage
-        else if (std.mem.eql(u8, name, "membership")) .decidable_membership
-        else if (std.mem.eql(u8, name, "termination")) .guaranteed_termination
-        else if (std.mem.eql(u8, name, "convergence")) .convergence_claim
-        else if (std.mem.eql(u8, name, "open")) .open_extension
-        else return error.TypeError;
+    const claim: GuidelineClaim = if (std.mem.eql(u8, name, "universal-semantic")) .universal_semantic_property else if (std.mem.eql(u8, name, "permanent")) .permanent_completeness else if (std.mem.eql(u8, name, "compliance")) .universal_compliance_check else if (std.mem.eql(u8, name, "coverage")) .total_coverage else if (std.mem.eql(u8, name, "membership")) .decidable_membership else if (std.mem.eql(u8, name, "termination")) .guaranteed_termination else if (std.mem.eql(u8, name, "convergence")) .convergence_claim else if (std.mem.eql(u8, name, "open")) .open_extension else return error.TypeError;
 
     const result = auditClaim(claim);
 
@@ -1378,24 +1354,12 @@ const StacksTag = struct {
 };
 
 const stacks_tags = [_]StacksTag{
-    .{ .tag = "00VH", .name = "Site", .chapter = "7.6",
-       .connection = "classified problems as a site under Turing reductions",
-       .trit = 0 },
-    .{ .tag = "00VL", .name = "Sheaf on a Site", .chapter = "7.7",
-       .connection = "Omega_eff = Sigma^0_1 truth values (subobject classifier)",
-       .trit = 1 },
-    .{ .tag = "03N1", .name = "Etale Cohomology", .chapter = "59",
-       .connection = "over Spec(GF(3)), etale sheaves are trit-valued",
-       .trit = -1 },
-    .{ .tag = "026K", .name = "Algebraic Stacks", .chapter = "94",
-       .connection = "Gorard tower as stack of proof-theoretic depths",
-       .trit = 0 },
-    .{ .tag = "0238", .name = "Descent", .chapter = "35",
-       .connection = "effective descent = realizer witnesses gluing",
-       .trit = 1 },
-    .{ .tag = "00ZU", .name = "Homological Algebra", .chapter = "12",
-       .connection = "derived functors = iterated Sigma/Pi quantifier alternation",
-       .trit = -1 },
+    .{ .tag = "00VH", .name = "Site", .chapter = "7.6", .connection = "classified problems as a site under Turing reductions", .trit = 0 },
+    .{ .tag = "00VL", .name = "Sheaf on a Site", .chapter = "7.7", .connection = "Omega_eff = Sigma^0_1 truth values (subobject classifier)", .trit = 1 },
+    .{ .tag = "03N1", .name = "Etale Cohomology", .chapter = "59", .connection = "over Spec(GF(3)), etale sheaves are trit-valued", .trit = -1 },
+    .{ .tag = "026K", .name = "Algebraic Stacks", .chapter = "94", .connection = "Gorard tower as stack of proof-theoretic depths", .trit = 0 },
+    .{ .tag = "0238", .name = "Descent", .chapter = "35", .connection = "effective descent = realizer witnesses gluing", .trit = 1 },
+    .{ .tag = "00ZU", .name = "Homological Algebra", .chapter = "12", .connection = "derived functors = iterated Sigma/Pi quantifier alternation", .trit = -1 },
 };
 
 /// (stacks-tags) → vector of {:tag "00VH" :name "Site" :connection str :trit n}
@@ -1494,7 +1458,10 @@ fn hsvToRgb(hue: i48, sat: i48, val: i48) [3]u8 {
     const h: u32 = @intCast(@mod(hue, 255));
     const s: u32 = @intCast(@max(0, @min(sat, 254)));
     const v: u32 = @intCast(@max(0, @min(val, 254)));
-    if (s == 0) { const g: u8 = @intCast(v); return [3]u8{ g, g, g }; }
+    if (s == 0) {
+        const g: u8 = @intCast(v);
+        return [3]u8{ g, g, g };
+    }
     const region = h / 43;
     const remainder = (h - region * 43) * 6;
     const p: u8 = @intCast((v * (255 - s)) >> 8);
@@ -1585,13 +1552,7 @@ pub fn matterSceneFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Va
     const name = gc.getString(args[0].asStringId());
     const S = struct { h: i48, s: i48, l: i48 };
     const scene: ?S =
-        if (std.mem.eql(u8, name, "warm")) S{ .h = 20, .s = 200, .l = 200 }
-    else if (std.mem.eql(u8, name, "cool")) S{ .h = 160, .s = 180, .l = 200 }
-    else if (std.mem.eql(u8, name, "red")) S{ .h = 0, .s = 254, .l = 254 }
-    else if (std.mem.eql(u8, name, "green")) S{ .h = 85, .s = 254, .l = 254 }
-    else if (std.mem.eql(u8, name, "blue")) S{ .h = 170, .s = 254, .l = 254 }
-    else if (std.mem.eql(u8, name, "party")) S{ .h = 210, .s = 254, .l = 254 }
-    else null;
+        if (std.mem.eql(u8, name, "warm")) S{ .h = 20, .s = 200, .l = 200 } else if (std.mem.eql(u8, name, "cool")) S{ .h = 160, .s = 180, .l = 200 } else if (std.mem.eql(u8, name, "red")) S{ .h = 0, .s = 254, .l = 254 } else if (std.mem.eql(u8, name, "green")) S{ .h = 85, .s = 254, .l = 254 } else if (std.mem.eql(u8, name, "blue")) S{ .h = 170, .s = 254, .l = 254 } else if (std.mem.eql(u8, name, "party")) S{ .h = 210, .s = 254, .l = 254 } else null;
     if (scene == null) return Value.makeNil();
     const sc = scene.?;
     var lamp_args = [3]Value{ Value.makeInt(sc.h), Value.makeInt(sc.s), Value.makeInt(sc.l) };
@@ -1801,7 +1762,10 @@ pub fn detectionTheoremFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerr
     for (0..64) |i| {
         var dup = false;
         for (0..i) |j| {
-            if (keys[i] == keys[j]) { dup = true; break; }
+            if (keys[i] == keys[j]) {
+                dup = true;
+                break;
+            }
         }
         if (!dup) distinct += 1;
     }

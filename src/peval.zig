@@ -28,6 +28,10 @@ const eval_mod = @import("eval.zig");
 
 /// Is this value a ground term (no free variables, no side effects)?
 /// Ground terms can be safely evaluated at compile time.
+pub fn isGroundPublic(val: Value, gc: *GC, env: *const Env) bool {
+    return isGround(val, gc, env);
+}
+
 fn isGround(val: Value, gc: *GC, env: *const Env) bool {
     if (val.isNil() or val.isBool() or val.isInt() or
         val.isString() or val.isKeyword())

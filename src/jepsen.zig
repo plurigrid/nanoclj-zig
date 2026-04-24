@@ -24,16 +24,16 @@ const transitivity = @import("transitivity.zig");
 // ============================================================================
 
 pub const OpKind = enum(u8) {
-    eval,       // normal eval
-    nemesis,    // fault injection
-    recover,    // recovery from fault
-    check,      // invariant check
+    eval, // normal eval
+    nemesis, // fault injection
+    recover, // recovery from fault
+    check, // invariant check
 };
 
 pub const OpResult = enum(u8) {
     ok,
     fail,
-    info,       // nemesis-generated informational
+    info, // nemesis-generated informational
 };
 
 pub const HistoryEntry = struct {
@@ -42,8 +42,8 @@ pub const HistoryEntry = struct {
     trit_before: i8,
     trit_after: i8,
     version_id: u64,
-    causal_ts: u64,     // monotonic timestamp
-    detail: u32,        // op-specific detail (e.g., nemesis type)
+    causal_ts: u64, // monotonic timestamp
+    detail: u32, // op-specific detail (e.g., nemesis type)
 };
 
 const HISTORY_SIZE = 4096;
@@ -91,11 +91,11 @@ pub fn resetHistory() void {
 
 pub const NemesisKind = enum(u8) {
     none,
-    trit_corrupt,       // flip a trit value (+1 → -1)
-    trit_duplicate,     // duplicate a trit (breaks conservation)
-    version_rewind,     // rewind version counter (breaks monotonicity)
-    eval_drop,          // silently drop an eval result
-    causal_invert,      // swap causal ordering of two events
+    trit_corrupt, // flip a trit value (+1 → -1)
+    trit_duplicate, // duplicate a trit (breaks conservation)
+    version_rewind, // rewind version counter (breaks monotonicity)
+    eval_drop, // silently drop an eval result
+    causal_invert, // swap causal ordering of two events
 };
 
 var nemesis_active: bool = false;
@@ -195,10 +195,10 @@ pub const Violation = struct {
 };
 
 pub const ViolationKind = enum(u8) {
-    gf3_broken,         // trit_sum != 0 mod 3 after an eval
-    causal_inversion,   // causal_ts decreased
+    gf3_broken, // trit_sum != 0 mod 3 after an eval
+    causal_inversion, // causal_ts decreased
     version_regression, // version_id decreased without nemesis
-    trit_drift,         // trit changed without corresponding op
+    trit_drift, // trit changed without corresponding op
 };
 
 const MAX_VIOLATIONS = 256;
@@ -404,9 +404,9 @@ pub const CasRegisterResult = struct {
     reads: usize,
     writes: usize,
     cas_ops: usize,
-    stale_reads: usize,     // read returned a value that was already overwritten
-    lost_writes: usize,     // write acknowledged but never observed
-    register_value: u32,    // final register state
+    stale_reads: usize, // read returned a value that was already overwritten
+    lost_writes: usize, // write acknowledged but never observed
+    register_value: u32, // final register state
 };
 
 pub fn checkCasRegister() CasRegisterResult {
@@ -559,9 +559,9 @@ test "jepsen: unique-ids — duplicate detected" {
 
 test "jepsen: counter — clean increments pass" {
     resetHistory();
-    record(.eval, .ok, 0, 0, 0, 5);   // add 5
-    record(.eval, .ok, 0, 0, 0, 3);   // add 3
-    record(.check, .ok, 0, 0, 0, 8);  // read 8 (= 5+3, within bounds)
+    record(.eval, .ok, 0, 0, 0, 5); // add 5
+    record(.eval, .ok, 0, 0, 0, 3); // add 3
+    record(.check, .ok, 0, 0, 0, 8); // read 8 (= 5+3, within bounds)
     const result = checkCounter();
     try std.testing.expect(result.valid);
     try std.testing.expectEqual(@as(u64, 8), result.lower_bound);
@@ -571,8 +571,8 @@ test "jepsen: counter — clean increments pass" {
 
 test "jepsen: counter — read out of bounds detected" {
     resetHistory();
-    record(.eval, .ok, 0, 0, 0, 5);   // add 5
-    record(.eval, .ok, 0, 0, 0, 3);   // add 3
+    record(.eval, .ok, 0, 0, 0, 5); // add 5
+    record(.eval, .ok, 0, 0, 0, 3); // add 3
     record(.check, .ok, 0, 0, 0, 10); // read 10, but upper=8
     const result = checkCounter();
     try std.testing.expect(!result.valid);
@@ -581,9 +581,9 @@ test "jepsen: counter — read out of bounds detected" {
 
 test "jepsen: counter — failed add widens bounds" {
     resetHistory();
-    record(.eval, .ok, 0, 0, 0, 5);    // add 5 (ok)
-    record(.eval, .fail, 0, 0, 0, 3);  // add 3 (failed)
-    record(.check, .ok, 0, 0, 0, 7);   // read 7: lower=5, upper=8, valid
+    record(.eval, .ok, 0, 0, 0, 5); // add 5 (ok)
+    record(.eval, .fail, 0, 0, 0, 3); // add 3 (failed)
+    record(.check, .ok, 0, 0, 0, 7); // read 7: lower=5, upper=8, valid
     const result = checkCounter();
     try std.testing.expect(result.valid);
     try std.testing.expectEqual(@as(u64, 5), result.lower_bound);
@@ -592,9 +592,9 @@ test "jepsen: counter — failed add widens bounds" {
 
 test "jepsen: cas-register — clean writes and reads" {
     resetHistory();
-    record(.eval, .ok, 0, 0, 0, 42);  // write 42
+    record(.eval, .ok, 0, 0, 0, 42); // write 42
     record(.check, .ok, 0, 0, 0, 42); // read 42
-    record(.eval, .ok, 0, 0, 0, 99);  // write 99
+    record(.eval, .ok, 0, 0, 0, 99); // write 99
     record(.check, .ok, 0, 0, 0, 99); // read 99
     const result = checkCasRegister();
     try std.testing.expect(result.valid);
@@ -605,10 +605,10 @@ test "jepsen: cas-register — clean writes and reads" {
 
 test "jepsen: cas-register — CAS success" {
     resetHistory();
-    record(.eval, .ok, 0, 0, 0, 10);             // write 10
+    record(.eval, .ok, 0, 0, 0, 10); // write 10
     // CAS: expect 10, set 20 — encoded as version_id = (20 << 16) | 10
     record(.eval, .info, 0, 0, (20 << 16) | 10, 0);
-    record(.check, .ok, 0, 0, 0, 20);            // read 20
+    record(.check, .ok, 0, 0, 0, 20); // read 20
     const result = checkCasRegister();
     try std.testing.expect(result.valid);
     try std.testing.expectEqual(@as(u32, 20), result.register_value);

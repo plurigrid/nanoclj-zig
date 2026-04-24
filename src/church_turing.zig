@@ -265,19 +265,19 @@ pub fn illPosedFn(args: []Value, gc: *GC, env: *Env, _: *Resources) anyerror!Val
 
 /// Decidability level of a predicate observed through a substrate.
 pub const DecidabilityLevel = enum(u8) {
-    decidable,       // halted with definite YES or NO
-    semi_decidable,  // halted with YES, or fuel exhausted (unknown)
-    undecidable,     // cannot decide; substrate-specific failure mode
+    decidable, // halted with definite YES or NO
+    semi_decidable, // halted with YES, or fuel exhausted (unknown)
+    undecidable, // cannot decide; substrate-specific failure mode
 };
 
 /// Witness: evidence from running a predicate through a substrate.
 pub const DecidabilityWitness = struct {
     level: DecidabilityLevel,
-    answer: ?bool,           // null = couldn't determine
+    answer: ?bool, // null = couldn't determine
     fuel_spent: u64,
-    trit_balanced: bool,     // inet only: did trit balance to 0?
+    trit_balanced: bool, // inet only: did trit balance to 0?
     substrate_name: []const u8,
-    halted: bool,            // did the computation terminate?
+    halted: bool, // did the computation terminate?
 };
 
 /// Primitive recursive: even? — always decidable.

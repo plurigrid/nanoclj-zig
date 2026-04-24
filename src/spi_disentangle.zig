@@ -40,9 +40,9 @@ pub const SpiLevel = enum(u8) {
 /// Every SPI decomposes as (provider, bus, selector).
 pub fn SpiTriple(comptime T: type) type {
     return struct {
-        provider: T,   // the thing that does work
-        bus: T,        // the thing that routes/dispatches
-        selector: T,   // the thing that chooses/escalates
+        provider: T, // the thing that does work
+        bus: T, // the thing that routes/dispatches
+        selector: T, // the thing that chooses/escalates
     };
 }
 

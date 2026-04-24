@@ -430,7 +430,7 @@ pub fn coneVolume(branching: u64, depth: u64) u64 {
     if (branching <= 1) return depth + 1;
     var vol: u64 = 0;
     var layer: u64 = 1;
-    for (0..depth + 1) |_| {
+    for (0..@as(usize, @intCast(depth + 1))) |_| {
         vol +|= layer;
         layer *|= branching;
     }
@@ -530,8 +530,10 @@ fn structuralEqObj(a: *Obj, b: *Obj, gc: *GC) bool {
         .set => structuralEqSeq(a.data.set.items.items, b.data.set.items.items, gc),
         .rational => a.data.rational.numerator == b.data.rational.numerator and a.data.rational.denominator == b.data.rational.denominator,
         .color => a.data.color.eql(b.data.color),
-        .function, .macro_fn, .bc_closure, .builtin_ref, .lazy_seq, .partial_fn, .multimethod, .protocol, .dense_f64, .trace, .channel => false,
+        .function, .macro_fn, .bc_closure, .builtin_ref, .lazy_seq, .partial_fn, .multimethod, .protocol, .dense_f64, .trace, .channel, .agent, .file_handle => false,
         .atom => structuralEq(a.data.atom.val, b.data.atom.val, gc),
+        .bytes => std.mem.eql(u8, a.data.bytes.data, b.data.bytes.data),
+        .mmap_view => std.mem.eql(u8, a.data.mmap_view.data, b.data.mmap_view.data),
     };
 }
 

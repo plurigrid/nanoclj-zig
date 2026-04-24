@@ -18,6 +18,32 @@ pub const ReadError = error{
 
 const MAX_READ_DEPTH: u32 = 256;
 
+/// Sentinel symbol name for discarded reader-conditional branches.
+/// Never a valid Clojure identifier (starts with __reader), so collision-free.
+const SKIP_SENTINEL_NAME: []const u8 = "__reader_skip__";
+/// Sentinel head marker for splice lists produced by `#?@`.
+const SPLICE_SENTINEL_NAME: []const u8 = "__reader_splice__";
+
+/// Returns true if `v` is the skip sentinel (non-matching `#?` / `#?@`).
+fn isSkipSentinel(gc: *GC, v: Value) bool {
+    if (!v.isSymbol()) return false;
+    const name = gc.getString(v.asSymbolId());
+    return std.mem.eql(u8, name, SKIP_SENTINEL_NAME);
+}
+
+/// Returns non-null splice-children slice if `v` is a splice sentinel list.
+fn spliceChildren(gc: *GC, v: Value) ?[]Value {
+    if (!v.isObj()) return null;
+    const obj = v.asObj();
+    if (obj.kind != .list) return null;
+    const items = obj.data.list.items.items;
+    if (items.len == 0) return null;
+    if (!items[0].isSymbol()) return null;
+    const name = gc.getString(items[0].asSymbolId());
+    if (!std.mem.eql(u8, name, SPLICE_SENTINEL_NAME)) return null;
+    return items[1..];
+}
+
 pub const Reader = struct {
     src: []const u8,
     pos: usize = 0,
@@ -115,6 +141,13 @@ pub const Reader = struct {
                 return Value.makeObj(obj);
             }
             const v = try self.readForm();
+            if (isSkipSentinel(self.gc, v)) continue;
+            if (spliceChildren(self.gc, v)) |children| {
+                for (children) |ch| {
+                    obj.data.list.items.append(self.gc.allocator, ch) catch return error.OutOfMemory;
+                }
+                continue;
+            }
             obj.data.list.items.append(self.gc.allocator, v) catch return error.OutOfMemory;
         }
     }
@@ -133,6 +166,13 @@ pub const Reader = struct {
                 return Value.makeObj(obj);
             }
             const v = try self.readForm();
+            if (isSkipSentinel(self.gc, v)) continue;
+            if (spliceChildren(self.gc, v)) |children| {
+                for (children) |ch| {
+                    obj.data.vector.items.append(self.gc.allocator, ch) catch return error.OutOfMemory;
+                }
+                continue;
+            }
             obj.data.vector.items.append(self.gc.allocator, v) catch return error.OutOfMemory;
         }
     }
@@ -150,7 +190,16 @@ pub const Reader = struct {
                 self.pos += 1;
                 return Value.makeObj(obj);
             }
-            const k = try self.readForm();
+            var k = try self.readForm();
+            while (isSkipSentinel(self.gc, k)) {
+                self.skipWhitespace();
+                if (self.pos >= self.src.len) return error.UnexpectedEOF;
+                if (self.src[self.pos] == '}') {
+                    self.pos += 1;
+                    return Value.makeObj(obj);
+                }
+                k = try self.readForm();
+            }
             const v = try self.readForm();
             obj.data.map.keys.append(self.gc.allocator, k) catch return error.OutOfMemory;
             obj.data.map.vals.append(self.gc.allocator, v) catch return error.OutOfMemory;
@@ -176,6 +225,7 @@ pub const Reader = struct {
             '(' => self.readAnonFn(),
             '{' => self.readSet(),
             '"' => self.readRegex(),
+            '?' => self.readReaderConditional(),
             '_' => {
                 self.pos += 1;
                 _ = try self.readForm(); // discard next form
@@ -243,42 +293,158 @@ pub const Reader = struct {
         };
     }
 
-    /// ^meta form → (with-meta form meta)
-    /// ^{:k v} form, ^:keyword form → {:keyword true}, ^Type form → {:tag Type}
+    /// ^meta form — attach parsed metadata to the next form.
+    /// Normalizations:
+    ///   ^{:k v} form     → meta = {:k v}
+    ///   ^:kw form        → meta = {:kw true}
+    ///   ^Sym form        → meta = {:tag Sym}
+    ///   ^"Str" form      → meta = {:tag "Str"}
+    /// Heap-object targets (list/vector/map/set/fn/…) get the meta attached
+    /// directly via `obj.meta`. NaN-boxed atoms (symbol/keyword/string) fall
+    /// back to `(with-meta target meta-map)` so downstream can still see the
+    /// metadata — `(meta x)` on a bare symbol would otherwise be unreachable.
+    /// Stacked `^` merge into one meta map; OUTERMOST wins on collision.
     fn readMeta(self: *Reader) ReadError!Value {
         self.pos += 1; // skip ^
-        // Read the metadata
         const meta_val = try self.readForm();
-        // Read the target form
         const target = try self.readForm();
-        // Normalize metadata:
-        // - map → use as-is
-        // - keyword → {:keyword true}
-        // - symbol → {:tag symbol}
-        var meta_map: Value = undefined;
-        if (meta_val.isObj() and meta_val.asObj().kind == .map) {
-            meta_map = meta_val;
-        } else if (meta_val.isKeyword()) {
+        const meta_map = try self.normalizeMeta(meta_val);
+
+        // Merge outer-wins if target already has meta attached (inner ^).
+        var final_target = target;
+        if (final_target.isObj() and final_target.asObj().meta != null) {
+            try self.mergeMetaInto(meta_map, final_target.asObj().meta.?);
+        }
+        // If inner expanded to (with-meta inner-target inner-meta), unwrap+merge.
+        if (isWithMetaForm(final_target, self.gc)) {
+            const items = final_target.asObj().data.list.items.items;
+            const inner_meta = items[2];
+            if (inner_meta.isObj() and inner_meta.asObj().kind == .map) {
+                try self.mergeMetaInto(meta_map, inner_meta.asObj());
+            }
+            final_target = items[1];
+        }
+
+        // Attach directly if possible.
+        if (final_target.isObj() and canHoldMeta(final_target.asObj().kind) and meta_map.isObj() and meta_map.asObj().kind == .map) {
+            final_target.asObj().meta = meta_map.asObj();
+            return final_target;
+        }
+
+        // Otherwise wrap so the information is preserved through evaluation.
+        const wm_sym = self.gc.internString("with-meta") catch return error.OutOfMemory;
+        const obj = self.gc.allocObj(.list) catch return error.OutOfMemory;
+        obj.data.list.items.append(self.gc.allocator, Value.makeSymbol(wm_sym)) catch return error.OutOfMemory;
+        obj.data.list.items.append(self.gc.allocator, final_target) catch return error.OutOfMemory;
+        obj.data.list.items.append(self.gc.allocator, meta_map) catch return error.OutOfMemory;
+        return Value.makeObj(obj);
+    }
+
+    /// Normalize raw metadata (map/keyword/symbol/string) into a map Value.
+    fn normalizeMeta(self: *Reader, meta_val: Value) ReadError!Value {
+        if (meta_val.isObj() and meta_val.asObj().kind == .map) return meta_val;
+        if (meta_val.isKeyword()) {
             const m = self.gc.allocObj(.map) catch return error.OutOfMemory;
             m.data.map.keys.append(self.gc.allocator, meta_val) catch return error.OutOfMemory;
             m.data.map.vals.append(self.gc.allocator, Value.makeBool(true)) catch return error.OutOfMemory;
-            meta_map = Value.makeObj(m);
-        } else if (meta_val.isSymbol()) {
+            return Value.makeObj(m);
+        }
+        if (meta_val.isSymbol() or meta_val.isString()) {
             const m = self.gc.allocObj(.map) catch return error.OutOfMemory;
             const tag_kw = self.gc.internString("tag") catch return error.OutOfMemory;
             m.data.map.keys.append(self.gc.allocator, Value.makeKeyword(tag_kw)) catch return error.OutOfMemory;
             m.data.map.vals.append(self.gc.allocator, meta_val) catch return error.OutOfMemory;
-            meta_map = Value.makeObj(m);
-        } else {
-            meta_map = meta_val; // fallback
+            return Value.makeObj(m);
         }
-        // Build (with-meta target meta-map)
-        const wm_sym = self.gc.internString("with-meta") catch return error.OutOfMemory;
-        const obj = self.gc.allocObj(.list) catch return error.OutOfMemory;
-        obj.data.list.items.append(self.gc.allocator, Value.makeSymbol(wm_sym)) catch return error.OutOfMemory;
-        obj.data.list.items.append(self.gc.allocator, target) catch return error.OutOfMemory;
-        obj.data.list.items.append(self.gc.allocator, meta_map) catch return error.OutOfMemory;
-        return Value.makeObj(obj);
+        return meta_val; // fallback
+    }
+
+    /// Merge keys from `src` into `dst` map, outer/earlier wins (dst keeps
+    /// its value on collision).
+    fn mergeMetaInto(self: *Reader, dst_val: Value, src: *@import("value.zig").Obj) ReadError!void {
+        if (!(dst_val.isObj() and dst_val.asObj().kind == .map)) return;
+        const dst = dst_val.asObj();
+        const semantics = @import("semantics.zig");
+        src_loop: for (src.data.map.keys.items, 0..) |sk, i| {
+            for (dst.data.map.keys.items) |dk| {
+                if (semantics.structuralEq(dk, sk, self.gc)) continue :src_loop;
+            }
+            dst.data.map.keys.append(self.gc.allocator, sk) catch return error.OutOfMemory;
+            dst.data.map.vals.append(self.gc.allocator, src.data.map.vals.items[i]) catch return error.OutOfMemory;
+        }
+    }
+
+    /// #?(:clj a :cljs b :default c) — select form by platform key.
+    /// True if `v` is a (with-meta target meta) list produced by readMeta.
+    fn isWithMetaForm(v: Value, gc: *GC) bool {
+        if (!(v.isObj() and v.asObj().kind == .list)) return false;
+        const items = v.asObj().data.list.items.items;
+        if (items.len != 3) return false;
+        if (!items[0].isSymbol()) return false;
+        return std.mem.eql(u8, gc.getString(items[0].asSymbolId()), "with-meta");
+    }
+
+    /// Which ObjKinds can safely carry metadata via `obj.meta`.
+    fn canHoldMeta(kind: @import("value.zig").ObjKind) bool {
+        return switch (kind) {
+            .list, .vector, .map, .set, .function, .macro_fn => true,
+            else => false,
+        };
+    }
+
+    /// #?@(:clj [x y])              — splice sequence into surrounding list/vector.
+    /// Current platform set: :nanoclj, :clj, :default.
+    /// No match → returns skip-sentinel symbol that list/vector loops drop.
+    /// Splicing match → returns list with splice-sentinel head that the parent inlines.
+    fn readReaderConditional(self: *Reader) ReadError!Value {
+        self.pos += 1; // skip '?'
+        if (self.pos >= self.src.len) return error.UnexpectedEOF;
+        var splicing = false;
+        if (self.src[self.pos] == '@') {
+            splicing = true;
+            self.pos += 1;
+            if (self.pos >= self.src.len) return error.UnexpectedEOF;
+        }
+        self.skipWhitespace();
+        if (self.pos >= self.src.len or self.src[self.pos] != '(') return error.UnexpectedChar;
+        // Read body as a plain list of alternating keyword/form pairs.
+        const body = try self.readList();
+        if (!body.isObj() or body.asObj().kind != .list) return error.UnexpectedChar;
+        const items = body.asObj().data.list.items.items;
+
+        // Prioritized platform matching: :nanoclj (primary) > :clj > :default.
+        // Scan each priority across all pairs so a later :nanoclj beats an earlier :clj.
+        const priorities = [_][]const u8{ "nanoclj", "clj", "default" };
+        for (priorities) |want| {
+            var i: usize = 0;
+            while (i + 1 < items.len) : (i += 2) {
+                const k = items[i];
+                if (!k.isKeyword()) return error.UnexpectedChar;
+                const name = self.gc.getString(k.asKeywordId());
+                if (!std.mem.eql(u8, name, want)) continue;
+                const form = items[i + 1];
+                if (!splicing) return form;
+                // Splicing: wrap the form's children in a splice-sentinel list.
+                if (!form.isObj() or (form.asObj().kind != .list and form.asObj().kind != .vector)) {
+                    return error.UnexpectedChar;
+                }
+                const child_items = switch (form.asObj().kind) {
+                    .list => form.asObj().data.list.items.items,
+                    .vector => form.asObj().data.vector.items.items,
+                    else => unreachable,
+                };
+                const wrap = self.gc.allocObj(.list) catch return error.OutOfMemory;
+                const marker_id = self.gc.internString(SPLICE_SENTINEL_NAME) catch return error.OutOfMemory;
+                wrap.data.list.items.append(self.gc.allocator, Value.makeSymbol(marker_id)) catch return error.OutOfMemory;
+                for (child_items) |ci| {
+                    wrap.data.list.items.append(self.gc.allocator, ci) catch return error.OutOfMemory;
+                }
+                return Value.makeObj(wrap);
+            }
+        }
+        // No match: produce skip sentinel; list/vector loops ignore it.
+        const skip_id = self.gc.internString(SKIP_SENTINEL_NAME) catch return error.OutOfMemory;
+        return Value.makeSymbol(skip_id);
     }
 
     /// #"pattern" => (re-pattern "pattern")
@@ -439,13 +605,7 @@ pub const Reader = struct {
                 const id = self.gc.internString(name) catch return error.OutOfMemory;
                 return Value.makeString(id);
             }
-            const ch: u8 = if (std.mem.eql(u8, name, "space")) ' '
-                else if (std.mem.eql(u8, name, "newline")) '\n'
-                else if (std.mem.eql(u8, name, "tab")) '\t'
-                else if (std.mem.eql(u8, name, "return")) '\r'
-                else if (std.mem.eql(u8, name, "backspace")) 8
-                else if (std.mem.eql(u8, name, "formfeed")) 12
-                else return error.UnexpectedChar;
+            const ch: u8 = if (std.mem.eql(u8, name, "space")) ' ' else if (std.mem.eql(u8, name, "newline")) '\n' else if (std.mem.eql(u8, name, "tab")) '\t' else if (std.mem.eql(u8, name, "return")) '\r' else if (std.mem.eql(u8, name, "backspace")) 8 else if (std.mem.eql(u8, name, "formfeed")) 12 else return error.UnexpectedChar;
             const buf = [_]u8{ch};
             const id = self.gc.internString(&buf) catch return error.OutOfMemory;
             return Value.makeString(id);
@@ -619,4 +779,180 @@ test "read #_ discard" {
     // Should return bar (foo is discarded)
     try std.testing.expect(v.isSymbol());
     try std.testing.expectEqualStrings("bar", gc.getString(v.asSymbolId()));
+}
+
+test "read #? selects :nanoclj" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("#?(:clj 1 :nanoclj 2 :default 3)", &gc);
+    const v = try r.readForm();
+    try std.testing.expect(v.isInt());
+    try std.testing.expectEqual(@as(i48, 2), v.asInt());
+}
+
+test "read #? no match inside list is discarded" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("(1 #?(:cljs x) 2)", &gc);
+    const v = try r.readForm();
+    try std.testing.expect(v.isObj());
+    try std.testing.expect(v.asObj().kind == .list);
+    const items = v.asObj().data.list.items.items;
+    try std.testing.expectEqual(@as(usize, 2), items.len);
+    try std.testing.expectEqual(@as(i48, 1), items[0].asInt());
+    try std.testing.expectEqual(@as(i48, 2), items[1].asInt());
+}
+
+test "read #?@ splices into vector" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("[1 #?@(:nanoclj [2 3]) 4]", &gc);
+    const v = try r.readForm();
+    try std.testing.expect(v.isObj());
+    try std.testing.expect(v.asObj().kind == .vector);
+    const items = v.asObj().data.vector.items.items;
+    try std.testing.expectEqual(@as(usize, 4), items.len);
+    try std.testing.expectEqual(@as(i48, 1), items[0].asInt());
+    try std.testing.expectEqual(@as(i48, 2), items[1].asInt());
+    try std.testing.expectEqual(@as(i48, 3), items[2].asInt());
+    try std.testing.expectEqual(@as(i48, 4), items[3].asInt());
+}
+
+test "read #? top-level no-match returns skip sentinel" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("#?(:cljs 1)", &gc);
+    const v = try r.readForm();
+    try std.testing.expect(isSkipSentinel(&gc, v));
+}
+
+test "read #? :clj also matches" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("#?(:clj 42)", &gc);
+    const v = try r.readForm();
+    try std.testing.expect(v.isInt());
+    try std.testing.expectEqual(@as(i48, 42), v.asInt());
+}
+
+test "read #?@ splices inside list" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("(a #?@(:nanoclj [b c]) d)", &gc);
+    const v = try r.readForm();
+    try std.testing.expect(v.asObj().kind == .list);
+    const items = v.asObj().data.list.items.items;
+    try std.testing.expectEqual(@as(usize, 4), items.len);
+}
+
+// --- Type-hint metadata tests --------------------------------------------
+
+/// Extract effective meta map from a reader result regardless of whether
+/// meta was attached directly (heap obj) or wrapped in (with-meta ...).
+fn extractMeta(v: Value, gc: *GC) ?*@import("value.zig").Obj {
+    if (!v.isObj()) return null;
+    if (v.asObj().meta) |m| return m;
+    if (v.asObj().kind == .list) {
+        const items = v.asObj().data.list.items.items;
+        if (items.len == 3 and items[0].isSymbol() and std.mem.eql(u8, gc.getString(items[0].asSymbolId()), "with-meta")) {
+            if (items[2].isObj() and items[2].asObj().kind == .map) {
+                return items[2].asObj();
+            }
+        }
+    }
+    return null;
+}
+
+fn metaLookupKeyword(m: *@import("value.zig").Obj, gc: *GC, name: []const u8) ?Value {
+    for (m.data.map.keys.items, 0..) |k, i| {
+        if (k.isKeyword() and std.mem.eql(u8, gc.getString(k.asKeywordId()), name)) {
+            return m.data.map.vals.items[i];
+        }
+    }
+    return null;
+}
+
+test "type hint: ^:dynamic *x* attaches {:dynamic true}" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("^:dynamic *x*", &gc);
+    const v = try r.readForm();
+    const m = extractMeta(v, &gc) orelse return error.TestExpectedEqual;
+    const dyn = metaLookupKeyword(m, &gc, "dynamic") orelse return error.TestExpectedEqual;
+    try std.testing.expect(dyn.isBool());
+    try std.testing.expect(dyn.asBool());
+}
+
+test "type hint: ^String s attaches {:tag String}" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("^String s", &gc);
+    const v = try r.readForm();
+    const m = extractMeta(v, &gc) orelse return error.TestExpectedEqual;
+    const tag = metaLookupKeyword(m, &gc, "tag") orelse return error.TestExpectedEqual;
+    try std.testing.expect(tag.isSymbol());
+    try std.testing.expectEqualStrings("String", gc.getString(tag.asSymbolId()));
+}
+
+test "type hint: ^\"String\" s attaches {:tag \"String\"}" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("^\"String\" s", &gc);
+    const v = try r.readForm();
+    const m = extractMeta(v, &gc) orelse return error.TestExpectedEqual;
+    const tag = metaLookupKeyword(m, &gc, "tag") orelse return error.TestExpectedEqual;
+    try std.testing.expect(tag.isString());
+    try std.testing.expectEqualStrings("String", gc.getString(tag.asStringId()));
+}
+
+test "type hint: ^{:doc \"d\" :tag Long} v attaches full map" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("^{:doc \"d\" :tag Long} v", &gc);
+    const v = try r.readForm();
+    const m = extractMeta(v, &gc) orelse return error.TestExpectedEqual;
+    const doc = metaLookupKeyword(m, &gc, "doc") orelse return error.TestExpectedEqual;
+    try std.testing.expect(doc.isString());
+    const tag = metaLookupKeyword(m, &gc, "tag") orelse return error.TestExpectedEqual;
+    try std.testing.expect(tag.isSymbol());
+}
+
+test "type hint: heap target (vector) has meta attached directly" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    var r = Reader.init("^:const [1 2 3]", &gc);
+    const v = try r.readForm();
+    try std.testing.expect(v.isObj());
+    try std.testing.expect(v.asObj().kind == .vector);
+    const m = v.asObj().meta orelse return error.TestExpectedEqual;
+    const c = metaLookupKeyword(m, &gc, "const") orelse return error.TestExpectedEqual;
+    try std.testing.expect(c.isBool());
+    try std.testing.expect(c.asBool());
+}
+
+test "type hint: stacked ^ merges, outermost wins on collision" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+
+    // Outer ^{:tag Long} should win over inner ^{:tag String}; :private flows in.
+    var r = Reader.init("^{:tag Long} ^:private ^{:tag String} x", &gc);
+    const v = try r.readForm();
+    const m = extractMeta(v, &gc) orelse return error.TestExpectedEqual;
+    const tag = metaLookupKeyword(m, &gc, "tag") orelse return error.TestExpectedEqual;
+    try std.testing.expect(tag.isSymbol());
+    try std.testing.expectEqualStrings("Long", gc.getString(tag.asSymbolId()));
+    const priv = metaLookupKeyword(m, &gc, "private") orelse return error.TestExpectedEqual;
+    try std.testing.expect(priv.isBool());
+    try std.testing.expect(priv.asBool());
 }

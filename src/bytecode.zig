@@ -24,52 +24,52 @@ const Env = @import("env.zig").Env;
 
 pub const Op = enum(u8) {
     // Control flow (5)
-    ret,          // return $D
-    ret_nil,      // return nil
-    jump,         // pc += DS (signed 24-bit)
-    jump_if,      // if truthy($A): pc += ES
-    jump_if_not,  // if falsy($A): pc += ES
+    ret, // return $D
+    ret_nil, // return nil
+    jump, // pc += DS (signed 24-bit)
+    jump_if, // if truthy($A): pc += ES
+    jump_if_not, // if falsy($A): pc += ES
 
     // Constants & moves (5)
-    load_nil,     // $D = nil
-    load_true,    // $D = true
-    load_false,   // $D = false
-    load_int,     // $A = ES (16-bit signed immediate)
-    load_const,   // $A = constants[E]
+    load_nil, // $D = nil
+    load_true, // $D = true
+    load_false, // $D = false
+    load_int, // $A = ES (16-bit signed immediate)
+    load_const, // $A = constants[E]
 
     // Arithmetic (6)
-    add,          // $A = $B + $C
-    sub,          // $A = $B - $C
-    mul,          // $A = $B * $C
-    div,          // $A = $B / $C (float division)
-    quot,         // $A = $B ÷ $C (integer truncating division)
-    rem,          // $A = $B % $C (integer remainder)
+    add, // $A = $B + $C
+    sub, // $A = $B - $C
+    mul, // $A = $B * $C
+    div, // $A = $B / $C (float division)
+    quot, // $A = $B ÷ $C (integer truncating division)
+    rem, // $A = $B % $C (integer remainder)
 
     // Comparison (3)
-    eq,           // $A = ($B == $C)
-    lt,           // $A = ($B < $C)
-    lte,          // $A = ($B <= $C)
+    eq, // $A = ($B == $C)
+    lt, // $A = ($B < $C)
+    lte, // $A = ($B <= $C)
 
     // Function calls (3)
-    call,         // $A = call(R[A+1], R[A+2..A+1+B]) with B args
-    tail_call,    // return call(R[A], R[A+1..A+B]) with B args
-    closure,      // $A = make_closure(defs[E])
+    call, // $A = call(R[A+1], R[A+2..A+1+B]) with B args
+    tail_call, // return call(R[A], R[A+1..A+B]) with B args
+    closure, // $A = make_closure(defs[E])
 
     // Data movement (2)
-    move,         // $A = $B  (register copy)
-    get_upvalue,  // $A = upvalues[E]  (read captured variable)
+    move, // $A = $B  (register copy)
+    get_upvalue, // $A = upvalues[E]  (read captured variable)
 
     // Globals (2)
-    get_global,   // $A = globals[constants[E]]
-    set_global,   // globals[constants[E]] = $A
+    get_global, // $A = globals[constants[E]]
+    set_global, // globals[constants[E]] = $A
 
     // List operations (6)
-    cons,         // $A = cons($B, $C)  — prepend B to list C
-    first,        // $A = first($B)     — head of list
-    rest,         // $A = rest($B)      — tail of list (new list)
-    make_list,    // $A = list(R[B..B+C]) — build list from C regs starting at B
-    count,        // $A = count($B)     — length of list/vector
-    nth,          // $A = nth($B, $C)   — element at index C in collection B
+    cons, // $A = cons($B, $C)  — prepend B to list C
+    first, // $A = first($B)     — head of list
+    rest, // $A = rest($B)      — tail of list (new list)
+    make_list, // $A = list(R[B..B+C]) — build list from C regs starting at B
+    count, // $A = count($B)     — length of list/vector
+    nth, // $A = nth($B, $C)   — element at index C in collection B
 };
 
 // ============================================================================
@@ -136,7 +136,7 @@ pub inline fn decode_es(inst: Inst) i16 {
 /// or an upvalue from the enclosing closure (for multi-level capture).
 pub const UpvalueSource = struct {
     is_local: bool, // true = from enclosing register, false = from enclosing upvalue
-    index: u8,      // register index or upvalue index
+    index: u8, // register index or upvalue index
 };
 
 pub const FuncDef = struct {
@@ -711,12 +711,12 @@ test "bytecode: conditional jump" {
 
     // Program: R0=true, if R0 jump +2, R1=0, ret R1, R1=42, ret R1
     const code = [_]Inst{
-        encode_d(.load_true, 0),                        // R0 = true
-        encode_ae(.jump_if, 0, @bitCast(@as(i16, 2))),  // if R0: skip 2
+        encode_d(.load_true, 0), // R0 = true
+        encode_ae(.jump_if, 0, @bitCast(@as(i16, 2))), // if R0: skip 2
         encode_ae(.load_int, 1, @bitCast(@as(i16, 0))), // R1 = 0 (skipped)
-        encode_d(.ret, 1),                               // return R1 (skipped)
-        encode_ae(.load_int, 1, @bitCast(@as(i16, 42))),// R1 = 42
-        encode_d(.ret, 1),                               // return R1
+        encode_d(.ret, 1), // return R1 (skipped)
+        encode_ae(.load_int, 1, @bitCast(@as(i16, 42))), // R1 = 42
+        encode_d(.ret, 1), // return R1
     };
 
     const def = FuncDef{
@@ -777,8 +777,8 @@ test "bytecode: function call and return" {
     // R0 = param x, R1 = scratch, R2 = result
     const inner_code = [_]Inst{
         encode_ae(.load_int, 1, @bitCast(@as(i16, 1))), // R1 = 1
-        encode_abc(.add, 2, 0, 1),                       // R2 = R0 + R1
-        encode_d(.ret, 2),                                // return R2
+        encode_abc(.add, 2, 0, 1), // R2 = R0 + R1
+        encode_d(.ret, 2), // return R2
     };
 
     const inner_def = FuncDef{
@@ -796,10 +796,10 @@ test "bytecode: function call and return" {
     const inner_def_ptr: *const FuncDef = &inner_def;
     const outer_defs = [_]*FuncDef{@constCast(inner_def_ptr)};
     const outer_code = [_]Inst{
-        encode_ae(.closure, 1, 0),                        // R1 = closure(defs[0])
+        encode_ae(.closure, 1, 0), // R1 = closure(defs[0])
         encode_ae(.load_int, 2, @bitCast(@as(i16, 10))), // R2 = 10
-        encode_abc(.call, 0, 1, 1),                       // R0 = call(R1, 1 arg)
-        encode_d(.ret, 0),                                 // return R0
+        encode_abc(.call, 0, 1, 1), // R0 = call(R1, 1 arg)
+        encode_d(.ret, 0), // return R0
     };
 
     const outer_def = FuncDef{

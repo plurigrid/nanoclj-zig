@@ -41,6 +41,32 @@ pub const EvalError = error{
 /// Last thrown exception value (set by throw, read by catch).
 var thrown_value: Value = Value.makeNil();
 
+/// Dynamic binding frame: (symbol-id, currently-bound value).
+/// Stack grows on (binding …) entry and shrinks on exit. Lookup for symbols
+/// flagged ^:dynamic walks this stack top-down before consulting lexical env.
+pub const DynFrame = struct { id: u48, val: Value };
+
+/// Process-wide dynamic stack. Single-threaded; one-per-thread if/when
+/// threading arrives. `.empty` keeps the cost zero until first `binding`.
+var dynamic_stack: std.ArrayListUnmanaged(DynFrame) = .empty;
+
+/// Tests share this global; `deinit` leaves it `undefined` in Zig 0.16, which
+/// poisons the next test that calls `append`. Reset to `.empty` after freeing.
+pub fn resetDynamicStack(allocator: std.mem.Allocator) void {
+    dynamic_stack.deinit(allocator);
+    dynamic_stack = .empty;
+}
+
+/// Top-down search: most recent binding wins.
+fn lookupDynamic(id: u48) ?Value {
+    var i: usize = dynamic_stack.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (dynamic_stack.items[i].id == id) return dynamic_stack.items[i].val;
+    }
+    return null;
+}
+
 pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
     if (val.isNil() or val.isBool() or val.isInt() or val.isString() or val.isKeyword()) {
         return val;
@@ -50,7 +76,12 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         return val;
     }
     if (val.isSymbol()) {
-        const name = gc.getString(val.asSymbolId());
+        const sym_id = val.asSymbolId();
+        // Dynamic vars: consult the dynamic_stack before falling back to root.
+        if (env.isDynamic(sym_id)) {
+            if (lookupDynamic(sym_id)) |dv| return dv;
+        }
+        const name = gc.getString(sym_id);
         return env.get(name) orelse return error.SymbolNotFound;
     }
 
@@ -71,8 +102,11 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         }
         if (std.mem.eql(u8, name, "def")) return evalDef(items, env, gc);
         if (std.mem.eql(u8, name, "let*")) return evalLet(items, env, gc);
+        if (std.mem.eql(u8, name, "binding")) return evalBinding(items, env, gc);
+        if (std.mem.eql(u8, name, "with-redefs")) return evalWithRedefs(items, env, gc);
         if (std.mem.eql(u8, name, "if")) return evalIf(items, env, gc);
         if (std.mem.eql(u8, name, "do")) return evalDo(items, env, gc);
+        if (std.mem.eql(u8, name, "dosync")) return evalDosync(items, env, gc);
         if (std.mem.eql(u8, name, "fn*")) return evalFnStar(items, env, gc);
         if (std.mem.eql(u8, name, "defn")) return evalDefn(items, env, gc);
         if (std.mem.eql(u8, name, "deftest")) return evalDeftest(items, env, gc);
@@ -83,6 +117,7 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "macroexpand-1")) return evalMacroexpand1(items, env, gc);
         if (std.mem.eql(u8, name, "defmulti")) return evalDefmulti(items, env, gc);
         if (std.mem.eql(u8, name, "defmethod")) return evalDefmethod(items, env, gc);
+        if (std.mem.eql(u8, name, "defrecord")) return evalDefrecord(items, env, gc);
         if (std.mem.eql(u8, name, "defprotocol")) return evalDefprotocol(items, env, gc);
         if (std.mem.eql(u8, name, "extend-type")) return evalExtendType(items, env, gc);
         if (std.mem.eql(u8, name, "->")) return evalThreadFirst(items, env, gc);
@@ -97,6 +132,8 @@ pub fn eval(val: Value, env: *Env, gc: *GC) EvalError!Value {
         if (std.mem.eql(u8, name, "loop")) return evalLoop(items, env, gc);
         if (std.mem.eql(u8, name, "when-let")) return evalWhenLet(items, env, gc);
         if (std.mem.eql(u8, name, "if-let")) return evalIfLet(items, env, gc);
+        if (std.mem.eql(u8, name, "when-some")) return evalWhenSome(items, env, gc);
+        if (std.mem.eql(u8, name, "if-some")) return evalIfSome(items, env, gc);
         if (std.mem.eql(u8, name, "when-not")) return evalWhenNot(items, env, gc);
         if (std.mem.eql(u8, name, "if-not")) return evalIfNot(items, env, gc);
         if (std.mem.eql(u8, name, "cond->")) return evalCondThread(items, env, gc, true);
@@ -177,11 +214,164 @@ fn evalMap(obj: *Obj, env: *Env, gc: *GC) EvalError!Value {
 
 fn evalDef(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     if (items.len != 3) return error.ArityError;
-    if (!items[1].isSymbol()) return error.TypeError;
-    const name = gc.getString(items[1].asSymbolId());
+
+    // Target can be a bare symbol or `(with-meta sym meta-map)` produced by
+    // the reader when `^:dynamic` (or any meta) decorates a NaN-boxed symbol.
+    var sym_val = items[1];
+    var meta_map: ?*Obj = null;
+    if (sym_val.isObj() and sym_val.asObj().kind == .list) {
+        const wm = sym_val.asObj().data.list.items.items;
+        if (wm.len == 3 and wm[0].isSymbol() and
+            std.mem.eql(u8, gc.getString(wm[0].asSymbolId()), "with-meta"))
+        {
+            sym_val = wm[1];
+            if (wm[2].isObj() and wm[2].asObj().kind == .map) {
+                meta_map = wm[2].asObj();
+            }
+        }
+    }
+    if (!sym_val.isSymbol()) return error.TypeError;
+
+    const sym_id = sym_val.asSymbolId();
+    const name = gc.getString(sym_id);
     const val = try eval(items[2], env, gc);
+
+    // Honour ^:dynamic by flagging the symbol on the root env.
+    if (meta_map) |m| {
+        if (metaHasDynamic(m, gc)) {
+            var root = env.rootEnv();
+            root.markDynamic(sym_id) catch return error.OutOfMemory;
+        }
+    }
+
     env.set(name, val) catch return error.OutOfMemory;
+    env.setById(sym_id, val) catch return error.OutOfMemory;
     return val;
+}
+
+/// True iff `m` contains the entry `:dynamic true`.
+fn metaHasDynamic(m: *Obj, gc: *GC) bool {
+    for (m.data.map.keys.items, 0..) |k, i| {
+        if (k.isKeyword() and std.mem.eql(u8, gc.getString(k.asKeywordId()), "dynamic")) {
+            const v = m.data.map.vals.items[i];
+            return v.isBool() and v.asBool();
+        }
+    }
+    return false;
+}
+
+/// (binding [*x* 99 *y* 42] body...) — establish dynamic scope for body.
+/// Vars must already be flagged ^:dynamic (checked permissively: we push
+/// regardless, but lookup only consults the stack for dynamic-flagged syms).
+fn evalBinding(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const b_obj = items[1].asObj();
+    const bindings = switch (b_obj.kind) {
+        .vector => b_obj.data.vector.items.items,
+        .list => b_obj.data.list.items.items,
+        else => return error.TypeError,
+    };
+    if (bindings.len % 2 != 0) return error.ArityError;
+
+    const initial_len = dynamic_stack.items.len;
+    // Pop all newly-pushed frames on both normal and error exit.
+    defer dynamic_stack.shrinkRetainingCapacity(initial_len);
+
+    var i: usize = 0;
+    while (i < bindings.len) : (i += 2) {
+        const target = bindings[i];
+        if (!target.isSymbol()) return error.TypeError;
+        const id = target.asSymbolId();
+        const v = try eval(bindings[i + 1], env, gc);
+        dynamic_stack.append(gc.allocator, .{ .id = id, .val = v }) catch return error.OutOfMemory;
+    }
+
+    var result = Value.makeNil();
+    for (items[2..]) |form| {
+        result = try eval(form, env, gc);
+    }
+    return result;
+}
+
+/// (with-redefs [name replacement ...] body...)
+/// Temporarily replaces the ROOT binding of each `name` for the duration of
+/// `body`, restoring the original value (by ID and by name) on exit — even
+/// on error. Unlike `binding`, this mutates the root env itself, so callers
+/// in other lexical scopes also see the replacement.
+fn evalWithRedefs(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 2) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const b_obj = items[1].asObj();
+    const bindings = switch (b_obj.kind) {
+        .vector => b_obj.data.vector.items.items,
+        .list => b_obj.data.list.items.items,
+        else => return error.TypeError,
+    };
+    if (bindings.len % 2 != 0) return error.ArityError;
+
+    const Saved = struct { id: u48, name: []const u8, prev: ?Value };
+    var saved_buf: [32]Saved = undefined;
+    const pair_count = bindings.len / 2;
+    if (pair_count > saved_buf.len) return error.ArityError;
+
+    var root = env.rootEnv();
+
+    // Phase 1: install replacements, remembering prior values.
+    var n: usize = 0;
+    errdefer {
+        // Restore in reverse on early error.
+        var k: usize = n;
+        while (k > 0) {
+            k -= 1;
+            const s = saved_buf[k];
+            if (s.prev) |pv| {
+                root.set(s.name, pv) catch {};
+                root.setById(s.id, pv) catch {};
+            } else {
+                _ = root.bindings.remove(s.name);
+                _ = root.id_bindings.remove(s.id);
+            }
+        }
+    }
+    while (n < pair_count) : (n += 1) {
+        const target = bindings[2 * n];
+        if (!target.isSymbol()) return error.TypeError;
+        const id = target.asSymbolId();
+        const name = gc.getString(id);
+        const prev = root.get(name);
+        const new_val = try eval(bindings[2 * n + 1], env, gc);
+        saved_buf[n] = .{ .id = id, .name = name, .prev = prev };
+        root.set(name, new_val) catch return error.OutOfMemory;
+        root.setById(id, new_val) catch return error.OutOfMemory;
+    }
+
+    // Phase 2: run body, restoring on exit either way.
+    var result = Value.makeNil();
+    var body_err: ?EvalError = null;
+    for (items[2..]) |form| {
+        result = eval(form, env, gc) catch |e| {
+            body_err = e;
+            break;
+        };
+    }
+
+    // Phase 3: restore in reverse.
+    var k: usize = n;
+    while (k > 0) {
+        k -= 1;
+        const s = saved_buf[k];
+        if (s.prev) |pv| {
+            root.set(s.name, pv) catch {};
+            root.setById(s.id, pv) catch {};
+        } else {
+            _ = root.bindings.remove(s.name);
+            _ = root.id_bindings.remove(s.id);
+        }
+    }
+
+    if (body_err) |e| return e;
+    return result;
 }
 
 fn evalLet(items: []Value, env: *Env, gc: *GC) EvalError!Value {
@@ -516,7 +706,11 @@ fn evalBlend(items: []Value, _: *Env, gc: *GC) EvalError!Value {
     _ = &reg;
     const name1 = if (items[1].isSymbol()) gc.getString(items[1].asSymbolId()) else if (items[1].isKeyword()) gc.getString(items[1].asKeywordId()) else return error.TypeError;
     const name2 = if (items[2].isSymbol()) gc.getString(items[2].asSymbolId()) else if (items[2].isKeyword()) gc.getString(items[2].asKeywordId()) else return error.TypeError;
-    const t_val = try eval(items[3], &struct { fn get() *Env { return cs_registry.?.currentEnv(); } }.get().*, gc);
+    const t_val = try eval(items[3], &struct {
+        fn get() *Env {
+            return cs_registry.?.currentEnv();
+        }
+    }.get().*, gc);
     const t: f32 = if (t_val.isFloat()) @as(f32, @floatCast(t_val.asFloat())) else if (t_val.isInt()) @as(f32, @floatFromInt(t_val.asInt())) else 0.5;
     const result_name = if (items.len > 4 and items[4].isSymbol())
         gc.getString(items[4].asSymbolId())
@@ -542,6 +736,24 @@ fn evalDo(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     for (items[1..]) |form| {
         result = try eval(form, env, gc);
     }
+    return result;
+}
+
+/// (dosync body...) — run body inside a ref transaction.  Single-threaded
+/// semantics: begin-tx → eval body → on success commit, on error abort.
+/// Nested dosync is allowed and joins the outer tx (does not re-begin).
+fn evalDosync(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    const refs_agents = @import("refs_agents.zig");
+    const already_in_tx = refs_agents.isInTransaction();
+    if (!already_in_tx) refs_agents.beginTransaction();
+    var result = Value.makeNil();
+    for (items[1..]) |form| {
+        result = eval(form, env, gc) catch |e| {
+            if (!already_in_tx) refs_agents.abortTransaction(gc);
+            return e;
+        };
+    }
+    if (!already_in_tx) refs_agents.commitTransaction(gc);
     return result;
 }
 
@@ -688,6 +900,95 @@ fn evalDefmacro(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     const id = gc.internString(name) catch return error.OutOfMemory;
     env.setById(id, val) catch return error.OutOfMemory;
     return val;
+}
+
+/// (defrecord Name [f1 f2 ...]) — creates record constructors and type marker.
+///   - Binds `Name` to the keyword `:Name` (the type marker).
+///   - Binds `->Name` to a positional constructor `(fn [f1 f2 ...] record-map)`.
+///   - Binds `map->Name` to a map-based constructor `(fn [m] record-map)`.
+/// Record maps carry metadata `{:record true :record-type :Name :fields [:f1 :f2 ...]}`.
+fn evalDefrecord(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isSymbol()) return error.TypeError;
+    const type_name = gc.getString(items[1].asSymbolId());
+    if (!items[2].isObj() or items[2].asObj().kind != .vector) return error.TypeError;
+    const fields = items[2].asObj().data.vector.items.items;
+    for (fields) |f| {
+        if (!f.isSymbol()) return error.TypeError;
+    }
+
+    const type_kw_id = gc.internString(type_name) catch return error.OutOfMemory;
+    const type_kw = Value.makeKeyword(type_kw_id);
+
+    // Shared meta map: {:record true :record-type :Name :fields [:f1 :f2 ...]}
+    const meta_map = gc.allocObj(.map) catch return error.OutOfMemory;
+    meta_map.data.map.keys.append(gc.allocator, Value.makeKeyword(gc.internString("record") catch return error.OutOfMemory)) catch return error.OutOfMemory;
+    meta_map.data.map.vals.append(gc.allocator, Value.makeBool(true)) catch return error.OutOfMemory;
+    meta_map.data.map.keys.append(gc.allocator, Value.makeKeyword(gc.internString("record-type") catch return error.OutOfMemory)) catch return error.OutOfMemory;
+    meta_map.data.map.vals.append(gc.allocator, type_kw) catch return error.OutOfMemory;
+    const fields_vec = gc.allocObj(.vector) catch return error.OutOfMemory;
+    for (fields) |f| {
+        const fname = gc.getString(f.asSymbolId());
+        const fkw = Value.makeKeyword(gc.internString(fname) catch return error.OutOfMemory);
+        fields_vec.data.vector.items.append(gc.allocator, fkw) catch return error.OutOfMemory;
+    }
+    meta_map.data.map.keys.append(gc.allocator, Value.makeKeyword(gc.internString("fields") catch return error.OutOfMemory)) catch return error.OutOfMemory;
+    meta_map.data.map.vals.append(gc.allocator, Value.makeObj(fields_vec)) catch return error.OutOfMemory;
+
+    const with_meta_sym = Value.makeSymbol(gc.internString("with-meta") catch return error.OutOfMemory);
+    const hash_map_sym = Value.makeSymbol(gc.internString("hash-map") catch return error.OutOfMemory);
+
+    // Positional ctor ->Name: (fn [f1 f2 ...] (with-meta (hash-map :f1 f1 ...) META))
+    const pos_hm = gc.allocObj(.list) catch return error.OutOfMemory;
+    pos_hm.data.list.items.append(gc.allocator, hash_map_sym) catch return error.OutOfMemory;
+    for (fields) |f| {
+        const fname = gc.getString(f.asSymbolId());
+        const fkw = Value.makeKeyword(gc.internString(fname) catch return error.OutOfMemory);
+        pos_hm.data.list.items.append(gc.allocator, fkw) catch return error.OutOfMemory;
+        pos_hm.data.list.items.append(gc.allocator, f) catch return error.OutOfMemory;
+    }
+    const pos_body = gc.allocObj(.list) catch return error.OutOfMemory;
+    pos_body.data.list.items.append(gc.allocator, with_meta_sym) catch return error.OutOfMemory;
+    pos_body.data.list.items.append(gc.allocator, Value.makeObj(pos_hm)) catch return error.OutOfMemory;
+    pos_body.data.list.items.append(gc.allocator, Value.makeObj(meta_map)) catch return error.OutOfMemory;
+
+    const pos_fn = gc.allocObj(.function) catch return error.OutOfMemory;
+    for (fields) |f| {
+        pos_fn.data.function.params.append(gc.allocator, f) catch return error.OutOfMemory;
+    }
+    pos_fn.data.function.is_variadic = false;
+    pos_fn.data.function.env = env;
+    const ctor_name = std.fmt.allocPrint(gc.allocator, "->{s}", .{type_name}) catch return error.OutOfMemory;
+    pos_fn.data.function.name = ctor_name;
+    pos_fn.data.function.body.append(gc.allocator, Value.makeObj(pos_body)) catch return error.OutOfMemory;
+    env.set(ctor_name, Value.makeObj(pos_fn)) catch return error.OutOfMemory;
+    const ctor_id = gc.internString(ctor_name) catch return error.OutOfMemory;
+    env.setById(ctor_id, Value.makeObj(pos_fn)) catch return error.OutOfMemory;
+
+    // Map ctor map->Name: (fn [m] (with-meta m META))
+    const m_sym_id = gc.internString("__record_map__") catch return error.OutOfMemory;
+    const m_sym = Value.makeSymbol(m_sym_id);
+    const map_body = gc.allocObj(.list) catch return error.OutOfMemory;
+    map_body.data.list.items.append(gc.allocator, with_meta_sym) catch return error.OutOfMemory;
+    map_body.data.list.items.append(gc.allocator, m_sym) catch return error.OutOfMemory;
+    map_body.data.list.items.append(gc.allocator, Value.makeObj(meta_map)) catch return error.OutOfMemory;
+
+    const map_fn = gc.allocObj(.function) catch return error.OutOfMemory;
+    map_fn.data.function.params.append(gc.allocator, m_sym) catch return error.OutOfMemory;
+    map_fn.data.function.is_variadic = false;
+    map_fn.data.function.env = env;
+    const map_ctor_name = std.fmt.allocPrint(gc.allocator, "map->{s}", .{type_name}) catch return error.OutOfMemory;
+    map_fn.data.function.name = map_ctor_name;
+    map_fn.data.function.body.append(gc.allocator, Value.makeObj(map_body)) catch return error.OutOfMemory;
+    env.set(map_ctor_name, Value.makeObj(map_fn)) catch return error.OutOfMemory;
+    const map_ctor_id = gc.internString(map_ctor_name) catch return error.OutOfMemory;
+    env.setById(map_ctor_id, Value.makeObj(map_fn)) catch return error.OutOfMemory;
+
+    // Bind type name to the keyword marker
+    env.set(type_name, type_kw) catch return error.OutOfMemory;
+    env.setById(type_kw_id, type_kw) catch return error.OutOfMemory;
+
+    return type_kw;
 }
 
 /// (defmulti name dispatch-fn)
@@ -1124,6 +1425,38 @@ fn evalIfLet(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     return if (items.len > 3) eval(items[3], env, gc) else Value.makeNil();
 }
 
+/// (when-some [x expr] body...) — bind and execute iff (not (nil? expr)).
+/// Distinct from when-let: false is still a valid binding here; only nil short-circuits.
+fn evalWhenSome(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const binds = items[1].asObj().data.vector.items.items;
+    if (binds.len < 2 or !binds[0].isSymbol()) return error.ArityError;
+    const sym_name = gc.getString(binds[0].asSymbolId());
+    const val = try eval(binds[1], env, gc);
+    if (val.isNil()) return Value.makeNil();
+    env.set(sym_name, val) catch return error.OutOfMemory;
+    var result = Value.makeNil();
+    for (items[2..]) |body| result = try eval(body, env, gc);
+    return result;
+}
+
+/// (if-some [x expr] then else?) — bind and branch iff (not (nil? expr)).
+/// Distinct from if-let: false takes the `then` branch here; only nil takes `else`.
+fn evalIfSome(items: []Value, env: *Env, gc: *GC) EvalError!Value {
+    if (items.len < 3) return error.ArityError;
+    if (!items[1].isObj()) return error.TypeError;
+    const binds = items[1].asObj().data.vector.items.items;
+    if (binds.len < 2 or !binds[0].isSymbol()) return error.ArityError;
+    const sym_name = gc.getString(binds[0].asSymbolId());
+    const val = try eval(binds[1], env, gc);
+    if (!val.isNil()) {
+        env.set(sym_name, val) catch return error.OutOfMemory;
+        return eval(items[2], env, gc);
+    }
+    return if (items.len > 3) eval(items[3], env, gc) else Value.makeNil();
+}
+
 /// (when-not test body...) — execute body when test is falsy
 fn evalWhenNot(items: []Value, env: *Env, gc: *GC) EvalError!Value {
     if (items.len < 3) return error.ArityError;
@@ -1392,6 +1725,39 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
             if (std.mem.eql(u8, marker, "__constantly__")) {
                 return bound[1];
             }
+            if (std.mem.eql(u8, marker, "__memoize__")) {
+                // bound = [:__memoize__, inner-fn, cache-atom]
+                if (bound.len < 3) return error.InvalidArgs;
+                const inner = bound[1];
+                const atom_val = bound[2];
+                if (!atom_val.isObj() or atom_val.asObj().kind != .atom) return error.TypeError;
+                const cache_obj = atom_val.asObj();
+                // Build a vector-key: Clojure uses equal arg-lists as keys
+                const key_vec = gc.allocObj(.vector) catch return error.OutOfMemory;
+                for (args) |a| key_vec.data.vector.items.append(gc.allocator, a) catch return error.OutOfMemory;
+                const key = Value.makeObj(key_vec);
+                // Lookup in cache map
+                if (cache_obj.data.atom.val.isObj() and cache_obj.data.atom.val.asObj().kind == .map) {
+                    const m = cache_obj.data.atom.val.asObj();
+                    const keys = m.data.map.keys.items;
+                    const vals = m.data.map.vals.items;
+                    const semantics = @import("semantics.zig");
+                    for (keys, 0..) |k, i| {
+                        if (semantics.structuralEq(k, key, gc)) return vals[i];
+                    }
+                }
+                // Miss: apply inner and store
+                const result = try apply(inner, args, caller_env, gc);
+                // Mutate the atom's map (ensure it is a map)
+                if (!cache_obj.data.atom.val.isObj() or cache_obj.data.atom.val.asObj().kind != .map) {
+                    const new_m = gc.allocObj(.map) catch return error.OutOfMemory;
+                    cache_obj.data.atom.val = Value.makeObj(new_m);
+                }
+                const m = cache_obj.data.atom.val.asObj();
+                m.data.map.keys.append(gc.allocator, key) catch return error.OutOfMemory;
+                m.data.map.vals.append(gc.allocator, result) catch return error.OutOfMemory;
+                return result;
+            }
             // SRFI-171 transducer dispatch (sector.zig Tier 5)
             const sector = @import("sector.zig");
             if (sector.dispatchTransducer(marker, bound, @constCast(args), gc, caller_env)) |result| {
@@ -1439,4 +1805,69 @@ pub fn apply(func: Value, args: []const Value, caller_env: *Env, gc: *GC) EvalEr
     }
 
     return error.NotAFunction;
+}
+
+// --- ^:dynamic / binding / with-redefs tests --------------------------------
+
+fn readOne(src: []const u8, gc: *GC) !Value {
+    var r = @import("reader.zig").Reader.init(src, gc);
+    return try r.readForm();
+}
+
+fn evalSrc(src: []const u8, env: *Env, gc: *GC) !Value {
+    return try eval(try readOne(src, gc), env, gc);
+}
+
+test "dynamic var: binding rebinds, outside sees root" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    env.is_root = true;
+    defer env.deinit();
+    defer resetDynamicStack(gc.allocator);
+
+    _ = try evalSrc("(def ^:dynamic *x* 1)", &env, &gc);
+
+    const inside = try evalSrc("(binding [*x* 42] *x*)", &env, &gc);
+    try std.testing.expect(inside.isInt());
+    try std.testing.expectEqual(@as(i64, 42), inside.asInt());
+
+    const outside = try evalSrc("*x*", &env, &gc);
+    try std.testing.expect(outside.isInt());
+    try std.testing.expectEqual(@as(i64, 1), outside.asInt());
+}
+
+test "dynamic var: nested binding stacks, pops on exit" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    env.is_root = true;
+    defer env.deinit();
+    defer resetDynamicStack(gc.allocator);
+
+    _ = try evalSrc("(def ^:dynamic *x* 1)", &env, &gc);
+
+    const nested = try evalSrc("(binding [*x* 10] (binding [*x* 20] *x*))", &env, &gc);
+    try std.testing.expectEqual(@as(i64, 20), nested.asInt());
+
+    const outer_after = try evalSrc("(binding [*x* 10] *x*)", &env, &gc);
+    try std.testing.expectEqual(@as(i64, 10), outer_after.asInt());
+
+    const root_after = try evalSrc("*x*", &env, &gc);
+    try std.testing.expectEqual(@as(i64, 1), root_after.asInt());
+}
+
+test "with-redefs: replaces root, restores on exit" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    env.is_root = true;
+    defer env.deinit();
+    defer resetDynamicStack(gc.allocator);
+
+    _ = try evalSrc("(def y 5)", &env, &gc);
+    const during = try evalSrc("(with-redefs [y 99] y)", &env, &gc);
+    try std.testing.expectEqual(@as(i64, 99), during.asInt());
+    const after = try evalSrc("y", &env, &gc);
+    try std.testing.expectEqual(@as(i64, 5), after.asInt());
 }

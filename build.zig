@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .cwd_relative = syrup_path },
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     const full_build_options = addBuildOptions(b, target, optimize, .full);
@@ -41,6 +42,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
                 .{ .name = "build_options", .module = full_build_options },
@@ -62,6 +64,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/mcp_tool.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
@@ -83,6 +86,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/gorj_mcp.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
@@ -104,6 +108,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/strip_main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
     b.installArtifact(strip);
@@ -121,6 +126,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/world.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = full_build_options },
                 .{ .name = "syrup", .module = syrup_mod },
@@ -166,6 +172,11 @@ pub fn build(b: *std.Build) void {
         .abi = .none,
     });
     const wasm_build_options = addBuildOptions(b, wasm_target, .ReleaseSmall, .embed_safe);
+    const wasm_syrup_mod = b.addModule("syrup_wasm", .{
+        .root_source_file = .{ .cwd_relative = syrup_path },
+        .target = wasm_target,
+        .optimize = .ReleaseSmall,
+    });
     const wasm_exe = b.addExecutable(.{
         .name = "nanoclj",
         .root_module = b.createModule(.{
@@ -175,11 +186,12 @@ pub fn build(b: *std.Build) void {
             .strip = true,
             .imports = &.{
                 .{ .name = "build_options", .module = wasm_build_options },
+                .{ .name = "syrup", .module = wasm_syrup_mod },
             },
         }),
     });
     // Export eval entry point for JS host; no _start entry point
-    wasm_exe.root_module.export_symbol_names = &.{ "nanoclj_init", "nanoclj_eval", "nanoclj_alloc", "nanoclj_free" };
+    wasm_exe.root_module.export_symbol_names = &.{ "nanoclj_init", "nanoclj_eval", "nanoclj_result_len", "nanoclj_alloc", "nanoclj_free" };
     wasm_exe.entry = .disabled;
     b.installArtifact(wasm_exe);
     const wasm_install = b.addInstallArtifact(wasm_exe, .{});
@@ -195,6 +207,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = .ReleaseSmall,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
                 .{ .name = "build_options", .module = embed_min_options },
@@ -215,6 +228,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = .ReleaseSmall,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "syrup", .module = syrup_mod },
                 .{ .name = "build_options", .module = embed_safe_options },
@@ -243,4 +257,82 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    // flow.zig standalone tests (world-constructor kernel, registry W1..W5b)
+    const flow_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/flow.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    const run_flow_tests = b.addRunArtifact(flow_tests);
+    const flow_test_step = b.step("flow-test", "Run flow.zig kernel + registry tests");
+    flow_test_step.dependOn(&run_flow_tests.step);
+    test_step.dependOn(&run_flow_tests.step);
+
+    // flow_value.zig bidirectional teleportation tests (Clojure ↔ Zig bridge)
+    const flow_value_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/flow_value.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "syrup", .module = syrup_mod },
+                .{ .name = "build_options", .module = full_build_options },
+            },
+        }),
+    });
+    const run_flow_value_tests = b.addRunArtifact(flow_value_tests);
+    const flow_value_test_step = b.step("flow-value-test", "Run flow_value.zig Clojure↔Zig bridge tests");
+    flow_value_test_step.dependOn(&run_flow_value_tests.step);
+
+    // .topos/bench harness — BMF-JSON microbenchmarks.
+    // Streams per-bench JSON to stdout; pipe to `bencher run --adapter json`
+    // for continuous-benchmarking CI (sharkdp/hyperfine-style regression gate).
+    const bench_step = b.step("bench", "Run .topos/bench microbenchmarks (BMF JSON)");
+    const bench_optimize: std.builtin.OptimizeMode = .ReleaseFast;
+
+    const nanoclj_lib = b.addModule("nanoclj", .{
+        .root_source_file = b.path("src/bench_lib.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+        .imports = &.{
+            .{ .name = "syrup", .module = syrup_mod },
+            .{ .name = "build_options", .module = full_build_options },
+        },
+    });
+
+    const bench_names = [_][]const u8{
+        "cold_start",
+        "nanbox_fib",
+        "reader_arena",
+        "flow_throughput",
+        "fuel_slope",
+        "tak_gabriel",
+        "map_reduce",
+        "assoc_growth",
+        "ackermann",
+        "binary_trees",
+        "loop_tight",
+    };
+    inline for (bench_names) |name| {
+        const bench_exe = b.addExecutable(.{
+            .name = b.fmt("bench-{s}", .{name}),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.fmt(".topos/bench/{s}.zig", .{name})),
+                .target = target,
+                .optimize = bench_optimize,
+                .imports = &.{
+                    .{ .name = "syrup", .module = syrup_mod },
+                    .{ .name = "build_options", .module = full_build_options },
+                    .{ .name = "nanoclj", .module = nanoclj_lib },
+                },
+            }),
+        });
+        const bench_run = b.addRunArtifact(bench_exe);
+        bench_step.dependOn(&bench_run.step);
+    }
 }

@@ -62,6 +62,30 @@
     (swap! a inc)
     (is= 43 (deref a))))
 
+(deftest test-atom-validator
+  (testing "set-validator! installs predicate; get-validator returns it"
+    (let* [a (atom 0)]
+      (is (nil? (get-validator a)))
+      (set-validator! a pos?)
+      (is (= pos? (get-validator a)))))
+  (testing "swap! passes when validator is truthy"
+    (let* [a (atom 1)]
+      (set-validator! a pos?)
+      (swap! a inc)
+      (is= 2 (deref a))))
+  (testing "swap! rejects when validator returns falsy"
+    (let* [a (atom 1)]
+      (set-validator! a pos?)
+      (let* [rejected (try (swap! a (fn [_] -1)) false (catch e true))]
+        (is rejected)
+        (is= 1 (deref a)))))
+  (testing "reset! rejects when validator returns falsy"
+    (let* [a (atom 1)]
+      (set-validator! a pos?)
+      (let* [rejected (try (reset! a 0) false (catch e true))]
+        (is rejected)
+        (is= 1 (deref a))))))
+
 (deftest test-destructuring
   (let* [[a b c] [1 2 3]]
     (is= 1 a)

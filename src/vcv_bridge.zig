@@ -18,7 +18,6 @@ const compat = @import("compat.zig");
 /// Two modes:
 ///   1. Live: mmap ring buffer, chase gatomic's write pointer
 ///   2. File: read .f32 dump, interpolate to audio rate
-
 const FRAME_CHANNELS: usize = 6;
 const RING_FRAMES: usize = 4096;
 const HEADER_BYTES: usize = 16;

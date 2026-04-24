@@ -16,4 +16,3 @@ pub fn profileName() []const u8 {
     if (embed_safe) return "embed-safe";
     return "full";
 }
-

@@ -66,9 +66,8 @@ pub const Feature = enum {
 };
 
 pub const all_features = [_]Feature{
-    .clone, .close, .completions, .describe, .eval, .interrupt, .load_file,
-    .lookup, .ls_sessions, .stdin, .streaming_output, .bounded_eval,
-    .interrupt_semantics, .middleware_discovery,
+    .clone,  .close,       .completions, .describe,         .eval,         .interrupt,           .load_file,
+    .lookup, .ls_sessions, .stdin,       .streaming_output, .bounded_eval, .interrupt_semantics, .middleware_discovery,
 };
 
 pub const RuntimeKind = enum {

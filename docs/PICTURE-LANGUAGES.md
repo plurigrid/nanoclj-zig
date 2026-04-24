@@ -57,6 +57,24 @@ The Zig side checks typing and rewrites nested `:seq`/`:tensor` trees into a nor
 (diagram-well-typed? d)
 (diagram-normalize d)
 (diagram-summary d)
+(open-game-profile)
+(open-game-parity)
+(open-game-decision "move" :alice [:cooperate :defect] opts)
+(open-game-decision-no-obs "move" :alice [:cooperate :defect] opts)
+(open-game-dependent-decision "move" :alice [:rain :sun] [:umbrella :none] opts)
+(open-game-forward-function "f" [:X] [:Y] opts)
+(open-game-backward-function "k" [:Y] [:R] opts)
+(open-game-from-functions "lens" [:X] [:Y] opts)
+(open-game-nature "weather" dist opts)
+(open-game-lift-stochastic "weather" dist opts)
+(open-game-discount "gamma" 0.95 opts)
+(open-game-add-payoffs "bonus" {:alice 2} opts)
+(open-game-seq g1 g2 g3)
+(open-game-tensor g1 g2 g3)
+(open-game-diagnostics d-or-trace)
+(open-game-is-equilibrium? d-or-trace)
+(play d)
+(evaluate d)
 ```
 
 `diagram-summary` returns a map like:
@@ -77,6 +95,49 @@ If typing fails, it returns:
 {:ok false
  :error "domain-mismatch"}
 ```
+
+`play` and `evaluate` are now the first open-game runtime bridge from the
+`.topos` seed profile into the evaluator. They still operate on the shared
+diagram kernel, but the explicit `open-game-*` constructors lower into that
+kernel and preserve enough metadata for best-response diagnostics when you
+provide explicit payoff tables.
+
+`open-game-parity` reports the currently available, partial, and missing
+pieces relative to the `open-game-hs` / `open-game-engine` surface.
+
+## Open-Game Parity Slice
+
+The current parity layer focuses on the part of `open-game-hs` that fits the
+existing Zig evaluator cleanly:
+
+- atomic constructors for decisions, dependent decisions, forward/backward
+  functions, nature, stochastic lifts, discounts, and payoff adjustments
+- sequential and simultaneous composition aliases on top of `diagram-seq`
+  and `diagram-tensor`
+- seeded `play` traces
+- `evaluate` / `open-game-diagnostics` best-response checks for games with
+  explicit payoff tables
+
+Example:
+
+```clojure
+(let [pricing
+      (open-game-decision-no-obs
+        "pricing"
+        :firm
+        [:low :high]
+        {:payoff-table [{:action :low  :payoff 1}
+                        {:action :high :payoff 3}]})
+      trace
+      (play pricing {:strategies {:firm :low}})
+      report
+      (evaluate trace)]
+  {:equilibrium? (:equilibrium? report)
+   :diagnostics  (:diagnostics report)})
+```
+
+`open-game-discount` and `open-game-add-payoffs` compose with `open-game-seq`,
+so explicit payoff tables can be transformed before diagnostics are reported.
 
 ## Why This Shape
 
