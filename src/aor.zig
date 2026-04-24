@@ -17,6 +17,7 @@ pub const experiment = @import("aor_experiment.zig");
 pub const feedback = @import("aor_feedback.zig");
 pub const tool = @import("aor_tool.zig");
 pub const action = @import("aor_action.zig");
+pub const telemetry = @import("aor_telemetry.zig");
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -78,6 +79,12 @@ pub const RunInfo = action.RunInfo;
 pub const runAction = action.runAction;
 pub const runActionsOnInvocation = action.runActionsOnInvocation;
 
+/// Rung 10: Telemetry aggregator (outer monitor over the inner loop).
+pub const Sample = telemetry.Sample;
+pub const Series = telemetry.Series;
+pub const Aggregate = telemetry.Aggregate;
+pub const TelemetrySink = telemetry.TelemetrySink;
+
 // Rung 6 (persistence + streaming) remains as follow-up; the feedback loop
 // does not require it — intermediate state lives in-process on Agent.state.
 
@@ -91,4 +98,5 @@ test {
     _ = feedback;
     _ = tool;
     _ = action;
+    _ = telemetry;
 }
