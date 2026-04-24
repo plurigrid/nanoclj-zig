@@ -69,6 +69,33 @@ pub const CycleResult = struct {
     pub fn last(self: *const CycleResult) *const Report {
         return &self.reports[self.reports.len - 1];
     }
+
+    /// Pass-rate at each iteration. Caller owns returned slice.
+    pub fn passRateTrajectory(self: *const CycleResult, allocator: std.mem.Allocator) ![]f32 {
+        const out = try allocator.alloc(f32, self.reports.len);
+        for (self.reports, 0..) |*r, i| out[i] = r.passRate();
+        return out;
+    }
+
+    /// Change in pass rate from the previous iteration to the final.
+    /// +ve = converging, 0 = flat, -ve = diverging. Returns 0 if <2 iters.
+    pub fn lastDelta(self: *const CycleResult) f32 {
+        if (self.reports.len < 2) return 0.0;
+        const n = self.reports.len;
+        return self.reports[n - 1].passRate() - self.reports[n - 2].passRate();
+    }
+
+    /// True iff pass rate strictly decreased across the last `window`
+    /// iterations — an early signal to abort a non-converging loop.
+    pub fn isDiverging(self: *const CycleResult, window: usize) bool {
+        if (self.reports.len < window + 1) return false;
+        const n = self.reports.len;
+        var i: usize = n - window;
+        while (i < n) : (i += 1) {
+            if (self.reports[i].passRate() >= self.reports[i - 1].passRate()) return false;
+        }
+        return true;
+    }
 };
 
 /// Run the feedback loop. `target_agent_name` is the agent whose `.state`
@@ -256,6 +283,59 @@ test "cycleUntil: missing target agent errors cleanly" {
         FeedbackError.TargetAgentMissing,
         cycleUntil(std.testing.allocator, &exp, "missing", nudgeUp, stopAllPass, 5),
     );
+}
+
+test "passRateTrajectory traces convergence across iterations" {
+    var topo = aor_topology.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("biased_inc", biasedIncBody);
+
+    var ds = aor_dataset.Dataset.init(std.testing.allocator, "traj");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(-3), null, "");
+    try ds.addExample(Value.makeInt(-1), null, "");
+    try ds.addExample(Value.makeInt(1), null, "");
+
+    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    var exp = Experiment.init(std.testing.allocator, "t", &topo, &trace_store, &ds, &evs, "biased_inc");
+    var result = try cycleUntil(std.testing.allocator, &exp, "biased_inc", nudgeUp, stopAllPass, 10);
+    defer result.deinit();
+
+    const traj = try result.passRateTrajectory(std.testing.allocator);
+    defer std.testing.allocator.free(traj);
+    try std.testing.expect(traj.len == result.iterations);
+    // Pass rate should be monotonically non-decreasing for a converging loop.
+    var i: usize = 1;
+    while (i < traj.len) : (i += 1) {
+        try std.testing.expect(traj[i] >= traj[i - 1]);
+    }
+    // Final iteration is all-pass.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), traj[traj.len - 1], 0.0001);
+}
+
+test "lastDelta reports final change; isDiverging false on converging run" {
+    var topo = aor_topology.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("biased_inc", biasedIncBody);
+
+    var ds = aor_dataset.Dataset.init(std.testing.allocator, "c");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(-5), null, "");
+    try ds.addExample(Value.makeInt(0), null, "");
+
+    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    var exp = Experiment.init(std.testing.allocator, "c", &topo, &trace_store, &ds, &evs, "biased_inc");
+    var result = try cycleUntil(std.testing.allocator, &exp, "biased_inc", nudgeUp, stopAllPass, 10);
+    defer result.deinit();
+    // Converging run is never diverging.
+    try std.testing.expect(!result.isDiverging(1));
+    try std.testing.expect(!result.isDiverging(3));
+    // Final delta must be ≥ 0 on a converging run.
+    try std.testing.expect(result.lastDelta() >= 0.0);
 }
 
 test "cycleUntil: max_iters=0 errors" {
