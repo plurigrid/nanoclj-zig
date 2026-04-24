@@ -59,20 +59,28 @@ pub const TelemetrySink = struct {
         var it = self.series.iterator();
         while (it.next()) |kv| {
             self.allocator.free(kv.key_ptr.*);
+            // Free sink-owned tag strings (empty strings from fresh inserts
+            // are harmless — dupe returns a zero-length slice we still free).
+            for (kv.value_ptr.samples.items) |s| {
+                if (s.tags.len > 0) self.allocator.free(s.tags);
+            }
             kv.value_ptr.samples.deinit(self.allocator);
         }
         self.series.deinit(self.allocator);
     }
 
     /// Record a sample under `series_name`. Creates the series if missing.
-    /// The sink owns a duplicated copy of `series_name` so callers can pass
-    /// transient (stack-allocated) strings safely.
+    /// The sink owns a duplicated copy of `series_name` and (if non-empty)
+    /// `tags` so callers can pass transient (stack-allocated) strings safely.
     pub fn record(self: *TelemetrySink, series_name: []const u8, v: f32, tags: []const u8) !void {
+        const owned_tags = if (tags.len == 0) "" else try self.allocator.dupe(u8, tags);
+        errdefer if (tags.len > 0) self.allocator.free(owned_tags);
+
         if (self.series.getEntry(series_name)) |entry| {
             try entry.value_ptr.samples.append(self.allocator, .{
                 .ts_ns = monoNs(),
                 .value = v,
-                .tags = tags,
+                .tags = owned_tags,
             });
             return;
         }
@@ -83,7 +91,7 @@ pub const TelemetrySink = struct {
         try entry.value_ptr.samples.append(self.allocator, .{
             .ts_ns = monoNs(),
             .value = v,
-            .tags = tags,
+            .tags = owned_tags,
         });
     }
 
@@ -191,10 +199,11 @@ pub const TelemetrySink = struct {
             defer self.allocator.free(name_owned);
             const ts_ns = try std.fmt.parseInt(u64, parts[1], 10);
             const v = try std.fmt.parseFloat(f32, parts[2]);
-            const tags_owned = try unescapeField(self.allocator, parts[3]);
+            const tags_parsed = try unescapeField(self.allocator, parts[3]);
+            defer self.allocator.free(tags_parsed);
 
-            // record() will dupe the name internally; free the temp copy.
-            try self.record(name_owned, v, tags_owned);
+            // record() dupes name + tags internally; both temp copies freed.
+            try self.record(name_owned, v, tags_parsed);
             // Manually stamp the timestamp onto the just-appended sample
             // so ts_ns survives the reload (record() writes current mono).
             const entry = self.series.getEntry(name_owned).?;
