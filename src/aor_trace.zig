@@ -48,12 +48,18 @@ pub const InvocationTrace = struct {
     any_complete: bool,
 };
 
+/// Callback invoked synchronously after an event is recorded. Subscribers
+/// see events in insertion order. The store holds the subscriber slice by
+/// reference; caller owns the lifetime. Multiple subscribers are supported.
+pub const TraceSubscriber = *const fn (event: TraceEvent) void;
+
 /// Append-only event log with monotonic invocation ids.
 pub const TraceStore = struct {
     allocator: std.mem.Allocator,
     events: std.ArrayListUnmanaged(TraceEvent) = .empty,
     next_invoke_id: InvokeId = 1,
     next_step_by_invoke: std.AutoHashMapUnmanaged(InvokeId, u32) = .empty,
+    subscribers: std.ArrayListUnmanaged(TraceSubscriber) = .empty,
 
     pub fn init(allocator: std.mem.Allocator) TraceStore {
         return .{ .allocator = allocator };
@@ -62,6 +68,29 @@ pub const TraceStore = struct {
     pub fn deinit(self: *TraceStore) void {
         self.events.deinit(self.allocator);
         self.next_step_by_invoke.deinit(self.allocator);
+        self.subscribers.deinit(self.allocator);
+    }
+
+    /// Register a callback that fires after every `recordStep` call. Order
+    /// of subscribers matches registration order. No-op if the subscriber
+    /// is already registered (pointer-equality dedup).
+    pub fn subscribe(self: *TraceStore, sub: TraceSubscriber) !void {
+        for (self.subscribers.items) |existing| {
+            if (existing == sub) return;
+        }
+        try self.subscribers.append(self.allocator, sub);
+    }
+
+    /// Remove a previously registered subscriber. Returns true if a
+    /// subscriber was removed, false otherwise.
+    pub fn unsubscribe(self: *TraceStore, sub: TraceSubscriber) bool {
+        for (self.subscribers.items, 0..) |existing, i| {
+            if (existing == sub) {
+                _ = self.subscribers.orderedRemove(i);
+                return true;
+            }
+        }
+        return false;
     }
 
     /// Allocate a fresh invocation id. Does not append an event.
@@ -88,7 +117,7 @@ pub const TraceStore = struct {
         const step = next_ptr.value_ptr.*;
         next_ptr.value_ptr.* = step + 1;
 
-        try self.events.append(self.allocator, .{
+        const ev = TraceEvent{
             .invoke_id = invoke_id,
             .step = step,
             .agent_id = agent.id,
@@ -97,7 +126,11 @@ pub const TraceStore = struct {
             .output = output,
             .ts_mono = monoNs(),
             .tags = tags,
-        });
+        };
+        try self.events.append(self.allocator, ev);
+        // Notify live subscribers synchronously. They see the event exactly
+        // once, in insertion order.
+        for (self.subscribers.items) |sub| sub(ev);
         return step;
     }
 
@@ -400,6 +433,85 @@ test "getInvocation isolates events by invoke_id" {
     try std.testing.expectEqual(@as(usize, 2), trace_b.events.len);
     try std.testing.expectEqual(@as(i48, 1), trace_a.events[0].input.asInt());
     try std.testing.expectEqual(@as(i48, 10), trace_b.events[0].input.asInt());
+}
+
+var g_sub_count: u32 = 0;
+var g_sub_last_input: i48 = 0;
+fn testSub(ev: TraceEvent) void {
+    g_sub_count += 1;
+    g_sub_last_input = ev.input.asInt();
+}
+
+var g_sub2_count: u32 = 0;
+fn testSub2(_: TraceEvent) void {
+    g_sub2_count += 1;
+}
+
+test "subscribe: callback fires on each recordStep" {
+    g_sub_count = 0;
+    g_sub_last_input = 0;
+    var store = TraceStore.init(std.testing.allocator);
+    defer store.deinit();
+    try store.subscribe(testSub);
+
+    var agent = aor_agent.Agent.init("sub", echoBody);
+    const inv = store.startInvocation();
+    _ = try store.recordStep(inv, &agent, Value.makeInt(11), null, "");
+    _ = try store.recordStep(inv, &agent, Value.makeInt(22), null, "");
+    _ = try store.recordStep(inv, &agent, Value.makeInt(33), null, "");
+
+    try std.testing.expectEqual(@as(u32, 3), g_sub_count);
+    try std.testing.expectEqual(@as(i48, 33), g_sub_last_input);
+}
+
+test "subscribe is idempotent (no dedup re-register)" {
+    g_sub_count = 0;
+    var store = TraceStore.init(std.testing.allocator);
+    defer store.deinit();
+    try store.subscribe(testSub);
+    try store.subscribe(testSub); // should not double-register
+
+    var agent = aor_agent.Agent.init("s", echoBody);
+    const inv = store.startInvocation();
+    _ = try store.recordStep(inv, &agent, Value.makeInt(5), null, "");
+    try std.testing.expectEqual(@as(u32, 1), g_sub_count);
+}
+
+test "unsubscribe removes callback" {
+    g_sub_count = 0;
+    var store = TraceStore.init(std.testing.allocator);
+    defer store.deinit();
+    try store.subscribe(testSub);
+
+    var agent = aor_agent.Agent.init("s", echoBody);
+    const inv = store.startInvocation();
+    _ = try store.recordStep(inv, &agent, Value.makeInt(5), null, "");
+    try std.testing.expectEqual(@as(u32, 1), g_sub_count);
+
+    const removed = store.unsubscribe(testSub);
+    try std.testing.expect(removed);
+
+    _ = try store.recordStep(inv, &agent, Value.makeInt(6), null, "");
+    try std.testing.expectEqual(@as(u32, 1), g_sub_count); // no increment
+
+    // Second unsubscribe is a no-op.
+    try std.testing.expect(!store.unsubscribe(testSub));
+}
+
+test "multiple subscribers all fire, in registration order" {
+    g_sub_count = 0;
+    g_sub2_count = 0;
+    var store = TraceStore.init(std.testing.allocator);
+    defer store.deinit();
+    try store.subscribe(testSub);
+    try store.subscribe(testSub2);
+
+    var agent = aor_agent.Agent.init("s", echoBody);
+    const inv = store.startInvocation();
+    _ = try store.recordStep(inv, &agent, Value.makeInt(1), null, "");
+    _ = try store.recordStep(inv, &agent, Value.makeInt(2), null, "");
+    try std.testing.expectEqual(@as(u32, 2), g_sub_count);
+    try std.testing.expectEqual(@as(u32, 2), g_sub2_count);
 }
 
 test "writeJsonl → loadJsonl roundtrips all event fields" {
