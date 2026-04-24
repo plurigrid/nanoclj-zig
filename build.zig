@@ -258,6 +258,19 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
+    // aor.zig standalone tests (agent-o-nanoclj Rung 1: Agent primitive)
+    const aor_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/aor.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_aor_tests = b.addRunArtifact(aor_tests);
+    const aor_test_step = b.step("aor-test", "Run agent-o-nanoclj tests (Rung 1+)");
+    aor_test_step.dependOn(&run_aor_tests.step);
+    test_step.dependOn(&run_aor_tests.step);
+
     // flow.zig standalone tests (world-constructor kernel, registry W1..W5b)
     const flow_tests = b.addTest(.{
         .root_module = b.createModule(.{
