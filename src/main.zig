@@ -45,10 +45,11 @@ fn isCommentOnly(input: []const u8) bool {
 /// Bounded REP: uses fuel-bounded eval from semantics.zig.
 /// Defends against: infinite loops (fuel), deep recursion (depth),
 /// while maintaining denotational/operational agreement.
-fn rep(input: []const u8, env: *Env, gc: *GC) ![]const u8 {
+/// Always returns heap-owned memory (gc.allocator); caller frees.
+fn rep(input: []const u8, env: *Env, gc: *GC) ![]u8 {
     var reader = Reader.init(input, gc);
     const form = reader.readForm() catch |err| {
-        return switch (err) {
+        const msg: []const u8 = switch (err) {
             error.UnexpectedEOF => "Error: unexpected EOF",
             error.UnmatchedParen => "Error: unmatched )",
             error.UnmatchedBracket => "Error: unmatched ]",
@@ -57,14 +58,16 @@ fn rep(input: []const u8, env: *Env, gc: *GC) ![]const u8 {
             error.UnexpectedChar => "Error: unexpected character",
             else => "Error: read failed",
         };
+        return gc.allocator.dupe(u8, msg);
     };
 
     // Fuel-bounded eval: guaranteed termination
     var res = semantics.Resources.initDefault();
     const domain = semantics.evalBounded(form, env, gc, &res);
 
-    return switch (domain) {
-        .value => |v| printer.prStr(v, gc, true) catch "Error: print failed",
+    const msg: []const u8 = switch (domain) {
+        .value => |v| return @constCast(printer.prStr(v, gc, true) catch
+            return gc.allocator.dupe(u8, "Error: print failed")),
         .bottom => |reason| switch (reason) {
             .fuel_exhausted => "Error: computation exceeded fuel limit (possible infinite loop)",
             .depth_exceeded => "Error: recursion depth exceeded (possible stack bomb)",
@@ -85,23 +88,33 @@ fn rep(input: []const u8, env: *Env, gc: *GC) ![]const u8 {
             .invalid_syntax => "Error: invalid syntax",
         },
     };
+    return gc.allocator.dupe(u8, msg);
 }
 
-/// Bytecode REP: parse -> compile -> VM execute (uses persistent VM for globals)
-fn bcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM, env: *Env) []const u8 {
+/// Bytecode REP: parse -> compile -> VM execute (uses persistent VM for globals).
+/// Always returns owned heap memory — caller must `gc.allocator.free(...)` the result.
+fn bcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM, env: *Env) []u8 {
+    const errStr = struct {
+        fn dup(g: *GC, msg: []const u8) []u8 {
+            // OOM here means the host is already wedged; fall back to an empty
+            // owned slice so the caller's free() remains valid.
+            return g.allocator.dupe(u8, msg) catch g.allocator.alloc(u8, 0) catch &.{};
+        }
+    }.dup;
+
     var reader = Reader.init(input, gc);
-    const form = reader.readForm() catch return "Error: read failed";
+    const form = reader.readForm() catch return errStr(gc, "Error: read failed");
 
     var comp = Compiler.init(allocator, gc, null, &vm.globals, env);
     defer comp.deinit();
 
-    const dest = comp.allocReg() catch return "Error: too many registers";
-    comp.compile(form, dest) catch return "Error: compilation failed";
-    comp.emit(bc.encode_d(.ret, dest)) catch return "Error: emit failed";
+    const dest = comp.allocReg() catch return errStr(gc, "Error: too many registers");
+    comp.compile(form, dest) catch return errStr(gc, "Error: compilation failed");
+    comp.emit(bc.encode_d(.ret, dest)) catch return errStr(gc, "Error: emit failed");
 
-    const func_def = comp.finalize() catch return "Error: finalize failed";
+    const func_def = comp.finalize() catch return errStr(gc, "Error: finalize failed");
 
-    const closure_obj = gc.allocObj(.bc_closure) catch return "Error: alloc failed";
+    const closure_obj = gc.allocObj(.bc_closure) catch return errStr(gc, "Error: alloc failed");
     closure_obj.data.bc_closure = .{
         .def = func_def,
         .upvalues = &.{},
@@ -112,15 +125,16 @@ fn bcRep(input: []const u8, gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM, e
     vm.fuel = 100_000_000;
     @memset(&vm.stack, Value.makeNil());
 
-    const result = vm.execute(&closure_obj.data.bc_closure) catch |err| return switch (err) {
+    const result = vm.execute(&closure_obj.data.bc_closure) catch |err| return errStr(gc, switch (err) {
         error.FuelExhausted => "Error: fuel exhausted",
         error.StackOverflow => "Error: stack overflow",
         error.TypeError => "Error: type error",
         error.ArityError => "Error: arity error",
         error.UndefinedGlobal => "Error: undefined global",
-    };
+    });
 
-    return printer.prStr(result, gc, true) catch "Error: print failed";
+    const owned = printer.prStr(result, gc, true) catch return errStr(gc, "Error: print failed");
+    return @constCast(owned);
 }
 
 /// Time bytecode execution only (uses persistent VM with globals)
@@ -289,7 +303,8 @@ fn loadBcPrelude(gc: *GC, allocator: std.mem.Allocator, vm: *bc.VM, env: *Env) v
     };
 
     for (forms) |src| {
-        _ = bcRep(src, gc, allocator, vm, env);
+        const r = bcRep(src, gc, allocator, vm, env);
+        gc.allocator.free(r);
     }
 }
 
@@ -662,7 +677,9 @@ pub fn main() !void {
                 if (sline.len == 0) continue;
                 if (std.mem.eql(u8, sline, "(exit)") or std.mem.eql(u8, sline, "(quit)")) break;
 
-                const sresult = rep(sline, &sector_env, &gc) catch "Error: internal error";
+                const sresult = rep(sline, &sector_env, &gc) catch
+                    @constCast(gc.allocator.dupe(u8, "Error: internal error") catch "");
+                defer if (sresult.len > 0) gc.allocator.free(sresult);
                 if (!std.mem.eql(u8, sresult, "nil") or !isCommentOnly(sline)) {
                     compat.fileWriteAll(stdout, sresult);
                     compat.fileWriteAll(stdout, "\n");
@@ -701,6 +718,7 @@ pub fn main() !void {
         if (std.mem.startsWith(u8, line, "(bc ") and line[line.len - 1] == ')') {
             const inner = line[4 .. line.len - 1];
             const bc_result = bcRep(inner, &gc, allocator, &vm, &env);
+            defer gc.allocator.free(bc_result);
             compat.fileWriteAll(stdout, bc_result);
             compat.fileWriteAll(stdout, "\n");
             continue;
@@ -772,8 +790,11 @@ pub fn main() !void {
                 actual_tier = .red; // fall through to red
             }
         }
+        // bcRep always returns owned heap memory; track for free below.
+        var bc_owned: ?[]u8 = null;
         if (actual_tier == .red and !tier_success) {
             const bc_result = bcRep(line, &gc, allocator, &vm, &env);
+            bc_owned = bc_result;
             if (!std.mem.startsWith(u8, bc_result, "Error")) {
                 result = bc_result;
                 tier_success = true;
@@ -781,10 +802,19 @@ pub fn main() !void {
                 actual_tier = .blue; // fall through to blue
             }
         }
+        // When we fall through to the blue (interpreter) tier, rep() returns
+        // owned heap memory; hold the pointer so we can free it below.
+        var rep_owned: ?[]u8 = null;
         if (!tier_success) {
             actual_tier = .blue;
-            result = rep(line, &env, &gc) catch "Error: internal error";
-            tier_success = !std.mem.startsWith(u8, result, "Error");
+            if (rep(line, &env, &gc)) |r| {
+                rep_owned = r;
+                result = r;
+                tier_success = !std.mem.startsWith(u8, r, "Error");
+            } else |_| {
+                result = "Error: internal error";
+                tier_success = false;
+            }
         }
 
         // Record outcome for hysteresis learning
@@ -801,6 +831,9 @@ pub fn main() !void {
             compat.fileWriteAll(stdout, result);
             compat.fileWriteAll(stdout, "\n");
         }
+
+        if (rep_owned) |r| gc.allocator.free(r);
+        if (bc_owned) |r| gc.allocator.free(r);
     }
 }
 

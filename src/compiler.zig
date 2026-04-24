@@ -1274,6 +1274,7 @@ pub const Compiler = struct {
             .arity = 0,
             .num_registers = self.next_reg,
         };
+        self.gc.trackFuncDef(func_def) catch return error.OutOfMemory;
         return func_def;
     }
 };
@@ -1363,12 +1364,7 @@ test "compiler: compile + execute roundtrip" {
     try c.emit(bc.encode_d(.ret, dest));
 
     const func_def = try c.finalize();
-    defer {
-        gc.allocator.free(func_def.code);
-        gc.allocator.free(func_def.constants);
-        gc.allocator.free(func_def.defs);
-        gc.allocator.destroy(func_def);
-    }
+    // func_def is tracked by gc.trackFuncDef; freed on gc.deinit.
     c.deinit();
 
     const closure = bc.Closure{ .def = func_def, .upvalues = &.{} };
@@ -1378,15 +1374,6 @@ test "compiler: compile + execute roundtrip" {
     const result = try vm.execute(&closure);
     try std.testing.expect(result.isInt());
     try std.testing.expectEqual(@as(i48, 30), result.asInt());
-}
-
-fn freeFuncDef(def: *FuncDef, allocator: std.mem.Allocator) void {
-    for (def.defs) |child| freeFuncDef(@constCast(child), allocator);
-    allocator.free(def.code);
-    allocator.free(def.constants);
-    allocator.free(def.defs);
-    if (def.upvalue_sources.len > 0) allocator.free(def.upvalue_sources);
-    allocator.destroy(def);
 }
 
 fn compileAndRun(src: []const u8, allocator: std.mem.Allocator) !Value {
@@ -1413,7 +1400,7 @@ fn compileAndRunWithBuiltins(src: []const u8, allocator: std.mem.Allocator, init
     try comp.emit(bc.encode_d(.ret, dest));
     const func_def = try comp.finalize();
     comp.deinit();
-    defer freeFuncDef(func_def, allocator);
+    // func_def is tracked by gc; freed on gc.deinit above.
     const closure = bc.Closure{ .def = func_def, .upvalues = &.{} };
     var vm = bc.VM.init(&gc, 10_000_000);
     if (init_builtins) {

@@ -72,12 +72,21 @@
             (or (:batch r) "—")
             (human-bytes (:alloc r))))
   (println)
-  (let [digest-path (str root "/.topos/bench/.last-digest.json")]
-    (spit digest-path (json/generate-string
-                        {:wall_ms wall
-                         :exit    (:exit res)
-                         :rows    rows
-                         :raw     (vec lines)}
-                        {:pretty true}))
-    (println "# digest →" digest-path))
+  (let [digest-path (str root "/.topos/bench/.last-digest.json")
+        prior       (when (fs/exists? digest-path)
+                      (try (json/parse-string (slurp digest-path) true)
+                           (catch Exception _ nil)))
+        prior-rows  (count (:rows prior))
+        keep-prior? (and prior (< (count rows) (max 1 prior-rows)))]
+    (if keep-prior?
+      (println (format "# degraded run (%d rows < prior %d); keeping existing digest"
+                       (count rows) prior-rows))
+      (do
+        (spit digest-path (json/generate-string
+                            {:wall_ms wall
+                             :exit    (:exit res)
+                             :rows    rows
+                             :raw     (vec lines)}
+                            {:pretty true}))
+        (println "# digest →" digest-path))))
   (System/exit (:exit res)))

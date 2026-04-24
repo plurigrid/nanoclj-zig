@@ -7,10 +7,11 @@
 //!   file-as-cell: lattice L = bytes* × {0,1}       ← fsync climbs the d-bit
 //!     merge = compatible-extension + d ∨ d'        (info-monotone)
 //!
-//! Five p-directions (pread / pwrite / fsync / size / mmap_ro) + two
+//! Six p-directions (pread / pwrite / fsync / size / mmap_ro / flock) + two
 //! p-positions (open / close) + one lattice-compat combinator
 //! (atomic_spit). mmap_ro returns a zero-copy view-position whose lifetime
-//! is explicit (munmap) or GC-managed.
+//! is explicit (munmap) or GC-managed. flock is a state-direction that
+//! mutates the lock-bit on a handle (no data transfer).
 //!
 //! Positional I/O (pread/pwrite) is thread-safe: no seek state mutated.
 
@@ -78,9 +79,14 @@ pub const DiskError = error{
     StatFailed,
     RenameFailed,
     MmapFailed,
+    LockFailed,
+    LockWouldBlock,
     OutOfMemory,
     Unsupported,
 };
+
+/// Lock mode on a file descriptor.
+pub const LockMode = enum { shared, exclusive, unlock };
 
 // ============================================================================
 // NATIVE IMPLEMENTATION (POSIX via std.c extern bindings)
@@ -137,6 +143,24 @@ pub fn pwriteNative(fd: i32, offset: u64, buf: []const u8) DiskError!usize {
 pub fn fsyncNative(fd: i32) DiskError!void {
     const rc = std.c.fsync(fd);
     if (rc != 0) return DiskError.FsyncFailed;
+}
+
+/// Advisory lock on a file descriptor (BSD flock; per-open-file-description).
+/// Not inherited across exec but is across fork + shared across dup.
+pub fn flockNative(fd: i32, mode: LockMode, nonblocking: bool) DiskError!void {
+    // POSIX flock op values: LOCK_SH=1, LOCK_EX=2, LOCK_UN=8, LOCK_NB=4
+    var op: c_int = switch (mode) {
+        .shared => 1,
+        .exclusive => 2,
+        .unlock => 8,
+    };
+    if (nonblocking) op |= 4;
+    const rc = std.c.flock(fd, op);
+    if (rc == 0) return;
+    const errno = std.c._errno().*;
+    // EWOULDBLOCK = 35 on darwin, 11 on linux — both covered by this check
+    if (nonblocking and (errno == 35 or errno == 11)) return DiskError.LockWouldBlock;
+    return DiskError.LockFailed;
 }
 
 /// Read the entire file into a freshly-allocated buffer.
@@ -242,6 +266,9 @@ pub fn atomicSpitStub(_: []const u8, _: []const u8) DiskError!void {
 pub fn mmapReadOnlyStub(_: []const u8) DiskError!MmapView {
     return DiskError.Unsupported;
 }
+pub fn flockStub(_: i32, _: LockMode, _: bool) DiskError!void {
+    return DiskError.Unsupported;
+}
 
 // ============================================================================
 // DISPATCH
@@ -256,3 +283,4 @@ pub const fsync = if (is_wasm) fsyncStub else fsyncNative;
 pub const readAllBytes = if (is_wasm) readAllBytesStub else readAllBytesNative;
 pub const atomicSpit = if (is_wasm) atomicSpitStub else atomicSpitNative;
 pub const mmapReadOnly = if (is_wasm) mmapReadOnlyStub else mmapReadOnlyNative;
+pub const flock = if (is_wasm) flockStub else flockNative;

@@ -5,6 +5,7 @@ const Obj = value.Obj;
 const ObjKind = value.ObjKind;
 const Env = @import("env.zig").Env;
 const compat = @import("compat.zig");
+const FuncDef = @import("bytecode.zig").FuncDef;
 
 pub const GC = struct {
     allocator: std.mem.Allocator,
@@ -13,6 +14,7 @@ pub const GC = struct {
     strings: std.ArrayListUnmanaged([]const u8) = compat.emptyList([]const u8),
     string_index: std.StringHashMapUnmanaged(u48) = .{},
     envs: std.ArrayListUnmanaged(*Env) = compat.emptyList(*Env),
+    func_defs: std.ArrayListUnmanaged(*FuncDef) = compat.emptyList(*FuncDef),
     bytes_allocated: usize = 0,
     next_gc: usize = 1024 * 1024,
 
@@ -38,12 +40,22 @@ pub const GC = struct {
             self.allocator.destroy(e);
         }
         self.envs.deinit(self.allocator);
+        for (self.func_defs.items) |fd| freeFuncDefTree(fd, self.allocator);
+        self.func_defs.deinit(self.allocator);
     }
 
     /// Register a heap-allocated child Env so the GC can free it.
     pub fn trackEnv(self: *GC, e: *Env) !void {
         try self.envs.append(self.allocator, e);
         self.bytes_allocated += @sizeOf(Env);
+    }
+
+    /// Register a top-level FuncDef (from Compiler.finalize) so its
+    /// recursive tree (code + constants + defs + upvalue_sources)
+    /// is freed on gc.deinit. Child FuncDefs are reached via `.defs`
+    /// and must NOT be tracked separately or double-free results.
+    pub fn trackFuncDef(self: *GC, fd: *FuncDef) !void {
+        try self.func_defs.append(self.allocator, fd);
     }
 
     pub fn internString(self: *GC, s: []const u8) !u48 {
@@ -336,3 +348,14 @@ pub const GC = struct {
         self.bytes_allocated -|= @sizeOf(Obj);
     }
 };
+
+/// Recursively free a FuncDef tree: child defs first, then slices, then struct.
+/// Mirrors the dupe pattern used in compiler.zig (finalize + compileFnStar).
+pub fn freeFuncDefTree(def: *FuncDef, allocator: std.mem.Allocator) void {
+    for (def.defs) |child| freeFuncDefTree(@constCast(child), allocator);
+    allocator.free(def.code);
+    allocator.free(def.constants);
+    allocator.free(def.defs);
+    if (def.upvalue_sources.len > 0) allocator.free(def.upvalue_sources);
+    allocator.destroy(def);
+}

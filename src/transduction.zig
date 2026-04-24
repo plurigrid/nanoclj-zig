@@ -692,7 +692,18 @@ fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
     // Level 2: DAG analysis — find independent binding layers.
     // A binding is independent if its RHS doesn't reference any prior let* binding.
     // Independent bindings form a "layer" that can eval with forked fuel.
-    if (n_bindings >= 2 and n_bindings <= 32) {
+    //
+    // Reflexivity primitives (fuel/depth/max-depth/charge/history/meter) observe
+    // the runtime Resources. Forking gives each child a separate Resources, so a
+    // sibling `(max-depth)` can't see what `(fib n)` did. Detect and serialize.
+    const any_reflexive = blk: {
+        var i: usize = 0;
+        while (i < n_bindings) : (i += 1) {
+            if (hasReflexivePrimitive(bindings[i * 2 + 1], gc)) break :blk true;
+        }
+        break :blk false;
+    };
+    if (n_bindings >= 2 and n_bindings <= 32 and !any_reflexive) {
         // Collect binding names (u48 symbol ids for fast comparison)
         var bind_ids: [32]u48 = undefined;
         for (0..n_bindings) |bi| {
@@ -781,6 +792,34 @@ fn evalBoundedLet(items: []Value, env: *Env, gc: *GC, res: *Resources) Domain {
         if (!result.isValue()) return result;
     }
     return result;
+}
+
+/// True if expr contains a call to a reflexivity primitive whose value depends
+/// on the shared Resources (fuel/depth/max-depth/charge/history/meter). These
+/// must not be parallelized across let* bindings — each child fork gets a
+/// separate Resources and the observation would miss its sibling's effects.
+fn hasReflexivePrimitive(expr: Value, gc: *GC) bool {
+    if (expr.isSymbol()) {
+        const name = gc.getString(expr.asSymbolId());
+        return std.mem.eql(u8, name, "fuel") or
+            std.mem.eql(u8, name, "depth") or
+            std.mem.eql(u8, name, "max-depth") or
+            std.mem.eql(u8, name, "charge") or
+            std.mem.eql(u8, name, "history") or
+            std.mem.eql(u8, name, "meter");
+    }
+    if (!expr.isObj()) return false;
+    const obj = expr.asObj();
+    switch (obj.kind) {
+        .list => for (obj.data.list.items.items) |item| {
+            if (hasReflexivePrimitive(item, gc)) return true;
+        },
+        .vector => for (obj.data.vector.items.items) |item| {
+            if (hasReflexivePrimitive(item, gc)) return true;
+        },
+        else => return false,
+    }
+    return false;
 }
 
 /// Scan an expression for references to any of the given binding symbol ids.

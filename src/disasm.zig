@@ -255,20 +255,7 @@ fn disasmExpr(src: []const u8, allocator: std.mem.Allocator) ![]const u8 {
     try comp.emit(bc.encode_d(.ret, dest));
     const func_def = try comp.finalize();
     comp.deinit();
-    defer {
-        for (func_def.defs) |child| {
-            allocator.free(child.code);
-            allocator.free(child.constants);
-            allocator.free(child.defs);
-            if (child.upvalue_sources.len > 0) allocator.free(child.upvalue_sources);
-            allocator.destroy(@constCast(child));
-        }
-        allocator.free(func_def.code);
-        allocator.free(func_def.constants);
-        allocator.free(func_def.defs);
-        if (func_def.upvalue_sources.len > 0) allocator.free(func_def.upvalue_sources);
-        allocator.destroy(func_def);
-    }
+    // func_def is tracked by gc.trackFuncDef in finalize; freed on gc.deinit.
     const result = try disassemble(func_def, &gc, allocator);
     defer allocator.free(result);
     return allocator.dupe(u8, result);

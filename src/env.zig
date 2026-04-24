@@ -28,12 +28,17 @@ pub const Env = struct {
 
     /// Lightweight init: no hash maps allocated, only small arrays used.
     /// Call deinitSmall() instead of deinit() when done.
+    /// The allocator is taken from parent so any child env created during the
+    /// fast-path body eval (e.g. via a nested let/loop) matches the GC's
+    /// allocator on destroy. Previously hard-coded page_allocator here leaked a
+    /// child into gc.envs allocated with the wrong allocator, causing an
+    /// "Invalid free" panic in gc.deinit.
     pub fn initSmall(parent: ?*Env) Env {
-        // Use undefined allocator — hash maps won't be touched
+        const alloc = if (parent) |p| p.allocator else std.heap.page_allocator;
         return .{
             .parent = parent,
-            .bindings = std.StringHashMap(Value).init(std.heap.page_allocator),
-            .allocator = std.heap.page_allocator,
+            .bindings = std.StringHashMap(Value).init(alloc),
+            .allocator = alloc,
             .marked = false,
             .is_root = false,
         };
