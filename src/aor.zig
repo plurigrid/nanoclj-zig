@@ -14,6 +14,7 @@ pub const topology = @import("aor_topology.zig");
 pub const eval = @import("aor_eval.zig");
 pub const dataset = @import("aor_dataset.zig");
 pub const experiment = @import("aor_experiment.zig");
+pub const feedback = @import("aor_feedback.zig");
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -51,7 +52,14 @@ pub const ExampleResult = experiment.ExampleResult;
 pub const Report = experiment.Report;
 pub const PassFn = experiment.PassFn;
 
-// Rungs 6–7: see .topos/agent-o-nanoclj.md §2 — store, feedback.
+/// Rung 7: Feedback-loop closure (invocation → verdict → revise → invocation).
+pub const CycleResult = feedback.CycleResult;
+pub const ReviseFn = feedback.ReviseFn;
+pub const StopFn = feedback.StopFn;
+pub const cycleUntil = feedback.cycleUntil;
+
+// Rung 6 (persistence + streaming) remains as follow-up; the feedback loop
+// does not require it — intermediate state lives in-process on Agent.state.
 
 test {
     _ = agent;
@@ -60,4 +68,5 @@ test {
     _ = eval;
     _ = dataset;
     _ = experiment;
+    _ = feedback;
 }

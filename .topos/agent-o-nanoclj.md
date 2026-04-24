@@ -95,10 +95,26 @@ ocapn_* / holy / backward_fiber files integrated earlier this session.
 - **Rama-specific dataflow** — agent-o-rama inherits Rama's PState + ETL
   topology model. We rebuild on the lighter propagator substrate.
 
-## 5. Success criterion
+## 5. Closure — the ultimate feedback loop
 
-Once Rung 5 lands, the equivalent of agent-o-rama's
-`examples/clj/src/com/rpl/agent/e2e_test_agent.clj` should run on nanoclj-zig:
+Not a demo, not a showcase: Rungs 5 + 7 together are the **world** in which
+invocation → evaluation → revision runs as one closed cycle. An agent whose
+own state reads its verdict history can **re-plan itself** — which is what
+the evaluator/experiment/feedback trio is for.
+
+The primitive cycle after Rung 7:
+
+```
+  Agent → invoke → Trace → Evaluator → Verdict → FeedbackSink →
+                                                        ↓
+         Agent.state  ←  revise(prior_state, verdicts)  ←┘
+```
+
+Once both Rung 5 (experiment/dataset) and Rung 7 (feedback) are on main,
+the loop is closed inside a single nanoclj runtime — no external
+orchestrator. That is the target.
+
+The Clojure-equivalent before-picture (reference only):
 
 ```clojure
 (let [topo (-> (agent-topology)
