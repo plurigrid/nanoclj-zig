@@ -10,6 +10,7 @@ const std = @import("std");
 
 pub const agent = @import("aor_agent.zig");
 pub const trace = @import("aor_trace.zig");
+pub const topology = @import("aor_topology.zig");
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -23,10 +24,18 @@ pub const TraceEvent = trace.TraceEvent;
 pub const TraceStore = trace.TraceStore;
 pub const InvocationTrace = trace.InvocationTrace;
 
-// Rungs 3–7: see .topos/agent-o-nanoclj.md §2 — topology, eval, dataset,
-// experiment, store, feedback.
+/// Rung 3: Topology + invocation.
+pub const Topology = topology.Topology;
+pub const Edge = topology.Edge;
+pub const InvokeResult = topology.InvokeResult;
+pub const TopologyError = topology.TopologyError;
+pub const invoke = topology.invoke;
+
+// Rungs 4–7: see .topos/agent-o-nanoclj.md §2 — eval, dataset, experiment,
+// store, feedback.
 
 test {
     _ = agent;
     _ = trace;
+    _ = topology;
 }
