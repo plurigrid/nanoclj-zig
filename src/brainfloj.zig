@@ -123,7 +123,8 @@ fn parseDelimitedSummary(
     var lines = std.mem.tokenizeAny(u8, content, "\r\n");
     while (lines.next()) |line| {
         if (line.len == 0) continue;
-        if (line[0] == '#') continue;
+        // Skip comment lines: '#' (BrainFlow / generic), '%' (OpenBCI Cyton raw)
+        if (line[0] == '#' or line[0] == '%') continue;
 
         var token_idx: usize = 0;
         var selected: usize = 0;
@@ -304,6 +305,32 @@ test "brainfloj rejects zero channels" {
     };
     var res = Resources.initDefault();
     try std.testing.expectError(error.InvalidArgs, brainflojParseFn(&args, &gc, &env, &res));
+}
+
+test "brainfloj skips OpenBCI Cyton percent-prefixed metadata header" {
+    // OpenBCI GUI prepends 4 metadata lines with '%' before the column header
+    // and the data rows. The parser must skip those lines, then skip the
+    // non-numeric column header line via the existing first-token break,
+    // then ingest the numeric rows.
+    const content =
+        \\%OpenBCI Raw EXG Data
+        \\%Number of channels = 8
+        \\%Sample Rate = 250 Hz
+        \\%Board = OpenBCI_GUI$BoardCytonSerial
+        \\Sample Index, EXG 0, EXG 1, EXG 2
+        \\0, 1.0, 2.0, 3.0
+        \\1, 4.0, 5.0, 6.0
+    ;
+
+    var summary = try parseDelimitedSummary(content, 3, 1, std.testing.allocator);
+    defer summary.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), summary.sample_count);
+    try std.testing.expectEqual(@as(usize, 3), summary.channel_count);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), summary.sample0[0], 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 2.5), summary.means[0], 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 3.5), summary.means[1], 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 4.5), summary.means[2], 1e-9);
 }
 
 // ── Serial stream: (brainfloj-serial port n-channels helek-seconds) ──
