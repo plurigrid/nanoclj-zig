@@ -346,6 +346,101 @@ pub const TargetRevision = struct {
     revise: ReviseFn,
 };
 
+/// Compare two `?Value`s for bit-identical equality. Sufficient for
+/// Nash-fixed-point detection where `revise(s, …) == s` is the stop sign.
+fn valueEql(a: ?Value, b: ?Value) bool {
+    if (a == null and b == null) return true;
+    if (a == null or b == null) return false;
+    return a.?.bits == b.?.bits;
+}
+
+/// Run the multi-target cycle until every target's revise returns its own
+/// current state unchanged for one full iteration — i.e. the system is at
+/// a Nash fixed point in the revision lattice. This is a stricter closure
+/// than all-pass: the loop halts when no further adjustment is wanted, even
+/// if some examples still fail.
+///
+/// Returns a CycleResult whose `stopped_on_predicate` is true iff a fixed
+/// point was reached (vs max_iters).
+pub fn cycleUntilFixedPoint(
+    allocator: std.mem.Allocator,
+    experiment: *Experiment,
+    targets: []const TargetRevision,
+    max_iters: u32,
+) FeedbackError!CycleResult {
+    if (max_iters == 0) return error.FeedbackFailed;
+
+    var resolved: std.ArrayListUnmanaged(*aor_agent.Agent) = .empty;
+    defer resolved.deinit(allocator);
+    try resolved.ensureTotalCapacity(allocator, targets.len);
+    for (targets) |t| {
+        const a = experiment.topology.getAgent(t.agent_name) orelse return error.TargetAgentMissing;
+        try resolved.append(allocator, a);
+    }
+
+    var reports: std.ArrayListUnmanaged(Report) = .empty;
+    errdefer {
+        for (reports.items) |*r| r.deinit();
+        reports.deinit(allocator);
+    }
+
+    var fixed_point: bool = false;
+    var i: u32 = 0;
+    while (i < max_iters) : (i += 1) {
+        var report = experiment.run() catch |e| switch (e) {
+            error.AgentNotFound => return error.AgentNotFound,
+            error.DuplicateAgent => return error.DuplicateAgent,
+            error.CycleDetected => return error.CycleDetected,
+            error.ExperimentFailed => return error.ExperimentFailed,
+            error.EvalFailed => return error.EvalFailed,
+            error.Invoke => return error.Invoke,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+
+        var all_verdicts: std.ArrayListUnmanaged(Verdict) = .empty;
+        defer all_verdicts.deinit(allocator);
+        for (report.examples) |ex| {
+            for (ex.verdicts) |v| {
+                all_verdicts.append(allocator, v) catch |e| {
+                    report.deinit();
+                    return e;
+                };
+            }
+        }
+
+        // Compute proposed revisions; if every single one is a no-op,
+        // we've reached a Nash fixed point in the revision lattice.
+        var any_changed = false;
+        for (targets, 0..) |t, idx| {
+            const cur = resolved.items[idx].state;
+            const proposed = t.revise(cur, all_verdicts.items);
+            if (!valueEql(cur, proposed)) {
+                any_changed = true;
+            }
+        }
+
+        if (!any_changed) {
+            fixed_point = true;
+            try reports.append(allocator, report);
+            break;
+        }
+
+        // Apply the revisions we just computed.
+        for (targets, 0..) |t, idx| {
+            resolved.items[idx].state = t.revise(resolved.items[idx].state, all_verdicts.items);
+        }
+        try reports.append(allocator, report);
+    }
+
+    const iters = @as(u32, @intCast(reports.items.len));
+    return CycleResult{
+        .allocator = allocator,
+        .iterations = iters,
+        .reports = try reports.toOwnedSlice(allocator),
+        .stopped_on_predicate = fixed_point,
+    };
+}
+
 /// Like `cycleUntil` but multi-target: every iteration, all named agents
 /// have their state revised from the same verdict set. Agents not listed
 /// keep their state unchanged. This is the actual world-shape — one
@@ -499,6 +594,69 @@ test "cycleUntilMulti: unresolved target name errors at dispatch" {
         FeedbackError.TargetAgentMissing,
         cycleUntilMulti(std.testing.allocator, &exp, &targets, stopAllPass, 5),
     );
+}
+
+/// Revise that stops nudging once passRate is satisfied for this verdict
+/// set (returns prior unchanged). Lets us test cycleUntilFixedPoint.
+fn nudgeUpThenHold(prior: ?Value, verdicts: []const Verdict) ?Value {
+    for (verdicts) |v| {
+        if (v.score <= 0.0) {
+            const cur: i48 = if (prior) |p| p.asInt() else 0;
+            return Value.makeInt(cur + 1);
+        }
+    }
+    // No failing verdicts → no revision wanted → fixed point.
+    return prior;
+}
+
+test "cycleUntilFixedPoint halts when no target wants to revise" {
+    var topo = aor_topology.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("biased_inc", biasedIncBody);
+
+    // Dataset starts failing; after enough nudges, all pass; further nudges
+    // would be no-ops because every verdict is positive. That's the fixed
+    // point.
+    var ds = aor_dataset.Dataset.init(std.testing.allocator, "fp");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(-4), null, "");
+    try ds.addExample(Value.makeInt(-2), null, "");
+    try ds.addExample(Value.makeInt(0), null, "");
+
+    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    var exp = Experiment.init(std.testing.allocator, "fp", &topo, &trace_store, &ds, &evs, "biased_inc");
+    const targets = [_]TargetRevision{
+        .{ .agent_name = "biased_inc", .revise = nudgeUpThenHold },
+    };
+    var result = try cycleUntilFixedPoint(std.testing.allocator, &exp, &targets, 20);
+    defer result.deinit();
+
+    try std.testing.expect(result.stopped_on_predicate); // reached fixed point
+    try std.testing.expectEqual(@as(usize, 0), result.last().fail_count);
+}
+
+test "cycleUntilFixedPoint: never-converging revise hits max_iters" {
+    var topo = aor_topology.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("biased_inc", biasedIncBody);
+
+    var ds = aor_dataset.Dataset.init(std.testing.allocator, "oscillate");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(-1000), null, ""); // hard to fix
+
+    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    var exp = Experiment.init(std.testing.allocator, "osc", &topo, &trace_store, &ds, &evs, "biased_inc");
+    const targets = [_]TargetRevision{
+        .{ .agent_name = "biased_inc", .revise = nudgeUp }, // never halts
+    };
+    var result = try cycleUntilFixedPoint(std.testing.allocator, &exp, &targets, 5);
+    defer result.deinit();
+    try std.testing.expect(!result.stopped_on_predicate);
+    try std.testing.expectEqual(@as(u32, 5), result.iterations);
 }
 
 test "cycleUntil: max_iters=0 errors" {

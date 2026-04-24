@@ -60,6 +60,7 @@ pub const StopFn = feedback.StopFn;
 pub const TargetRevision = feedback.TargetRevision;
 pub const cycleUntil = feedback.cycleUntil;
 pub const cycleUntilMulti = feedback.cycleUntilMulti;
+pub const cycleUntilFixedPoint = feedback.cycleUntilFixedPoint;
 
 /// Rung 8: Tool + ToolRegistry (agent-o-rama's function-calling primitive).
 pub const Tool = tool.Tool;
