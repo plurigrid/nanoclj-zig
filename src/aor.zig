@@ -15,6 +15,7 @@ pub const eval = @import("aor_eval.zig");
 pub const dataset = @import("aor_dataset.zig");
 pub const experiment = @import("aor_experiment.zig");
 pub const feedback = @import("aor_feedback.zig");
+pub const tool = @import("aor_tool.zig");
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -58,6 +59,12 @@ pub const ReviseFn = feedback.ReviseFn;
 pub const StopFn = feedback.StopFn;
 pub const cycleUntil = feedback.cycleUntil;
 
+/// Rung 8: Tool + ToolRegistry (agent-o-rama's function-calling primitive).
+pub const Tool = tool.Tool;
+pub const ToolFn = tool.ToolFn;
+pub const ToolRegistry = tool.ToolRegistry;
+pub const ToolError = tool.ToolError;
+
 // Rung 6 (persistence + streaming) remains as follow-up; the feedback loop
 // does not require it — intermediate state lives in-process on Agent.state.
 
@@ -69,4 +76,5 @@ test {
     _ = dataset;
     _ = experiment;
     _ = feedback;
+    _ = tool;
 }
