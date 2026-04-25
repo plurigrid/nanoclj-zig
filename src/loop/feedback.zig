@@ -22,16 +22,16 @@
 //! agent's behavior.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
 
-const aor_agent = @import("aor_agent.zig");
-const aor_eval = @import("aor_eval.zig");
-const aor_experiment = @import("aor_experiment.zig");
+const agent_lib = @import("agent.zig");
+const eval_lib = @import("eval.zig");
+const experiment_lib = @import("experiment.zig");
 
-const Verdict = aor_eval.Verdict;
-const Experiment = aor_experiment.Experiment;
-const Report = aor_experiment.Report;
+const Verdict = eval_lib.Verdict;
+const Experiment = experiment_lib.Experiment;
+const Report = experiment_lib.Report;
 
 pub const FeedbackError = error{
     FeedbackFailed,
@@ -168,18 +168,18 @@ pub fn cycleUntil(
 // Tests — the world runs; the feedback loop converges.
 // ─────────────────────────────────────────────────────────────────────────
 
-const aor_trace = @import("aor_trace.zig");
-const aor_topology = @import("aor_topology.zig");
-const aor_dataset = @import("aor_dataset.zig");
+const trace_lib = @import("trace.zig");
+const topology_lib = @import("topology.zig");
+const dataset_lib = @import("dataset.zig");
 
 /// Body that adds its own state (if set) to the input.
 /// Uses @fieldParentPtr pattern — read the state from ctx.state.
-fn biasedIncBody(ctx: *aor_agent.Agent, in: Value) error{Invoke}!Value {
+fn biasedIncBody(ctx: *agent_lib.Agent, in: Value) error{Invoke}!Value {
     const bias: i48 = if (ctx.state) |s| s.asInt() else 0;
     return Value.makeInt(in.asInt() + 1 + bias);
 }
 
-fn identityScorer(v: Value) aor_eval.EvalError!f32 {
+fn identityScorer(v: Value) eval_lib.EvalError!f32 {
     return @floatFromInt(v.asInt());
 }
 
@@ -202,22 +202,22 @@ fn stopAllPass(report: *const Report) bool {
 }
 
 test "cycleUntil: revises state until all examples pass" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("biased_inc", biasedIncBody);
 
     // Start state is null (bias=0). Worst example (-5) fails at iter 0
     // (output = -5 + 1 = -4). Revise nudges bias up by 1 each iter until
     // -5 + 1 + bias > 0 → bias > 4 → takes 5 revisions.
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "biased");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "biased");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(-5), null, "");
     try ds.addExample(Value.makeInt(-3), null, "");
     try ds.addExample(Value.makeInt(-1), null, "");
 
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(
         std.testing.allocator,
         "loop",
@@ -239,17 +239,17 @@ test "cycleUntil: revises state until all examples pass" {
 }
 
 test "cycleUntil: max_iters caps iteration when stop never fires" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("biased_inc", biasedIncBody);
 
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "never");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "never");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(-1000), null, "");
 
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(
         std.testing.allocator,
         "capped",
@@ -267,16 +267,16 @@ test "cycleUntil: max_iters caps iteration when stop never fires" {
 }
 
 test "cycleUntil: missing target agent errors cleanly" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("biased_inc", biasedIncBody);
 
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "x");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "x");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(0), null, "");
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "e", &topo, &trace_store, &ds, &evs, "biased_inc");
 
     try std.testing.expectError(
@@ -286,19 +286,19 @@ test "cycleUntil: missing target agent errors cleanly" {
 }
 
 test "passRateTrajectory traces convergence across iterations" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("biased_inc", biasedIncBody);
 
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "traj");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "traj");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(-3), null, "");
     try ds.addExample(Value.makeInt(-1), null, "");
     try ds.addExample(Value.makeInt(1), null, "");
 
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "t", &topo, &trace_store, &ds, &evs, "biased_inc");
     var result = try cycleUntil(std.testing.allocator, &exp, "biased_inc", nudgeUp, stopAllPass, 10);
     defer result.deinit();
@@ -316,18 +316,18 @@ test "passRateTrajectory traces convergence across iterations" {
 }
 
 test "lastDelta reports final change; isDiverging false on converging run" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("biased_inc", biasedIncBody);
 
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "c");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "c");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(-5), null, "");
     try ds.addExample(Value.makeInt(0), null, "");
 
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "c", &topo, &trace_store, &ds, &evs, "biased_inc");
     var result = try cycleUntil(std.testing.allocator, &exp, "biased_inc", nudgeUp, stopAllPass, 10);
     defer result.deinit();
@@ -370,7 +370,7 @@ pub fn cycleUntilFixedPoint(
 ) FeedbackError!CycleResult {
     if (max_iters == 0) return error.FeedbackFailed;
 
-    var resolved: std.ArrayListUnmanaged(*aor_agent.Agent) = .empty;
+    var resolved: std.ArrayListUnmanaged(*agent_lib.Agent) = .empty;
     defer resolved.deinit(allocator);
     try resolved.ensureTotalCapacity(allocator, targets.len);
     for (targets) |t| {
@@ -456,7 +456,7 @@ pub fn cycleUntilMulti(
 
     // Resolve each target name → agent pointer up front so we fail fast on
     // misnamed targets.
-    var resolved: std.ArrayListUnmanaged(*aor_agent.Agent) = .empty;
+    var resolved: std.ArrayListUnmanaged(*agent_lib.Agent) = .empty;
     defer resolved.deinit(allocator);
     try resolved.ensureTotalCapacity(allocator, targets.len);
     for (targets) |t| {
@@ -518,7 +518,7 @@ pub fn cycleUntilMulti(
 
 // Multi-target feedback test helpers.
 
-fn biasedDoubleBody(ctx: *aor_agent.Agent, in: Value) error{Invoke}!Value {
+fn biasedDoubleBody(ctx: *agent_lib.Agent, in: Value) error{Invoke}!Value {
     const bias: i48 = if (ctx.state) |s| s.asInt() else 0;
     // Double then add bias, so a "negative" bias counter-acts the double.
     return Value.makeInt(in.asInt() * 2 + bias);
@@ -536,9 +536,9 @@ fn nudgeDown(prior: ?Value, verdicts: []const Verdict) ?Value {
 }
 
 test "cycleUntilMulti: two targets with opposing revisions both converge" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("biased_inc", biasedIncBody);
     _ = try topo.newAgent("biased_dbl", biasedDoubleBody);
@@ -548,12 +548,12 @@ test "cycleUntilMulti: two targets with opposing revisions both converge" {
     // With bias_inc = 0, bias_dbl = 0: output = -8 (fails, score ≤ 0).
     // nudgeUp raises bias_inc; nudgeDown lowers bias_dbl — both try to push
     // the chained output into positive. Converges.
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "multi");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "multi");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(-5), null, "");
     try ds.addExample(Value.makeInt(-2), null, "");
 
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(
         std.testing.allocator,
         "multi",
@@ -575,15 +575,15 @@ test "cycleUntilMulti: two targets with opposing revisions both converge" {
 }
 
 test "cycleUntilMulti: unresolved target name errors at dispatch" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("real", biasedIncBody);
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "x");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "x");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(0), null, "");
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "e", &topo, &trace_store, &ds, &evs, "real");
 
     const targets = [_]TargetRevision{
@@ -610,22 +610,22 @@ fn nudgeUpThenHold(prior: ?Value, verdicts: []const Verdict) ?Value {
 }
 
 test "cycleUntilFixedPoint halts when no target wants to revise" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("biased_inc", biasedIncBody);
 
     // Dataset starts failing; after enough nudges, all pass; further nudges
     // would be no-ops because every verdict is positive. That's the fixed
     // point.
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "fp");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "fp");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(-4), null, "");
     try ds.addExample(Value.makeInt(-2), null, "");
     try ds.addExample(Value.makeInt(0), null, "");
 
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "fp", &topo, &trace_store, &ds, &evs, "biased_inc");
     const targets = [_]TargetRevision{
         .{ .agent_name = "biased_inc", .revise = nudgeUpThenHold },
@@ -638,17 +638,17 @@ test "cycleUntilFixedPoint halts when no target wants to revise" {
 }
 
 test "cycleUntilFixedPoint: never-converging revise hits max_iters" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("biased_inc", biasedIncBody);
 
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "oscillate");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "oscillate");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(-1000), null, ""); // hard to fix
 
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "osc", &topo, &trace_store, &ds, &evs, "biased_inc");
     const targets = [_]TargetRevision{
         .{ .agent_name = "biased_inc", .revise = nudgeUp }, // never halts
@@ -660,14 +660,14 @@ test "cycleUntilFixedPoint: never-converging revise hits max_iters" {
 }
 
 test "cycleUntil: max_iters=0 errors" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("biased_inc", biasedIncBody);
-    var ds = aor_dataset.Dataset.init(std.testing.allocator, "x");
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "x");
     defer ds.deinit();
-    const evs = [_]aor_eval.Evaluator{aor_eval.individual("s", identityScorer)};
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "e", &topo, &trace_store, &ds, &evs, "biased_inc");
     try std.testing.expectError(
         FeedbackError.FeedbackFailed,

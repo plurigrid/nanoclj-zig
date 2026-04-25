@@ -8,7 +8,7 @@
 //! Format (pipe/newline-escaped at the per-log level per the rung's own
 //! encoder):
 //!
-//!     # aor-checkpoint v1
+//!     # loop-checkpoint v1
 //!     # trace
 //!     <trace lines...>
 //!     # action
@@ -23,9 +23,9 @@
 //! header catches the mismatch.)
 
 const std = @import("std");
-const aor_trace = @import("aor_trace.zig");
-const aor_action = @import("aor_action.zig");
-const aor_telemetry = @import("aor_telemetry.zig");
+const trace_lib = @import("trace.zig");
+const action_lib = @import("action.zig");
+const telemetry = @import("telemetry.zig");
 
 pub const CheckpointError = error{
     ParseError,
@@ -36,9 +36,9 @@ pub const CheckpointError = error{
 
 /// Handles to the three log types. Any can be null to opt out.
 pub const Checkpoint = struct {
-    trace: ?*aor_trace.TraceStore = null,
-    action_log: ?*aor_action.ActionLog = null,
-    telemetry: ?*aor_telemetry.TelemetrySink = null,
+    trace: ?*trace_lib.TraceStore = null,
+    action_log: ?*action_lib.ActionLog = null,
+    telemetry: ?*telemetry.TelemetrySink = null,
 
     /// Serialize all participating logs into a single buffer.
     pub fn write(
@@ -47,7 +47,7 @@ pub const Checkpoint = struct {
         alloc: std.mem.Allocator,
         scratch_alloc: std.mem.Allocator,
     ) !void {
-        try out.appendSlice(alloc, "# aor-checkpoint v1\n");
+        try out.appendSlice(alloc, "# loop-checkpoint v1\n");
         try out.appendSlice(alloc, "# trace\n");
         if (self.trace) |t| try t.writeJsonl(out, alloc, scratch_alloc);
         try out.appendSlice(alloc, "# action\n");
@@ -73,7 +73,7 @@ pub const Checkpoint = struct {
                     const buf = data[section_start..pos];
                     try self.dispatchSection(section, buf, intern_alloc);
                 }
-                if (std.mem.startsWith(u8, line, "# aor-checkpoint v1")) {
+                if (std.mem.startsWith(u8, line, "# loop-checkpoint v1")) {
                     saw_version = true;
                     section = .header;
                 } else if (std.mem.eql(u8, line, "# trace")) {
@@ -116,24 +116,24 @@ pub const Checkpoint = struct {
 // Tests
 // ─────────────────────────────────────────────────────────────────────────
 
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
-const aor_agent = @import("aor_agent.zig");
+const agent_lib = @import("agent.zig");
 
-fn echoBody(_: *aor_agent.Agent, in: Value) error{Invoke}!Value {
+fn echoBody(_: *agent_lib.Agent, in: Value) error{Invoke}!Value {
     return in;
 }
 
 test "Checkpoint write → load preserves all three logs" {
     // Populate three logs.
-    var trace = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace.deinit();
-    var action = aor_action.ActionLog.init(std.testing.allocator);
+    var action = action_lib.ActionLog.init(std.testing.allocator);
     defer action.deinit();
-    var telem = aor_telemetry.TelemetrySink.init(std.testing.allocator);
+    var telem = telemetry.TelemetrySink.init(std.testing.allocator);
     defer telem.deinit();
 
-    var agent = aor_agent.Agent.init("e", echoBody);
+    var agent = agent_lib.Agent.init("e", echoBody);
     agent.id = 1;
     const inv = trace.startInvocation();
     _ = try trace.recordStep(inv, &agent, Value.makeInt(10), Value.makeInt(10), "");
@@ -155,7 +155,7 @@ test "Checkpoint write → load preserves all three logs" {
     try cp_out.write(&buf, std.testing.allocator, std.testing.allocator);
 
     // Fresh world; load.
-    var trace2 = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace2 = trace_lib.TraceStore.init(std.testing.allocator);
     defer {
         for (trace2.events.items) |ev| {
             std.testing.allocator.free(ev.agent_name);
@@ -163,7 +163,7 @@ test "Checkpoint write → load preserves all three logs" {
         }
         trace2.deinit();
     }
-    var action2 = aor_action.ActionLog.init(std.testing.allocator);
+    var action2 = action_lib.ActionLog.init(std.testing.allocator);
     defer {
         for (action2.results.items) |r| {
             std.testing.allocator.free(r.action_name);
@@ -171,7 +171,7 @@ test "Checkpoint write → load preserves all three logs" {
         }
         action2.deinit();
     }
-    var telem2 = aor_telemetry.TelemetrySink.init(std.testing.allocator);
+    var telem2 = telemetry.TelemetrySink.init(std.testing.allocator);
     defer telem2.deinit();
     var cp_in = Checkpoint{ .trace = &trace2, .action_log = &action2, .telemetry = &telem2 };
     try cp_in.load(buf.items, std.testing.allocator);
@@ -183,7 +183,7 @@ test "Checkpoint write → load preserves all three logs" {
 }
 
 test "Checkpoint.load rejects bad version header" {
-    var trace = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace.deinit();
     var cp = Checkpoint{ .trace = &trace };
     try std.testing.expectError(
@@ -199,7 +199,7 @@ test "Checkpoint with all fields null: write produces framing only" {
     try cp.write(&buf, std.testing.allocator, std.testing.allocator);
     // Just three markers + version header.
     const expected =
-        "# aor-checkpoint v1\n" ++
+        "# loop-checkpoint v1\n" ++
         "# trace\n" ++
         "# action\n" ++
         "# telemetry\n";

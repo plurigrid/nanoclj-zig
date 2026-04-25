@@ -19,12 +19,12 @@
 //! concerns until Rung 6 (persistence) makes the ActionLog durable.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
 
-const aor_trace = @import("aor_trace.zig");
-const InvokeId = aor_trace.InvokeId;
-const InvocationTrace = aor_trace.InvocationTrace;
+const trace_lib = @import("trace.zig");
+const InvokeId = trace_lib.InvokeId;
+const InvocationTrace = trace_lib.InvocationTrace;
 
 pub const ActionError = error{
     ActionFailed,
@@ -172,7 +172,7 @@ pub const ActionLog = struct {
 };
 
 // Escape helpers shared between write/load. Identical grammar to
-// aor_trace.zig so a single codec covers trace + action logs.
+// trace.zig so a single codec covers trace + action logs.
 fn escapeField(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
     var out = try std.ArrayListUnmanaged(u8).initCapacity(allocator, s.len);
     errdefer out.deinit(allocator);
@@ -259,8 +259,8 @@ pub fn runActionsOnInvocation(
 // Tests
 // ─────────────────────────────────────────────────────────────────────────
 
-const aor_agent = @import("aor_agent.zig");
-const aor_topology = @import("aor_topology.zig");
+const agent_lib = @import("agent.zig");
+const topology_lib = @import("topology.zig");
 
 fn recordBody(info: RunInfo) ActionError!ActionResult {
     return .{
@@ -285,7 +285,7 @@ fn failBody(_: RunInfo) ActionError!ActionResult {
     return error.ActionFailed;
 }
 
-fn incBody(_: *aor_agent.Agent, in: Value) error{Invoke}!Value {
+fn incBody(_: *agent_lib.Agent, in: Value) error{Invoke}!Value {
     return Value.makeInt(in.asInt() + 1);
 }
 
@@ -314,13 +314,13 @@ test "runAction appends a result" {
 }
 
 test "runActionsOnInvocation runs all actions + produces one log entry each" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("inc", incBody);
 
-    const r = try aor_topology.invoke(&topo, &trace_store, "inc", Value.makeInt(100));
+    const r = try topology_lib.invoke(&topo, &trace_store, "inc", Value.makeInt(100));
     const tr = try trace_store.getInvocation(std.testing.allocator, r.invoke_id);
     defer std.testing.allocator.free(tr.events);
 
@@ -343,12 +343,12 @@ test "runActionsOnInvocation runs all actions + produces one log entry each" {
 }
 
 test "failing action still produces a 'failed' log entry (no silent drop)" {
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("inc", incBody);
-    const r = try aor_topology.invoke(&topo, &trace_store, "inc", Value.makeInt(7));
+    const r = try topology_lib.invoke(&topo, &trace_store, "inc", Value.makeInt(7));
     const tr = try trace_store.getInvocation(std.testing.allocator, r.invoke_id);
     defer std.testing.allocator.free(tr.events);
 

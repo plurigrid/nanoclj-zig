@@ -13,7 +13,7 @@
 //! (https://github.com/redplanetlabs/agent-o-rama/wiki/Evaluation).
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
 
 pub const Example = struct {

@@ -16,10 +16,10 @@
 //! is a `Verdict`.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
-const aor_trace = @import("aor_trace.zig");
-const InvocationTrace = aor_trace.InvocationTrace;
+const trace_lib = @import("trace.zig");
+const InvocationTrace = trace_lib.InvocationTrace;
 
 pub const EvalError = error{
     EvalFailed,
@@ -246,24 +246,24 @@ test "tryAny dispatches by evaluator kind" {
 }
 
 test "scoreInvocationSteps scores each completed step" {
-    const aor_agent = @import("aor_agent.zig");
-    const aor_topology = @import("aor_topology.zig");
+    const agent_lib = @import("agent.zig");
+    const topology_lib = @import("topology.zig");
 
     const body_struct = struct {
-        fn inc(_: *aor_agent.Agent, in: Value) error{Invoke}!Value {
+        fn inc(_: *agent_lib.Agent, in: Value) error{Invoke}!Value {
             return Value.makeInt(in.asInt() + 1);
         }
     };
 
-    var topo = aor_topology.Topology.init(std.testing.allocator);
+    var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
-    var trace_store = aor_trace.TraceStore.init(std.testing.allocator);
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("a", body_struct.inc);
     _ = try topo.newAgent("b", body_struct.inc);
     try topo.connect("a", "b");
 
-    const r = try aor_topology.invoke(&topo, &trace_store, "a", Value.makeInt(10));
+    const r = try topology_lib.invoke(&topo, &trace_store, "a", Value.makeInt(10));
     _ = r;
     const tr = try trace_store.getInvocation(std.testing.allocator, 1);
     defer std.testing.allocator.free(tr.events);

@@ -12,7 +12,7 @@
 //! shape of an Agent so later rungs can compose them unambiguously.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
 
 /// Callable signature for an agent body. `ctx` lets an Agent consult its own

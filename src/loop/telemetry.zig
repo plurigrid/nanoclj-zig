@@ -16,11 +16,11 @@
 //! store for an on-disk append log without changing the API.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
 
-const aor_eval = @import("aor_eval.zig");
-const aor_action = @import("aor_action.zig");
+const eval_lib = @import("eval.zig");
+const action_lib = @import("action.zig");
 
 pub const Sample = struct {
     ts_ns: u64,
@@ -127,7 +127,7 @@ pub const TelemetrySink = struct {
 
     /// Convenience: ingest a slice of Verdicts, one sample per verdict, all
     /// under "eval.<evaluator_name>".
-    pub fn ingestVerdicts(self: *TelemetrySink, verdicts: []const aor_eval.Verdict) !void {
+    pub fn ingestVerdicts(self: *TelemetrySink, verdicts: []const eval_lib.Verdict) !void {
         var namebuf: [256]u8 = undefined;
         for (verdicts) |v| {
             const key = try std.fmt.bufPrint(&namebuf, "eval.{s}", .{v.evaluator_name});
@@ -136,7 +136,7 @@ pub const TelemetrySink = struct {
     }
 
     /// Convenience: ingest one RunInfo as latency + step-count samples.
-    pub fn ingestRunInfo(self: *TelemetrySink, info: aor_action.RunInfo) !void {
+    pub fn ingestRunInfo(self: *TelemetrySink, info: action_lib.RunInfo) !void {
         try self.record("latency.ns", @as(f32, @floatFromInt(info.latency_ns)), "");
         try self.record("step-count", @as(f32, @floatFromInt(info.step_count)), "");
     }
@@ -287,7 +287,7 @@ test "TelemetrySink.aggregate returns empty sentinel for missing series" {
 test "ingestVerdicts creates eval.<name> series entries" {
     var sink = TelemetrySink.init(std.testing.allocator);
     defer sink.deinit();
-    const verdicts = [_]aor_eval.Verdict{
+    const verdicts = [_]eval_lib.Verdict{
         .{ .evaluator_name = "score", .score = 0.7 },
         .{ .evaluator_name = "score", .score = 0.9 },
         .{ .evaluator_name = "preference", .score = -1.0 },
@@ -304,7 +304,7 @@ test "ingestVerdicts creates eval.<name> series entries" {
 test "ingestRunInfo creates latency.ns and step-count series" {
     var sink = TelemetrySink.init(std.testing.allocator);
     defer sink.deinit();
-    const info = aor_action.RunInfo{
+    const info = action_lib.RunInfo{
         .invoke_id = 1,
         .input = Value.makeInt(0),
         .output = Value.makeInt(0),

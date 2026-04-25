@@ -1,24 +1,35 @@
-//! agent-o-nanoclj — an agent-o-rama-inspired layer on nanoclj-zig.
+//! agent-o-nanoclj — the feedback-loop core of nanoclj-zig.
 //!
-//! Top-level namespace; re-exports the rungs as they land. See
-//! `.topos/agent-o-nanoclj.md` for the full architecture.
+//! Top-level namespace; re-exports each rung as it lands. See
+//! `.topos/agent-o-nanoclj.md` for the full architecture (10 rungs +
+//! gradient extension).
 //!
-//! Naming: `Aor` prefix everywhere so this doesn't collide with nanoclj's
-//! existing Clojure `agent` (STM-style, in src/agent.zig + src/refs_agents.zig).
+//! Layout: every loop primitive lives under `src/loop/` with a bare,
+//! collision-free name (agent / topology / trace / eval / dataset /
+//! experiment / feedback / tool / action / telemetry / checkpoint /
+//! gradient / builtins). The umbrella file (this one) is what `core.zig`
+//! and `build.zig` reference.
+//!
+//! Functorial framing (see "funcotriality in control"):
+//!   F_play   : Topology → Trace               (invoke / Rung 3)
+//!   F_witness: Trace    → Verdict / pass-rate (eval, experiment / Rungs 4–5)
+//!   F_coplay : ∇(rate)  → Topology'           (gradient + revise / 7 + grad)
+//! GF(3) closure: F_coplay ∘ F_witness ∘ F_play : Topology → Topology.
 
 const std = @import("std");
 
-pub const agent = @import("aor_agent.zig");
-pub const trace = @import("aor_trace.zig");
-pub const topology = @import("aor_topology.zig");
-pub const eval = @import("aor_eval.zig");
-pub const dataset = @import("aor_dataset.zig");
-pub const experiment = @import("aor_experiment.zig");
-pub const feedback = @import("aor_feedback.zig");
-pub const tool = @import("aor_tool.zig");
-pub const action = @import("aor_action.zig");
-pub const telemetry = @import("aor_telemetry.zig");
-pub const checkpoint = @import("aor_checkpoint.zig");
+pub const agent = @import("loop/agent.zig");
+pub const trace = @import("loop/trace.zig");
+pub const topology = @import("loop/topology.zig");
+pub const eval = @import("loop/eval.zig");
+pub const dataset = @import("loop/dataset.zig");
+pub const experiment = @import("loop/experiment.zig");
+pub const feedback = @import("loop/feedback.zig");
+pub const tool = @import("loop/tool.zig");
+pub const action = @import("loop/action.zig");
+pub const telemetry = @import("loop/telemetry.zig");
+pub const checkpoint = @import("loop/checkpoint.zig");
+pub const gradient = @import("loop/gradient.zig");
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -69,13 +80,13 @@ pub const cycleUntil = feedback.cycleUntil;
 pub const cycleUntilMulti = feedback.cycleUntilMulti;
 pub const cycleUntilFixedPoint = feedback.cycleUntilFixedPoint;
 
-/// Rung 8: Tool + ToolRegistry (agent-o-rama's function-calling primitive).
+/// Rung 8: Tool + ToolRegistry.
 pub const Tool = tool.Tool;
 pub const ToolFn = tool.ToolFn;
 pub const ToolRegistry = tool.ToolRegistry;
 pub const ToolError = tool.ToolError;
 
-/// Rung 9: Action + ActionLog (the side-effect side of the invocation hook).
+/// Rung 9: Action + ActionLog.
 pub const Action = action.Action;
 pub const ActionFn = action.ActionFn;
 pub const ActionResult = action.ActionResult;
@@ -84,18 +95,22 @@ pub const RunInfo = action.RunInfo;
 pub const runAction = action.runAction;
 pub const runActionsOnInvocation = action.runActionsOnInvocation;
 
-/// Rung 10: Telemetry aggregator (outer monitor over the inner loop).
+/// Rung 10: Telemetry.
 pub const Sample = telemetry.Sample;
 pub const Series = telemetry.Series;
 pub const Aggregate = telemetry.Aggregate;
 pub const TelemetrySink = telemetry.TelemetrySink;
 
-/// Rung 6+: unified world checkpoint across trace + action + telemetry.
+/// Rung 6+: unified checkpoint across trace + action + telemetry.
 pub const Checkpoint = checkpoint.Checkpoint;
 pub const CheckpointError = checkpoint.CheckpointError;
 
-// Rung 6 (persistence + streaming) remains as follow-up; the feedback loop
-// does not require it — intermediate state lives in-process on Agent.state.
+/// Gradient: F_coplay realized as finite-difference descent on agent state.
+pub const Gradient = gradient.Gradient;
+pub const GradientCycleResult = gradient.GradientCycleResult;
+pub const GradientError = gradient.GradientError;
+pub const traceGradient = gradient.traceGradient;
+pub const cycleByGradient = gradient.cycleByGradient;
 
 test {
     _ = agent;
@@ -109,5 +124,6 @@ test {
     _ = action;
     _ = telemetry;
     _ = checkpoint;
-    _ = @import("aor_world_test.zig");
+    _ = gradient;
+    _ = @import("loop/world_test.zig");
 }

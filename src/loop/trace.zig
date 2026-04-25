@@ -17,10 +17,10 @@
 //!     deref them later.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
-const aor_agent = @import("aor_agent.zig");
-const AgentId = aor_agent.AgentId;
+const agent_lib = @import("agent.zig");
+const AgentId = agent_lib.AgentId;
 
 pub const InvokeId = u64;
 
@@ -107,7 +107,7 @@ pub const TraceStore = struct {
     pub fn recordStep(
         self: *TraceStore,
         invoke_id: InvokeId,
-        agent: *const aor_agent.Agent,
+        agent: *const agent_lib.Agent,
         input: Value,
         output: ?Value,
         tags: []const u8,
@@ -339,7 +339,7 @@ fn loadJsonlImpl(self: *TraceStore, data: []const u8, intern_alloc: std.mem.Allo
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn echoBody(_: *aor_agent.Agent, input: Value) error{Invoke}!Value {
+fn echoBody(_: *agent_lib.Agent, input: Value) error{Invoke}!Value {
     return input;
 }
 
@@ -364,7 +364,7 @@ test "startInvocation issues monotonic ids" {
 test "recordStep appends with auto step numbering per invocation" {
     var store = TraceStore.init(std.testing.allocator);
     defer store.deinit();
-    var agent = aor_agent.Agent.init("echo", echoBody);
+    var agent = agent_lib.Agent.init("echo", echoBody);
 
     const inv = store.startInvocation();
     const s0 = try store.recordStep(inv, &agent, Value.makeInt(10), null, "");
@@ -380,7 +380,7 @@ test "recordStep appends with auto step numbering per invocation" {
 test "recordStep per-invocation step numbering is independent" {
     var store = TraceStore.init(std.testing.allocator);
     defer store.deinit();
-    var agent = aor_agent.Agent.init("echo", echoBody);
+    var agent = agent_lib.Agent.init("echo", echoBody);
 
     const inv_a = store.startInvocation();
     const inv_b = store.startInvocation();
@@ -394,7 +394,7 @@ test "recordStep per-invocation step numbering is independent" {
 test "completeStep backfills output on the right event" {
     var store = TraceStore.init(std.testing.allocator);
     defer store.deinit();
-    var agent = aor_agent.Agent.init("echo", echoBody);
+    var agent = agent_lib.Agent.init("echo", echoBody);
     const inv = store.startInvocation();
     _ = try store.recordStep(inv, &agent, Value.makeInt(5), null, "");
     try store.completeStep(inv, 0, Value.makeInt(42));
@@ -415,7 +415,7 @@ test "completeStep on missing step errors" {
 test "getInvocation isolates events by invoke_id" {
     var store = TraceStore.init(std.testing.allocator);
     defer store.deinit();
-    var agent = aor_agent.Agent.init("echo", echoBody);
+    var agent = agent_lib.Agent.init("echo", echoBody);
     const inv_a = store.startInvocation();
     const inv_b = store.startInvocation();
     _ = try store.recordStep(inv_a, &agent, Value.makeInt(1), null, "");
@@ -454,7 +454,7 @@ test "subscribe: callback fires on each recordStep" {
     defer store.deinit();
     try store.subscribe(testSub);
 
-    var agent = aor_agent.Agent.init("sub", echoBody);
+    var agent = agent_lib.Agent.init("sub", echoBody);
     const inv = store.startInvocation();
     _ = try store.recordStep(inv, &agent, Value.makeInt(11), null, "");
     _ = try store.recordStep(inv, &agent, Value.makeInt(22), null, "");
@@ -471,7 +471,7 @@ test "subscribe is idempotent (no dedup re-register)" {
     try store.subscribe(testSub);
     try store.subscribe(testSub); // should not double-register
 
-    var agent = aor_agent.Agent.init("s", echoBody);
+    var agent = agent_lib.Agent.init("s", echoBody);
     const inv = store.startInvocation();
     _ = try store.recordStep(inv, &agent, Value.makeInt(5), null, "");
     try std.testing.expectEqual(@as(u32, 1), g_sub_count);
@@ -483,7 +483,7 @@ test "unsubscribe removes callback" {
     defer store.deinit();
     try store.subscribe(testSub);
 
-    var agent = aor_agent.Agent.init("s", echoBody);
+    var agent = agent_lib.Agent.init("s", echoBody);
     const inv = store.startInvocation();
     _ = try store.recordStep(inv, &agent, Value.makeInt(5), null, "");
     try std.testing.expectEqual(@as(u32, 1), g_sub_count);
@@ -506,7 +506,7 @@ test "multiple subscribers all fire, in registration order" {
     try store.subscribe(testSub);
     try store.subscribe(testSub2);
 
-    var agent = aor_agent.Agent.init("s", echoBody);
+    var agent = agent_lib.Agent.init("s", echoBody);
     const inv = store.startInvocation();
     _ = try store.recordStep(inv, &agent, Value.makeInt(1), null, "");
     _ = try store.recordStep(inv, &agent, Value.makeInt(2), null, "");
@@ -517,8 +517,8 @@ test "multiple subscribers all fire, in registration order" {
 test "writeJsonl → loadJsonl roundtrips all event fields" {
     var store = TraceStore.init(std.testing.allocator);
     defer store.deinit();
-    var agent_a = aor_agent.Agent.init("alpha", echoBody);
-    var agent_b = aor_agent.Agent.init("beta|with|pipes", echoBody);
+    var agent_a = agent_lib.Agent.init("alpha", echoBody);
+    var agent_b = agent_lib.Agent.init("beta|with|pipes", echoBody);
     agent_a.id = 1;
     agent_b.id = 2;
 
@@ -568,7 +568,7 @@ test "loadJsonl on empty input produces empty store" {
 test "tags pass through to events" {
     var store = TraceStore.init(std.testing.allocator);
     defer store.deinit();
-    var agent = aor_agent.Agent.init("echo", echoBody);
+    var agent = agent_lib.Agent.init("echo", echoBody);
     const inv = store.startInvocation();
     _ = try store.recordStep(inv, &agent, Value.makeInt(0), null, "retry,llm,cached");
     const trace = try store.getInvocation(std.testing.allocator, inv);

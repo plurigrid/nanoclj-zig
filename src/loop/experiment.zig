@@ -15,21 +15,21 @@
 //! pattern is expressible on nanoclj-zig primitives.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
 
-const aor_agent = @import("aor_agent.zig");
-const aor_trace = @import("aor_trace.zig");
-const aor_topology = @import("aor_topology.zig");
-const aor_eval = @import("aor_eval.zig");
-const aor_dataset = @import("aor_dataset.zig");
+const agent_lib = @import("agent.zig");
+const trace_lib = @import("trace.zig");
+const topology_lib = @import("topology.zig");
+const eval_lib = @import("eval.zig");
+const dataset_lib = @import("dataset.zig");
 
-const Topology = aor_topology.Topology;
-const TraceStore = aor_trace.TraceStore;
-const InvokeId = aor_trace.InvokeId;
-const Evaluator = aor_eval.Evaluator;
-const Verdict = aor_eval.Verdict;
-const Dataset = aor_dataset.Dataset;
+const Topology = topology_lib.Topology;
+const TraceStore = trace_lib.TraceStore;
+const InvokeId = trace_lib.InvokeId;
+const Evaluator = eval_lib.Evaluator;
+const Verdict = eval_lib.Verdict;
+const Dataset = dataset_lib.Dataset;
 
 pub const ExperimentError = error{
     ExperimentFailed,
@@ -126,7 +126,7 @@ pub const Experiment = struct {
         var fail_n: usize = 0;
 
         for (self.dataset.examples.items) |ex| {
-            const invoke_res = aor_topology.invoke(
+            const invoke_res = topology_lib.invoke(
                 self.topology,
                 self.trace,
                 self.start_agent,
@@ -144,14 +144,14 @@ pub const Experiment = struct {
 
             for (self.evaluators) |eval| {
                 const v = switch (eval.kind()) {
-                    .individual => aor_eval.scoreOne(eval, invoke_res.final) catch return ExperimentError.EvalFailed,
+                    .individual => eval_lib.scoreOne(eval, invoke_res.final) catch return ExperimentError.EvalFailed,
                     .comparative => blk: {
                         const exp_val = ex.expected orelse break :blk Verdict{ .evaluator_name = eval.name(), .score = 0.0 };
-                        break :blk aor_eval.scorePair(eval, invoke_res.final, exp_val) catch return ExperimentError.EvalFailed;
+                        break :blk eval_lib.scorePair(eval, invoke_res.final, exp_val) catch return ExperimentError.EvalFailed;
                     },
                     .summary => blk: {
                         const xs = [_]Value{invoke_res.final};
-                        break :blk aor_eval.scoreMany(eval, &xs) catch return ExperimentError.EvalFailed;
+                        break :blk eval_lib.scoreMany(eval, &xs) catch return ExperimentError.EvalFailed;
                     },
                 };
                 try verdict_list.append(self.allocator, v);
@@ -185,15 +185,15 @@ pub const Experiment = struct {
 // Tests — this is the success-criterion e2e from .topos/agent-o-nanoclj.md §5
 // ─────────────────────────────────────────────────────────────────────────
 
-fn incBody(_: *aor_agent.Agent, in: Value) error{Invoke}!Value {
+fn incBody(_: *agent_lib.Agent, in: Value) error{Invoke}!Value {
     return Value.makeInt(in.asInt() + 1);
 }
 
-fn doubleBody(_: *aor_agent.Agent, in: Value) error{Invoke}!Value {
+fn doubleBody(_: *agent_lib.Agent, in: Value) error{Invoke}!Value {
     return Value.makeInt(in.asInt() * 2);
 }
 
-fn identityScorer(v: Value) aor_eval.EvalError!f32 {
+fn identityScorer(v: Value) eval_lib.EvalError!f32 {
     // Pass iff positive (matches defaultPass: score > 0).
     return @floatFromInt(v.asInt());
 }
@@ -211,7 +211,7 @@ test "Experiment.run: single-agent with individual evaluator" {
     try ds.addExample(Value.makeInt(-5), null, "");
     try ds.addExample(Value.makeInt(0), null, "");
 
-    const evaluators = [_]Evaluator{aor_eval.individual("score", identityScorer)};
+    const evaluators = [_]Evaluator{eval_lib.individual("score", identityScorer)};
     var exp = Experiment.init(
         std.testing.allocator,
         "inc-experiment",
@@ -250,7 +250,7 @@ test "Experiment.run: chain topology with dataset + verdicts" {
     try ds.addExample(Value.makeInt(3), null, ""); // (3+1)*2 = 8 → pass
     try ds.addExample(Value.makeInt(-3), null, ""); // (-3+1)*2 = -4 → fail
 
-    const evaluators = [_]Evaluator{aor_eval.individual("score", identityScorer)};
+    const evaluators = [_]Evaluator{eval_lib.individual("score", identityScorer)};
     var exp = Experiment.init(
         std.testing.allocator,
         "chain-exp",
@@ -284,7 +284,7 @@ test "Report.passRate reflects counts" {
     try ds.addExample(Value.makeInt(1), null, ""); // pass
     try ds.addExample(Value.makeInt(-10), null, ""); // fail
 
-    const evaluators = [_]Evaluator{aor_eval.individual("score", identityScorer)};
+    const evaluators = [_]Evaluator{eval_lib.individual("score", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "pr", &topo, &trace, &ds, &evaluators, "inc");
     var report = try exp.run();
     defer report.deinit();
@@ -302,7 +302,7 @@ test "Experiment with empty dataset → 0 total, rate 0" {
     var ds = Dataset.init(std.testing.allocator, "empty");
     defer ds.deinit();
 
-    const evaluators = [_]Evaluator{aor_eval.individual("s", identityScorer)};
+    const evaluators = [_]Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "empty-exp", &topo, &trace, &ds, &evaluators, "inc");
     var report = try exp.run();
     defer report.deinit();

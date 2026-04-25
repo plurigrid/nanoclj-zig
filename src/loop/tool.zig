@@ -17,7 +17,7 @@
 //! action.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
 
 pub const ToolError = error{

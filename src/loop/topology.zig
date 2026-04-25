@@ -21,14 +21,14 @@
 //!     invocation id returned to the caller.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
-const aor_agent = @import("aor_agent.zig");
-const aor_trace = @import("aor_trace.zig");
-const Agent = aor_agent.Agent;
-const AgentId = aor_agent.AgentId;
-const TraceStore = aor_trace.TraceStore;
-const InvokeId = aor_trace.InvokeId;
+const agent_lib = @import("agent.zig");
+const trace_lib = @import("trace.zig");
+const Agent = agent_lib.Agent;
+const AgentId = agent_lib.AgentId;
+const TraceStore = trace_lib.TraceStore;
+const InvokeId = trace_lib.InvokeId;
 
 pub const TopologyError = error{
     AgentNotFound,
@@ -70,7 +70,7 @@ pub const Topology = struct {
 
     /// Register an agent. The agent's name becomes its handle; mutates
     /// agent.id to the newly-assigned numeric id.
-    pub fn newAgent(self: *Topology, name: []const u8, body: aor_agent.AgentFn) !AgentId {
+    pub fn newAgent(self: *Topology, name: []const u8, body: agent_lib.AgentFn) !AgentId {
         if (self.name_index.get(name) != null) return TopologyError.DuplicateAgent;
         const id = self.next_id;
         self.next_id += 1;

@@ -7,8 +7,8 @@
 ## Quickstart:
 ##   flox activate
 ##   zig build                       # all binaries → zig-out/bin/
-##   zig build aor-test --summary all  # 70+ agent-o-nanoclj tests
-##   zig build test --summary all      # full nz suite incl. aor
+##   zig build loop-test --summary all # 80+ agent-o-nanoclj loop-core tests
+##   zig build test --summary all      # full nz suite incl. loop core
 ##
 ## Sibling repo: nanoclj-zig builds against `../zig-syrup`. Clone it if
 ## missing — the activation hook reminds you.
@@ -44,7 +44,7 @@ on-activate = '''
 common = '''
   alias nb='zig build'
   alias nt='zig build test --summary all'
-  alias na='zig build aor-test --summary all'
+  alias nl='zig build loop-test --summary all'
 '''
 
 [build]

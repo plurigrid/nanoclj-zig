@@ -18,45 +18,45 @@
 //! the interfaces between rungs — exactly the thing unit tests can miss.
 
 const std = @import("std");
-const value = @import("value.zig");
+const value = @import("../value.zig");
 const Value = value.Value;
-const aor = @import("aor.zig");
+const loop = @import("../loop.zig");
 
 // Shared tool registry + stateful scratch for the world.
 var g_scale: i48 = 1;
 
-fn scaleTool(in: Value) aor.ToolError!Value {
+fn scaleTool(in: Value) loop.ToolError!Value {
     return Value.makeInt(in.asInt() * g_scale);
 }
 
-fn incTool(in: Value) aor.ToolError!Value {
+fn incTool(in: Value) loop.ToolError!Value {
     return Value.makeInt(in.asInt() + 1);
 }
 
 // Agent bodies. Each uses a tool from the registry (shared in g_*)
 // and consults its own .state as a per-agent offset.
-var g_registry_ptr: ?*aor.ToolRegistry = null;
+var g_registry_ptr: ?*loop.ToolRegistry = null;
 
-fn toolingInc(ctx: *aor.Agent, in: Value) error{Invoke}!Value {
+fn toolingInc(ctx: *loop.Agent, in: Value) error{Invoke}!Value {
     const reg = g_registry_ptr orelse return error.Invoke;
     const offset: i48 = if (ctx.state) |s| s.asInt() else 0;
     const scaled = reg.call("inc", in) catch return error.Invoke;
     return Value.makeInt(scaled.asInt() + offset);
 }
 
-fn toolingScale(ctx: *aor.Agent, in: Value) error{Invoke}!Value {
+fn toolingScale(ctx: *loop.Agent, in: Value) error{Invoke}!Value {
     const reg = g_registry_ptr orelse return error.Invoke;
     const offset: i48 = if (ctx.state) |s| s.asInt() else 0;
     const scaled = reg.call("scale", in) catch return error.Invoke;
     return Value.makeInt(scaled.asInt() + offset);
 }
 
-fn positiveScore(v: Value) aor.eval.EvalError!f32 {
+fn positiveScore(v: Value) loop.eval.EvalError!f32 {
     return @floatFromInt(v.asInt());
 }
 
 // Nudge state up on any non-positive verdict — classic "push out of failure".
-fn nudgeUp(prior: ?Value, verdicts: []const aor.Verdict) ?Value {
+fn nudgeUp(prior: ?Value, verdicts: []const loop.Verdict) ?Value {
     var any_nonpos = false;
     for (verdicts) |v| if (v.score <= 0.0) {
         any_nonpos = true;
@@ -68,9 +68,9 @@ fn nudgeUp(prior: ?Value, verdicts: []const aor.Verdict) ?Value {
 }
 
 // Telemetry action: record latency + step count + pass-rate proxy.
-var g_sink_ptr: ?*aor.TelemetrySink = null;
+var g_sink_ptr: ?*loop.TelemetrySink = null;
 
-fn telemetryAction(info: aor.action.RunInfo) aor.action.ActionError!aor.action.ActionResult {
+fn telemetryAction(info: loop.action.RunInfo) loop.action.ActionError!loop.action.ActionResult {
     const sink = g_sink_ptr orelse return error.ActionFailed;
     sink.ingestRunInfo(info) catch return error.ActionFailed;
     sink.record("output.value", @as(f32, @floatFromInt(info.output.asInt())), "") catch return error.ActionFailed;
@@ -84,23 +84,23 @@ fn telemetryAction(info: aor.action.RunInfo) aor.action.ActionError!aor.action.A
 
 test "world survives: dump → reload → query loaded invariants" {
     // Phase 1 — run a small amount of activity in "process A".
-    var sink = aor.TelemetrySink.init(std.testing.allocator);
+    var sink = loop.TelemetrySink.init(std.testing.allocator);
     defer sink.deinit();
-    var log = aor.ActionLog.init(std.testing.allocator);
+    var log = loop.ActionLog.init(std.testing.allocator);
     defer log.deinit();
-    var trace_store = aor.TraceStore.init(std.testing.allocator);
+    var trace_store = loop.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
 
-    var topo = aor.Topology.init(std.testing.allocator);
+    var topo = loop.Topology.init(std.testing.allocator);
     defer topo.deinit();
     _ = try topo.newAgent("inc", struct {
-        fn body(_: *aor.Agent, in: Value) error{Invoke}!Value {
+        fn body(_: *loop.Agent, in: Value) error{Invoke}!Value {
             return Value.makeInt(in.asInt() + 1);
         }
     }.body);
 
-    _ = try aor.topology.invoke(&topo, &trace_store, "inc", Value.makeInt(10));
-    _ = try aor.topology.invoke(&topo, &trace_store, "inc", Value.makeInt(20));
+    _ = try loop.topology.invoke(&topo, &trace_store, "inc", Value.makeInt(10));
+    _ = try loop.topology.invoke(&topo, &trace_store, "inc", Value.makeInt(20));
 
     try sink.record("latency.ns", 1_500_000.0, "");
     try sink.record("eval.score", 0.9, "");
@@ -125,9 +125,9 @@ test "world survives: dump → reload → query loaded invariants" {
     try sink.writeJsonl(&telem_buf, std.testing.allocator, std.testing.allocator);
 
     // Phase 3 — simulate process B: fresh structs, load all three logs.
-    var sink2 = aor.TelemetrySink.init(std.testing.allocator);
+    var sink2 = loop.TelemetrySink.init(std.testing.allocator);
     defer sink2.deinit();
-    var log2 = aor.ActionLog.init(std.testing.allocator);
+    var log2 = loop.ActionLog.init(std.testing.allocator);
     defer {
         for (log2.results.items) |rr| {
             std.testing.allocator.free(rr.action_name);
@@ -135,7 +135,7 @@ test "world survives: dump → reload → query loaded invariants" {
         }
         log2.deinit();
     }
-    var trace_store2 = aor.TraceStore.init(std.testing.allocator);
+    var trace_store2 = loop.TraceStore.init(std.testing.allocator);
     defer {
         for (trace_store2.events.items) |ev| {
             std.testing.allocator.free(ev.agent_name);
@@ -169,7 +169,7 @@ test "world survives: dump → reload → query loaded invariants" {
 
 test "world composes: 10 rungs through one scenario" {
     // ─── Rung 8: tools ──────────────────────────────────────────────
-    var registry = aor.ToolRegistry.init(std.testing.allocator);
+    var registry = loop.ToolRegistry.init(std.testing.allocator);
     defer registry.deinit();
     try registry.register(.{ .name = "inc", .description = "+1", .invoke = incTool });
     try registry.register(.{ .name = "scale", .description = "*g_scale", .invoke = scaleTool });
@@ -177,28 +177,28 @@ test "world composes: 10 rungs through one scenario" {
     g_scale = 2;
 
     // ─── Rungs 1, 3: topology ──────────────────────────────────────
-    var topo = aor.Topology.init(std.testing.allocator);
+    var topo = loop.Topology.init(std.testing.allocator);
     defer topo.deinit();
     _ = try topo.newAgent("a_inc", toolingInc);
     _ = try topo.newAgent("a_scale", toolingScale);
     try topo.connect("a_inc", "a_scale");
 
     // ─── Rung 2: trace store ────────────────────────────────────────
-    var trace_store = aor.TraceStore.init(std.testing.allocator);
+    var trace_store = loop.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
 
     // ─── Rung 5a: dataset ──────────────────────────────────────────
-    var ds = aor.Dataset.init(std.testing.allocator, "world");
+    var ds = loop.Dataset.init(std.testing.allocator, "world");
     defer ds.deinit();
     try ds.addExample(Value.makeInt(-3), null, "neg");
     try ds.addExample(Value.makeInt(-1), null, "neg");
     try ds.addExample(Value.makeInt(0), null, "zero");
 
     // ─── Rung 4: evaluator ──────────────────────────────────────────
-    const evs = [_]aor.Evaluator{aor.individualEvaluator("positive", positiveScore)};
+    const evs = [_]loop.Evaluator{loop.individualEvaluator("positive", positiveScore)};
 
     // ─── Rung 5b: experiment ───────────────────────────────────────
-    var exp = aor.Experiment.init(
+    var exp = loop.Experiment.init(
         std.testing.allocator,
         "world-e2e",
         &topo,
@@ -209,11 +209,11 @@ test "world composes: 10 rungs through one scenario" {
     );
 
     // ─── Rung 7: feedback cycle (fixed point) ───────────────────────
-    const targets = [_]aor.TargetRevision{
+    const targets = [_]loop.TargetRevision{
         .{ .agent_name = "a_inc", .revise = nudgeUp },
         .{ .agent_name = "a_scale", .revise = nudgeUp },
     };
-    var cycle_result = try aor.cycleUntilFixedPoint(std.testing.allocator, &exp, &targets, 30);
+    var cycle_result = try loop.cycleUntilFixedPoint(std.testing.allocator, &exp, &targets, 30);
     defer cycle_result.deinit();
 
     // Must have stopped at a fixed point.
@@ -229,13 +229,13 @@ test "world composes: 10 rungs through one scenario" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), traj[traj.len - 1], 0.0001);
 
     // ─── Rungs 9, 10: actions + telemetry ───────────────────────────
-    var action_log = aor.ActionLog.init(std.testing.allocator);
+    var action_log = loop.ActionLog.init(std.testing.allocator);
     defer action_log.deinit();
-    var sink = aor.TelemetrySink.init(std.testing.allocator);
+    var sink = loop.TelemetrySink.init(std.testing.allocator);
     defer sink.deinit();
     g_sink_ptr = &sink;
 
-    const actions = [_]aor.Action{
+    const actions = [_]loop.Action{
         .{ .name = "telemetry", .description = "emit run stats", .body = telemetryAction },
     };
 
@@ -244,7 +244,7 @@ test "world composes: 10 rungs through one scenario" {
     for (final_report.examples) |er| {
         const inv_trace = try trace_store.getInvocation(std.testing.allocator, er.invoke_id);
         defer std.testing.allocator.free(inv_trace.events);
-        try aor.runActionsOnInvocation(&actions, inv_trace, &action_log);
+        try loop.runActionsOnInvocation(&actions, inv_trace, &action_log);
     }
     // One log entry per example in the final iteration.
     try std.testing.expectEqual(final_report.examples.len, action_log.count());

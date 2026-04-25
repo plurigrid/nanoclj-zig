@@ -65,7 +65,7 @@
             echo "nanoclj-zig dev shell — zig $(${zigPkg}/bin/zig version)"
             echo "build: zig build"
             echo "test:  zig build test --summary all"
-            echo "aor:   zig build aor-test --summary all"
+            echo "loop:  zig build loop-test --summary all"
           '';
         };
       });
