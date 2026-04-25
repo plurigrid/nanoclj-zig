@@ -56,6 +56,7 @@ const nrepl = @import("nrepl.zig");
 const plural = @import("plural.zig");
 const juvix_bridge = @import("juvix_bridge.zig");
 const refs_agents = @import("refs_agents.zig");
+const aor_builtins = @import("aor_builtins.zig");
 
 fn getSeedMs() i64 {
     if (is_wasm) {
@@ -343,8 +344,11 @@ pub fn initCore(env: *Env, gc: *GC) !void {
                                                           .{ "fuel", &fuelFn },
         .{ "charge", &chargeFn },                                                     .{ "depth", &depthFn },
         .{ "max-depth", &maxDepthFn },
+        // agent-o-nanoclj — Clojure-callable bridges into the aor world.
+                                                       .{ "aor-version", &aor_builtins.aorVersionFn },
+        .{ "aor-test-count", &aor_builtins.aorTestCountFn },
         // IO
-                                                       .{ "slurp", &slurpFn },
+                                 .{ "slurp", &slurpFn },
         .{ "spit", &spitFn },                                                         .{ "read-line", &readLineFn },
         .{ "shell", &shellFn },                                                       .{ "sh", &shellFn },
         // Disk I/O (Zig-unique: positional, fsync-exposed, crash-safe atomic-spit)
