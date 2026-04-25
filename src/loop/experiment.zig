@@ -79,7 +79,7 @@ pub const PassFn = *const fn (expected: ?Value, actual: Value, verdicts: []const
 fn defaultPass(_: ?Value, _: Value, verdicts: []const Verdict) bool {
     if (verdicts.len == 0) return true;
     for (verdicts) |v| {
-        if (v.score <= 0.0) return false;
+        if (v.primaryScore() <= 0.0) return false;
     }
     return true;
 }
@@ -146,7 +146,7 @@ pub const Experiment = struct {
                 const v = switch (eval.kind()) {
                     .individual => eval_lib.scoreOne(eval, invoke_res.final) catch return ExperimentError.EvalFailed,
                     .comparative => blk: {
-                        const exp_val = ex.expected orelse break :blk Verdict{ .evaluator_name = eval.name(), .score = 0.0 };
+                        const exp_val = ex.expected orelse break :blk Verdict.makeScalar(eval.name(), 0.0);
                         break :blk eval_lib.scorePair(eval, invoke_res.final, exp_val) catch return ExperimentError.EvalFailed;
                     },
                     .summary => blk: {

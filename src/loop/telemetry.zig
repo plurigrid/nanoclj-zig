@@ -130,8 +130,8 @@ pub const TelemetrySink = struct {
     pub fn ingestVerdicts(self: *TelemetrySink, verdicts: []const eval_lib.Verdict) !void {
         var namebuf: [256]u8 = undefined;
         for (verdicts) |v| {
-            const key = try std.fmt.bufPrint(&namebuf, "eval.{s}", .{v.evaluator_name});
-            try self.record(key, v.score, "");
+            const key = try std.fmt.bufPrint(&namebuf, "eval.{s}", .{v.name()});
+            try self.record(key, v.primaryScore(), "");
         }
     }
 
@@ -288,9 +288,9 @@ test "ingestVerdicts creates eval.<name> series entries" {
     var sink = TelemetrySink.init(std.testing.allocator);
     defer sink.deinit();
     const verdicts = [_]eval_lib.Verdict{
-        .{ .evaluator_name = "score", .score = 0.7 },
-        .{ .evaluator_name = "score", .score = 0.9 },
-        .{ .evaluator_name = "preference", .score = -1.0 },
+        eval_lib.Verdict.makeScalar("score", 0.7),
+        eval_lib.Verdict.makeScalar("score", 0.9),
+        eval_lib.Verdict.makeScalar("preference", -1.0),
     };
     try sink.ingestVerdicts(&verdicts);
     const score_agg = sink.aggregateAll("eval.score");

@@ -187,7 +187,7 @@ fn identityScorer(v: Value) eval_lib.EvalError!f32 {
 /// output is higher); otherwise keep.
 fn nudgeUp(prior: ?Value, verdicts: []const Verdict) ?Value {
     var any_nonpos = false;
-    for (verdicts) |v| if (v.score <= 0.0) {
+    for (verdicts) |v| if (v.primaryScore() <= 0.0) {
         any_nonpos = true;
         break;
     };
@@ -526,7 +526,7 @@ fn biasedDoubleBody(ctx: *agent_lib.Agent, in: Value) error{Invoke}!Value {
 
 fn nudgeDown(prior: ?Value, verdicts: []const Verdict) ?Value {
     var any_nonpos = false;
-    for (verdicts) |v| if (v.score <= 0.0) {
+    for (verdicts) |v| if (v.primaryScore() <= 0.0) {
         any_nonpos = true;
         break;
     };
@@ -600,7 +600,7 @@ test "cycleUntilMulti: unresolved target name errors at dispatch" {
 /// set (returns prior unchanged). Lets us test cycleUntilFixedPoint.
 fn nudgeUpThenHold(prior: ?Value, verdicts: []const Verdict) ?Value {
     for (verdicts) |v| {
-        if (v.score <= 0.0) {
+        if (v.primaryScore() <= 0.0) {
             const cur: i48 = if (prior) |p| p.asInt() else 0;
             return Value.makeInt(cur + 1);
         }

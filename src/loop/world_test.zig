@@ -58,7 +58,7 @@ fn positiveScore(v: Value) loop.eval.EvalError!f32 {
 // Nudge state up on any non-positive verdict — classic "push out of failure".
 fn nudgeUp(prior: ?Value, verdicts: []const loop.Verdict) ?Value {
     var any_nonpos = false;
-    for (verdicts) |v| if (v.score <= 0.0) {
+    for (verdicts) |v| if (v.primaryScore() <= 0.0) {
         any_nonpos = true;
         break;
     };

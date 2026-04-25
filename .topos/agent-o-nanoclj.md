@@ -213,23 +213,36 @@ pub const skills: []const Skill = skill.combine(
 
 That is the entire commit. No edit to `core.zig`. No edit to anything else.
 
-### 6.2 Verdict — tagged-union polymorphism (STAGED)
+### 6.2 Verdict — tagged-union polymorphism (SHIPPED)
 
-Today `Verdict { evaluator_name, score: f32 }` is monomorphic. The three
-self-play curricula (MAGICORE / ProTeGi / Evaluator-Optimizer) need:
+`Verdict` was monomorphic `{ evaluator_name, score: f32 }`. Now a
+tagged union over five variants in `src/loop/eval.zig`:
 
-- `Verdict.scalar { score: f32 }` — current shape (Rung 4)
-- `Verdict.trit { trit: i2 }` — GF(3) gate (Rung 5)
-- `Verdict.vector { steps: []f32 }` — MAGICORE PRM (Rung 6)
-- `Verdict.record { fields: StringHashMap(f32), feedback: []const u8 }` — Evaluator-Optimizer (Rung 5)
-- `Verdict.semantic { gradient: []const u8 }` — ProTeGi (Rung 8)
+- `.scalar`   — Rung 4 (today): `{ evaluator_name, score: f32 }`
+- `.trit`     — Rung 5: `{ evaluator_name, trit: i2 }` for GF(3) gates
+- `.vector`   — Rung 6: `{ evaluator_name, steps: []const f32 }` for MAGICORE PRM
+- `.record`   — Rung 5+: `{ evaluator_name, score: f32, feedback: []const u8 }` for Evaluator-Optimizer
+- `.semantic` — Rung 8: `{ evaluator_name, gradient: []const u8 }` for ProTeGi
 
-Refactor target: convert `Verdict` to a `union(enum)` and add `pass(v,
-threshold) bool` that dispatches on tag. Existing call sites unwrap
-`.scalar` once; new call sites pattern-match. The default-pass predicate
-in `experiment.zig` becomes a generic dispatch instead of a fixed-shape
-field access. Tests survive verbatim (Rung 4's scalar verdict is still
-the default).
+Three dispatching methods on the union:
+
+```zig
+pub fn name         (self: Verdict) []const u8;     // → evaluator_name
+pub fn primaryScore (self: Verdict) f32;            // variant-specific projection
+pub fn passes       (self: Verdict, threshold: f32) bool;
+```
+
+`primaryScore` is defined per variant (no `default`) so a future Rung
+that demands a different projection has to think about it explicitly.
+`passes` short-circuits on `.semantic` — the natural-language gradient
+itself decides revision direction, so a scalar threshold is meaningless
+for that variant.
+
+All existing scalar consumers migrated to the dispatch methods (`v.score`
+→ `v.primaryScore()`, `v.evaluator_name` → `v.name()`). Construction goes
+through `Verdict.makeScalar(name, score)` for the legacy shape. Seven
+new tests pin the contract on each variant; `experiment.zig`,
+`feedback.zig`, `telemetry.zig`, `world_test.zig` all migrated cleanly.
 
 ### 6.3 cycle — combinator unification of cycleUntil* (STAGED)
 
