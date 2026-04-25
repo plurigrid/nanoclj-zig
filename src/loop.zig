@@ -32,6 +32,7 @@ pub const checkpoint = @import("loop/checkpoint.zig");
 pub const gradient = @import("loop/gradient.zig");
 pub const skill = @import("loop/skill.zig");
 pub const builtins = @import("loop/builtins.zig");
+pub const bench_skills = @import("loop/bench_skills.zig");
 
 /// Skill registry — SDF-style extension surface.
 /// Extending: add to a submodule's `skills` slice; this fold picks it up.
@@ -39,7 +40,10 @@ pub const Skill = skill.Skill;
 pub const SkillFn = skill.SkillFn;
 pub const skillCombine = skill.combine;
 pub const skillLookup = skill.lookup;
-pub const skills: []const Skill = &builtins.skills; // future: ++ gradient.skills ++ ...
+pub const skills: []const Skill = skill.combine(
+    &builtins.skills,
+    &bench_skills.skills,
+);
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -137,5 +141,6 @@ test {
     _ = gradient;
     _ = skill;
     _ = builtins;
+    _ = bench_skills;
     _ = @import("loop/world_test.zig");
 }

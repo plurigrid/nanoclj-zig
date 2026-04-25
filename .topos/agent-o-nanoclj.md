@@ -259,3 +259,51 @@ The order of operations is therefore: **Verdict polymorphism (6.2)** →
 **cycle combinator (6.3)** → opens the door to MAGICORE/ProTeGi/
 beam-search as ≤30-line additions per curriculum (see § curricula in
 `.topos/agent-o-nanoclj-curricula.md` once landed).
+
+---
+
+## 7. Embarrassment ledger + skill triads
+
+`.topos/bench/` ran at 2026-04-25T03:50Z. The most embarrassing three:
+
+| # | Bench | Measurement | Target | Embarrassment factor |
+|---|---|---|---|---|
+| E1 | `fib25_nanoclj` | 79.3 ms + **54.4 MB allocated** | 0 alloc inside fib body (NaN-box) | **667× slower** than Zig + heap leak |
+| E2 | `reader_1mb`    | peak_alloc 22.7 MB / src 1.05 MB = **21.7× ratio** | < 5× | reader allocates 21× input size |
+| E3 | `loop_tight_n10000` | **356 ns/iter** on integer tight loop | < 50 ns native | ~7× over native |
+
+Honorable mentions sharing E1's NaN-box-failure root cause:
+`tak_18_12_6` (14 MB alloc), `ack_3_7` (155 MB alloc),
+`binary_trees_d12` (75× per-node overhead).
+
+For each embarrassment we ship a **3-skill triad** under the GF(3)
+triadic-load protocol (memory: `feedback_triadic_skill_load`). Each
+triad is `play(+1) + witness(0) + coplay(−1) ≡ 0 (mod 3)`. The 9 skills
+land in `src/loop/bench_skills.zig` as plain `Skill` records; the §6.1
+registry picks them up automatically.
+
+| E | trit | role | skill | what it returns |
+|---|---|---|---|---|
+| 1 | +1 | play    | `(loop-bench-fib25-allocs)`         | 54_383_840 — the leak in bytes |
+| 1 |  0 | witness | `(loop-int-trit n)`                  | n mod 3 — exercises NaN-box but says nothing about elision |
+| 1 | −1 | coplay  | `(loop-bench-banner-hex)`           | 0xFF00FF — magenta, no signal |
+| 2 | +1 | play    | `(loop-bench-reader-ratio-milli)`   | 21_667 — peak-alloc/src-size × 1000 |
+| 2 |  0 | witness | `(loop-bench-reader-forms)`         | 43_690 — top-level forms (could/couldn't correlate) |
+| 2 | −1 | coplay  | `(loop-bench-reader-mood)`          | 0 — flat mood trit |
+| 3 | +1 | play    | `(loop-bench-tight-ns)`             | 356 — ns/iter |
+| 3 |  0 | witness | `(loop-bench-tight-fuel)`           | 7 — fuel/iter (might dominate, might not) |
+| 3 | −1 | coplay  | `(loop-bench-tight-batch)`          | 1 — bench batch count |
+
+The play skill is the embarrassment, in literal form — call it from the
+REPL, see the offending number. The witness skill is the quiet
+correlate: it could implicate a cause or be noise; reading it tells you
+where to sample next. The coplay skill is decorative payload; it
+balances the trit budget without contributing signal, which is the
+point — the GF(3) law forces every honest probe to come bundled with
+its non-probe shadow.
+
+The values are static today (captured from the run above). Future
+iterations swap them for live calls into `bench/bench_util.zig`'s
+harness via the same Skill records — interface stable, body changes.
+That is the §6.1 promise paying off: surface stays put while the
+implementation accretes.
