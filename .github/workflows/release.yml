@@ -1,0 +1,49 @@
+name: release
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_suffix: linux-x86_64
+          - os: macos-latest
+            artifact_suffix: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone zig-syrup sibling
+        run: git clone --depth 1 https://github.com/plurigrid/zig-syrup.git ../zig-syrup
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: zig version
+      - run: zig fmt --check .
+      - run: zig build -Doptimize=ReleaseSafe
+      - run: zig build test --summary all
+      - name: Stage release artifacts
+        run: |
+          mkdir -p release
+          cp zig-out/bin/nanoclj            release/nanoclj-${{ matrix.artifact_suffix }}
+          cp zig-out/bin/nanoclj-mcp        release/nanoclj-mcp-${{ matrix.artifact_suffix }}
+          cp zig-out/bin/gorj-mcp           release/gorj-mcp-${{ matrix.artifact_suffix }}
+          cp zig-out/bin/nanoclj-strip      release/nanoclj-strip-${{ matrix.artifact_suffix }}
+          cp zig-out/bin/nanoclj.wasm       release/nanoclj-${{ matrix.artifact_suffix }}.wasm || true
+      - name: Compute sha256
+        run: |
+          cd release
+          shasum -a 256 * > SHA256SUMS-${{ matrix.artifact_suffix }}
+          cat SHA256SUMS-${{ matrix.artifact_suffix }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*
