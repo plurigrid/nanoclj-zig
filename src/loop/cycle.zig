@@ -25,6 +25,7 @@ const eval_lib = @import("eval.zig");
 const experiment_lib = @import("experiment.zig");
 const feedback_lib = @import("feedback.zig");
 const agent_lib = @import("agent.zig");
+const gradient_lib = @import("gradient.zig");
 
 const Verdict = eval_lib.Verdict;
 const Experiment = experiment_lib.Experiment;
@@ -51,9 +52,12 @@ pub const Step = union(enum) {
     /// Reproduces today's cycleUntilMulti / cycleUntilFixedPoint shape.
     revise: ReviseSpec,
 
-    /// Reserved: gradient descent on agent integer states. Today's
-    /// cycleByGradient owns this; the combinator returns NotImplemented
-    /// until that function is folded in.
+    /// Finite-difference gradient descent on agent integer states.
+    /// Computes ∂pass_rate/∂state for each named agent (1-sided δ=+1
+    /// perturbation, see gradient.zig:traceGradient), then applies
+    /// `state += round(learning_rate * partial)` to each. If
+    /// `norm_tol > 0`, the cycle halts when the L1 gradient norm
+    /// drops below `norm_tol` (analog of `cycleByGradient`'s tol gate).
     gradient: GradientSpec,
 
     /// Caller-supplied step closure. Used by curricula that mutate state
@@ -79,6 +83,9 @@ pub const Step = union(enum) {
     pub const GradientSpec = struct {
         target_names: []const []const u8,
         learning_rate: f32,
+        /// If > 0, the cycle halts when the L1 gradient norm falls
+        /// below this tolerance. Set to 0.0 (default) to disable.
+        norm_tol: f32 = 0.0,
     };
 
     pub const CustomSpec = struct {
@@ -192,7 +199,13 @@ pub fn cycle(
                         break;
                     }
                 },
-                .gradient => return error.NotImplemented,
+                .gradient => |spec| {
+                    const reached = applyGradient(allocator, experiment, spec) catch |e| return mapErr(e);
+                    if (reached) {
+                        stopped = true;
+                        break;
+                    }
+                },
                 .custom => |spec| {
                     const last_idx = reports.items.len - 1;
                     spec.body(experiment, &reports.items[last_idx]) catch return error.CycleFailed;
@@ -211,6 +224,47 @@ pub fn cycle(
         .reports = try reports.toOwnedSlice(allocator),
         .stopped_on_predicate = stopped,
     };
+}
+
+/// Step.gradient body: trace the gradient at the current point, halt
+/// if norm < tol, otherwise apply the descent step (state +=
+/// round(lr * partial)) to each named target. Mirrors gradient.zig's
+/// cycleByGradient inner loop. Returns true iff the gradient norm fell
+/// below `spec.norm_tol` (cycle should halt).
+fn applyGradient(
+    allocator: std.mem.Allocator,
+    experiment: *Experiment,
+    spec: Step.GradientSpec,
+) !bool {
+    const grads = try gradient_lib.traceGradient(
+        allocator,
+        experiment,
+        spec.target_names,
+    );
+    defer allocator.free(grads);
+
+    // L1 norm — the magnitude signal for the tolerance gate.
+    var l1: f32 = 0;
+    for (grads) |g| l1 += @abs(g.partial);
+    if (spec.norm_tol > 0 and l1 < spec.norm_tol) return true;
+
+    for (grads) |g| {
+        const a = experiment.topology.getAgent(g.agent_name) orelse return error.AgentNotFound;
+        const cur: i48 = if (a.state) |s| s.asInt() else 0;
+        const step = @as(i48, @intFromFloat(@round(spec.learning_rate * g.partial)));
+        // Always make progress in the right direction even when
+        // rounding kills the step (matches gradient.zig:cycleByGradient).
+        const eff_step: i48 = if (step != 0)
+            step
+        else if (g.partial > 0)
+            1
+        else if (g.partial < 0)
+            -1
+        else
+            0;
+        a.state = Value.makeInt(cur + eff_step);
+    }
+    return false;
 }
 
 /// Snapshot every agent's `state` field. Caller frees the slice.
@@ -452,29 +506,75 @@ test "cycle frontier > 1 is not implemented yet" {
     );
 }
 
-test "cycle gradient step is not implemented yet" {
+test "cycle .gradient descends toward all-pass on a winnable problem" {
     var topo = topology_lib.Topology.init(std.testing.allocator);
     defer topo.deinit();
     var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
     defer trace_store.deinit();
     _ = try topo.newAgent("inc", biasedIncBody);
+
     var ds = dataset_lib.Dataset.init(std.testing.allocator, "g");
     defer ds.deinit();
+    try ds.addExample(Value.makeInt(-3), null, "");
+    try ds.addExample(Value.makeInt(-1), null, "");
     try ds.addExample(Value.makeInt(0), null, "");
+
     const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
     var exp = Experiment.init(std.testing.allocator, "g", &topo, &trace_store, &ds, &evs, "inc");
     const names = [_][]const u8{"inc"};
-    try std.testing.expectError(
-        CycleError.NotImplemented,
-        cycle(
-            std.testing.allocator,
-            &exp,
-            .{ .gradient = .{ .target_names = &names, .learning_rate = 1.0 } },
-            .{ .iters = 3 },
-            1,
-            5,
-        ),
+
+    var traj = try cycle(
+        std.testing.allocator,
+        &exp,
+        .{ .gradient = .{
+            .target_names = &names,
+            .learning_rate = 5.0,
+            .norm_tol = 0.01,
+        } },
+        .{ .iters = 30 },
+        1,
+        30,
     );
+    defer traj.deinit();
+    // Should converge to all-pass (or at least mostly-pass) — any of the
+    // three inputs that flipped to positive counts as gradient progress.
+    try std.testing.expect(traj.passRate() > 0.0);
+}
+
+test "cycle .gradient halts via norm_tol when gradient is flat" {
+    var topo = topology_lib.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("inc", biasedIncBody);
+    // Seed the agent at +100 so all inputs already pass at iter 0;
+    // perturbing state +1 also passes → ∂pass/∂state = 0 everywhere.
+    topo.nodes.items[0].agent.state = Value.makeInt(100);
+
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "flat");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(0), null, "");
+
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
+    var exp = Experiment.init(std.testing.allocator, "flat", &topo, &trace_store, &ds, &evs, "inc");
+    const names = [_][]const u8{"inc"};
+
+    var traj = try cycle(
+        std.testing.allocator,
+        &exp,
+        .{ .gradient = .{
+            .target_names = &names,
+            .learning_rate = 1.0,
+            .norm_tol = 0.01,
+        } },
+        .{ .iters = 20 },
+        1,
+        20,
+    );
+    defer traj.deinit();
+    // Should halt early via norm_tol, not run the full 20 iters.
+    try std.testing.expect(traj.stopped_on_predicate);
+    try std.testing.expect(traj.iterations < 20);
 }
 
 // ─────────────────────────────────────────────────────────────────────
