@@ -15,6 +15,24 @@ const Value = value.Value;
 const GC = @import("../gc.zig").GC;
 const Env = @import("../env.zig").Env;
 const Resources = @import("../transitivity.zig").Resources;
+const skill = @import("skill.zig");
+const Skill = skill.Skill;
+
+/// Skills exposed to the nanoclj REPL by this submodule.
+/// Add a new bridge: declare its `pub fn ...Fn(...)` above and append a
+/// `Skill{...}` here. No edit to `core.zig` required.
+pub const skills = [_]Skill{
+    .{
+        .name = "loop-version",
+        .doc = "(loop-version) — return the agent-o-nanoclj API generation symbol",
+        .body = loopVersionFn,
+    },
+    .{
+        .name = "loop-test-count",
+        .doc = "(loop-test-count) — return count of loop unit tests in this build",
+        .body = loopTestCountFn,
+    },
+};
 
 /// (loop-version) — returns the loop API generation as a symbol.
 /// Bumped when the wire-level format of any persisted log changes.

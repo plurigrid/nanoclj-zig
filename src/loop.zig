@@ -30,6 +30,16 @@ pub const action = @import("loop/action.zig");
 pub const telemetry = @import("loop/telemetry.zig");
 pub const checkpoint = @import("loop/checkpoint.zig");
 pub const gradient = @import("loop/gradient.zig");
+pub const skill = @import("loop/skill.zig");
+pub const builtins = @import("loop/builtins.zig");
+
+/// Skill registry — SDF-style extension surface.
+/// Extending: add to a submodule's `skills` slice; this fold picks it up.
+pub const Skill = skill.Skill;
+pub const SkillFn = skill.SkillFn;
+pub const skillCombine = skill.combine;
+pub const skillLookup = skill.lookup;
+pub const skills: []const Skill = &builtins.skills; // future: ++ gradient.skills ++ ...
 
 /// Rung 1: Agent primitive.
 pub const Agent = agent.Agent;
@@ -125,5 +135,7 @@ test {
     _ = telemetry;
     _ = checkpoint;
     _ = gradient;
+    _ = skill;
+    _ = builtins;
     _ = @import("loop/world_test.zig");
 }

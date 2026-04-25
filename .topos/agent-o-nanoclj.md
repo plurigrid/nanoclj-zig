@@ -150,3 +150,112 @@ The Clojure-equivalent before-picture (reference only):
 ```
 
 That's a working agent-evaluation harness entirely on nanoclj-zig primitives.
+
+---
+
+## 6. Permanent extension via SDF principles
+
+The loop core is structured for accretion, not modification. Three SDF
+moves anchor this — one shipped, two staged.
+
+### 6.1 Skill — generic dispatch on Clojure-callable name (SHIPPED)
+
+`src/loop/skill.zig` defines:
+
+```zig
+pub const Skill = struct {
+    name: []const u8,
+    doc:  []const u8,
+    body: SkillFn,   // *const fn ([]Value, *GC, *Env, *Resources) anyerror!Value
+};
+pub fn combine(comptime a: []const Skill, comptime b: []const Skill) []const Skill;
+pub fn lookup (skills: []const Skill, name: []const u8) ?*const Skill;
+```
+
+Each `loop/*.zig` submodule declares `pub const skills: []const Skill = &.{...}`.
+The umbrella `loop.zig` folds them under `skill.combine`. `core.zig` does
+**one** `inline for (loop.skills) |s| { … }` block — adding a new
+Clojure-callable is a one-edit affair (touch only the relevant submodule).
+
+This is the SDF move ("predicate-dispatched generics with attached doc",
+*Software Design for Flexibility* ch. 3): handlers are first-class data,
+combined under a monoid, looked up by predicate.
+
+The categorical anchor is `goblins-adapter/propagator-nash.scm:140`'s
+`merge-with-law`: a layered handler keyed by a discriminator. Same shape.
+
+**Adding a skill recipe:**
+
+```zig
+// in src/loop/<your-rung>.zig
+const skill_lib = @import("skill.zig");
+const Skill = skill_lib.Skill;
+
+pub fn myThingFn(args: []Value, gc: *GC, env: *Env, res: *Resources) anyerror!Value {
+    // …
+}
+
+pub const skills = [_]Skill{
+    .{ .name = "loop-my-thing",
+       .doc  = "(loop-my-thing arg1 arg2) — short docstring",
+       .body = myThingFn },
+};
+```
+
+Then in `src/loop.zig`:
+
+```zig
+pub const skills: []const Skill = skill.combine(
+    &builtins.skills,
+    &@import("loop/your-rung.zig").skills,
+);
+```
+
+That is the entire commit. No edit to `core.zig`. No edit to anything else.
+
+### 6.2 Verdict — tagged-union polymorphism (STAGED)
+
+Today `Verdict { evaluator_name, score: f32 }` is monomorphic. The three
+self-play curricula (MAGICORE / ProTeGi / Evaluator-Optimizer) need:
+
+- `Verdict.scalar { score: f32 }` — current shape (Rung 4)
+- `Verdict.trit { trit: i2 }` — GF(3) gate (Rung 5)
+- `Verdict.vector { steps: []f32 }` — MAGICORE PRM (Rung 6)
+- `Verdict.record { fields: StringHashMap(f32), feedback: []const u8 }` — Evaluator-Optimizer (Rung 5)
+- `Verdict.semantic { gradient: []const u8 }` — ProTeGi (Rung 8)
+
+Refactor target: convert `Verdict` to a `union(enum)` and add `pass(v,
+threshold) bool` that dispatches on tag. Existing call sites unwrap
+`.scalar` once; new call sites pattern-match. The default-pass predicate
+in `experiment.zig` becomes a generic dispatch instead of a fixed-shape
+field access. Tests survive verbatim (Rung 4's scalar verdict is still
+the default).
+
+### 6.3 cycle — combinator unification of cycleUntil* (STAGED)
+
+`cycleUntil`, `cycleUntilMulti`, `cycleUntilFixedPoint`, and
+`cycleByGradient` all inhabit the same shape:
+
+```
+cycle :: Step × Stop × Frontier → Trajectory
+```
+
+- `Step`: `Topology → Topology` (pure: revise via verdicts; gradient: descend)
+- `Stop`: `Trajectory → bool` (count / fixed-point / gradient norm / threshold)
+- `Frontier`: width 1 (current cycle*) or width N (beam-search, ProTeGi)
+
+A single `cycle` combinator with these three orthogonal axes makes
+beam-search a one-line specialization rather than a new rung. The four
+existing functions become `cycle(.classic, …)` / `cycle(.gradient, …)` etc.
+
+This is *Software Design for Flexibility*'s combinator-closure pattern
+(ch. 1 "Combinators"): a small set of orthogonal axes, closed under
+composition, expanding the surface by parameter rather than by function
+count.
+
+---
+
+The order of operations is therefore: **Verdict polymorphism (6.2)** →
+**cycle combinator (6.3)** → opens the door to MAGICORE/ProTeGi/
+beam-search as ≤30-line additions per curriculum (see § curricula in
+`.topos/agent-o-nanoclj-curricula.md` once landed).

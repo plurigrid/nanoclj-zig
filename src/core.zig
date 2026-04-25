@@ -56,7 +56,7 @@ const nrepl = @import("nrepl.zig");
 const plural = @import("plural.zig");
 const juvix_bridge = @import("juvix_bridge.zig");
 const refs_agents = @import("refs_agents.zig");
-const loop_builtins = @import("loop/builtins.zig");
+const loop = @import("loop.zig");
 
 fn getSeedMs() i64 {
     if (is_wasm) {
@@ -344,11 +344,10 @@ pub fn initCore(env: *Env, gc: *GC) !void {
                                                           .{ "fuel", &fuelFn },
         .{ "charge", &chargeFn },                                                     .{ "depth", &depthFn },
         .{ "max-depth", &maxDepthFn },
-        // agent-o-nanoclj — Clojure-callable bridges into the loop core.
-                                                       .{ "loop-version", &loop_builtins.loopVersionFn },
-        .{ "loop-test-count", &loop_builtins.loopTestCountFn },
+        // (agent-o-nanoclj loop skills are registered below via the
+        //  Skill registry — `loop.skills` is the extension surface.)
         // IO
-                              .{ "slurp", &slurpFn },
+                                                       .{ "slurp", &slurpFn },
         .{ "spit", &spitFn },                                                         .{ "read-line", &readLineFn },
         .{ "shell", &shellFn },                                                       .{ "sh", &shellFn },
         // Disk I/O (Zig-unique: positional, fsync-exposed, crash-safe atomic-spit)
@@ -565,6 +564,17 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // Put a keyword as sentinel value for the builtin name
         const id = try gc.internString(b[0]);
         try env.set(b[0], Value.makeKeyword(id));
+        try env.setById(id, Value.makeKeyword(id));
+    }
+
+    // ── Loop / agent-o-nanoclj Skill registry ─────────────────────────
+    // SDF-style extension surface. Each `loop/*.zig` submodule contributes
+    // a `pub const skills: []const Skill` slice; `loop.skills` is the fold.
+    // Adding a Clojure-callable is one edit to a submodule — no edit here.
+    inline for (loop.skills) |s| {
+        try builtin_table.put(s.name, s.body);
+        const id = try gc.internString(s.name);
+        try env.set(s.name, Value.makeKeyword(id));
         try env.setById(id, Value.makeKeyword(id));
     }
 
