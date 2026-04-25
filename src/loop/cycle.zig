@@ -60,6 +60,18 @@ pub const Step = union(enum) {
     /// in non-revise / non-gradient ways (e.g., ProTeGi's `mutate-prompt`).
     custom: CustomSpec,
 
+    /// 1-step beam search: each iteration, propose `peers.len` candidate
+    /// state mutations, snapshot agent state, evaluate each peer, keep
+    /// the highest-scoring peer's mutation. Reproduces ProTeGi-style
+    /// expand-and-prune at frontier-width = `peers.len`.
+    ///
+    /// This is a *single*-step beam (not the full ProTeGi beam set).
+    /// True ProTeGi maintains a beam ACROSS iterations, expanding each
+    /// member and pruning to top-b. That requires N parallel topology
+    /// copies — heavier; deferred. peer_pool here gives the principle
+    /// at frontier=N without topology forking.
+    peer_pool: PeerPoolSpec,
+
     pub const ReviseSpec = struct {
         targets: []const TargetRevision,
     };
@@ -71,6 +83,18 @@ pub const Step = union(enum) {
 
     pub const CustomSpec = struct {
         body: *const fn (*Experiment, *const Report) anyerror!void,
+    };
+
+    /// Function that mutates the experiment's topology in some way
+    /// (the "peer's" candidate move).
+    pub const PeerFn = *const fn (*Experiment) anyerror!void;
+
+    /// Optional scorer; default `report.passRate()` if null.
+    pub const PeerScoreFn = *const fn (*const Report) f32;
+
+    pub const PeerPoolSpec = struct {
+        peers: []const PeerFn,
+        score: ?PeerScoreFn = null,
     };
 };
 
@@ -173,6 +197,10 @@ pub fn cycle(
                     const last_idx = reports.items.len - 1;
                     spec.body(experiment, &reports.items[last_idx]) catch return error.CycleFailed;
                 },
+                .peer_pool => |spec| {
+                    if (spec.peers.len == 0) return error.CycleFailed;
+                    try applyPeerPool(allocator, experiment, spec);
+                },
             }
         }
     }
@@ -183,6 +211,53 @@ pub fn cycle(
         .reports = try reports.toOwnedSlice(allocator),
         .stopped_on_predicate = stopped,
     };
+}
+
+/// Snapshot every agent's `state` field. Caller frees the slice.
+fn captureStates(allocator: std.mem.Allocator, experiment: *Experiment) ![]?Value {
+    const nodes = experiment.topology.nodes.items;
+    const out = try allocator.alloc(?Value, nodes.len);
+    for (nodes, 0..) |node, i| out[i] = node.agent.state;
+    return out;
+}
+
+/// Restore each agent's `state` from the snapshot. Length must match.
+fn restoreStates(experiment: *Experiment, snapshot: []const ?Value) void {
+    const nodes = experiment.topology.nodes.items;
+    for (nodes, 0..) |*node, i| {
+        if (i < snapshot.len) node.agent.state = snapshot[i];
+    }
+}
+
+/// Step.peer_pool body: snapshot, try each peer, score, restore best.
+/// On exit, the topology has the winning peer's mutation applied;
+/// the next iteration's `experiment.run()` reflects it.
+fn applyPeerPool(
+    allocator: std.mem.Allocator,
+    experiment: *Experiment,
+    spec: Step.PeerPoolSpec,
+) !void {
+    const snapshot = try captureStates(allocator, experiment);
+    defer allocator.free(snapshot);
+
+    var best_score: f32 = -std.math.inf(f32);
+    var best_idx: usize = 0;
+
+    for (spec.peers, 0..) |peer, idx| {
+        restoreStates(experiment, snapshot);
+        peer(experiment) catch return error.CycleFailed;
+        var trial = experiment.run() catch |e| return mapErr(e);
+        defer trial.deinit();
+        const s = if (spec.score) |f| f(&trial) else trial.passRate();
+        if (s > best_score) {
+            best_score = s;
+            best_idx = idx;
+        }
+    }
+
+    // Commit the winner.
+    restoreStates(experiment, snapshot);
+    spec.peers[best_idx](experiment) catch return error.CycleFailed;
 }
 
 fn applyRevise(
@@ -398,6 +473,96 @@ test "cycle gradient step is not implemented yet" {
             .{ .iters = 3 },
             1,
             5,
+        ),
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Step.peer_pool — 1-step beam search
+// ─────────────────────────────────────────────────────────────────────
+
+fn peerPlus1(experiment: *Experiment) anyerror!void {
+    const a = experiment.topology.getAgent("inc") orelse return;
+    const cur: i48 = if (a.state) |s| s.asInt() else 0;
+    a.state = Value.makeInt(cur + 1);
+}
+
+fn peerPlus5(experiment: *Experiment) anyerror!void {
+    const a = experiment.topology.getAgent("inc") orelse return;
+    const cur: i48 = if (a.state) |s| s.asInt() else 0;
+    a.state = Value.makeInt(cur + 5);
+}
+
+fn peerMinus1(experiment: *Experiment) anyerror!void {
+    const a = experiment.topology.getAgent("inc") orelse return;
+    const cur: i48 = if (a.state) |s| s.asInt() else 0;
+    a.state = Value.makeInt(cur - 1);
+}
+
+test "Step.peer_pool: best-of-3 picks the +5 peer" {
+    var topo = topology_lib.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("inc", biasedIncBody);
+
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "pp");
+    defer ds.deinit();
+    // Inputs that fail at low bias and pass at high bias.
+    try ds.addExample(Value.makeInt(-3), null, "");
+    try ds.addExample(Value.makeInt(-2), null, "");
+    try ds.addExample(Value.makeInt(-1), null, "");
+
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
+    var exp = Experiment.init(std.testing.allocator, "pp", &topo, &trace_store, &ds, &evs, "inc");
+
+    const peers = [_]Step.PeerFn{ peerPlus1, peerPlus5, peerMinus1 };
+
+    var traj = try cycle(
+        std.testing.allocator,
+        &exp,
+        .{ .peer_pool = .{ .peers = &peers } },
+        .{ .iters = 3 },
+        1,
+        3,
+    );
+    defer traj.deinit();
+
+    // iter 0: state=0; +1 → 33%, +5 → 100%, -1 → 0%. +5 wins → state=5.
+    // iter 1: state=5; all three peers reach 100% (saturated). Strict >
+    //         comparison preserves the FIRST peer on tie → +1 wins.
+    //         state = 5 + 1 = 6.
+    // iter 2: state=6, run experiment → 100%, no further step.
+    // Final: state=6, pass_rate=1.0. The 1-step beam can't keep
+    // optimizing past saturation without a tiebreaker scorer.
+    try std.testing.expectEqual(@as(u32, 3), traj.iterations);
+    const final_state = topo.nodes.items[0].agent.state.?.asInt();
+    try std.testing.expectEqual(@as(i48, 6), final_state);
+    try std.testing.expectEqual(@as(f32, 1.0), traj.passRate());
+}
+
+test "Step.peer_pool: empty peer slice errors CycleFailed" {
+    var topo = topology_lib.Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("inc", biasedIncBody);
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "empty");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(0), null, "");
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("s", identityScorer)};
+    var exp = Experiment.init(std.testing.allocator, "empty", &topo, &trace_store, &ds, &evs, "inc");
+
+    const empty_peers: []const Step.PeerFn = &.{};
+    try std.testing.expectError(
+        CycleError.CycleFailed,
+        cycle(
+            std.testing.allocator,
+            &exp,
+            .{ .peer_pool = .{ .peers = empty_peers } },
+            .{ .iters = 2 },
+            1,
+            2,
         ),
     );
 }
