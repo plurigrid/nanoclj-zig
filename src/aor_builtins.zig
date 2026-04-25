@@ -39,9 +39,9 @@ pub fn aorTestCountFn(args: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Va
 // ─────────────────────────────────────────────────────────────────────────
 
 test "aorVersionFn rejects extra args" {
-    var gc = try GC.init(std.testing.allocator);
+    var gc = GC.init(std.testing.allocator);
     defer gc.deinit();
-    var env = Env.init(std.testing.allocator, &gc);
+    var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
     var res = Resources.unmetered();
     var args = [_]Value{Value.makeInt(0)};
@@ -49,9 +49,9 @@ test "aorVersionFn rejects extra args" {
 }
 
 test "aorTestCountFn returns the known count" {
-    var gc = try GC.init(std.testing.allocator);
+    var gc = GC.init(std.testing.allocator);
     defer gc.deinit();
-    var env = Env.init(std.testing.allocator, &gc);
+    var env = Env.init(std.testing.allocator, null);
     defer env.deinit();
     var res = Resources.unmetered();
     const out = try aorTestCountFn(&.{}, &gc, &env, &res);
