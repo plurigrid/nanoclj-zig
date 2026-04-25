@@ -348,7 +348,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
                                                        .{ "loop-version", &loop_builtins.loopVersionFn },
         .{ "loop-test-count", &loop_builtins.loopTestCountFn },
         // IO
-                                 .{ "slurp", &slurpFn },
+                              .{ "slurp", &slurpFn },
         .{ "spit", &spitFn },                                                         .{ "read-line", &readLineFn },
         .{ "shell", &shellFn },                                                       .{ "sh", &shellFn },
         // Disk I/O (Zig-unique: positional, fsync-exposed, crash-safe atomic-spit)
