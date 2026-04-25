@@ -30,6 +30,7 @@ pub const action = @import("loop/action.zig");
 pub const telemetry = @import("loop/telemetry.zig");
 pub const checkpoint = @import("loop/checkpoint.zig");
 pub const gradient = @import("loop/gradient.zig");
+pub const cycle_lib = @import("loop/cycle.zig");
 pub const skill = @import("loop/skill.zig");
 pub const builtins = @import("loop/builtins.zig");
 pub const bench_skills = @import("loop/bench_skills.zig");
@@ -126,6 +127,13 @@ pub const GradientError = gradient.GradientError;
 pub const traceGradient = gradient.traceGradient;
 pub const cycleByGradient = gradient.cycleByGradient;
 
+/// Unified cycle combinator (§6.3) — Step × Stop × Frontier → Trajectory.
+pub const Step = cycle_lib.Step;
+pub const Stop = cycle_lib.Stop;
+pub const Trajectory = cycle_lib.Trajectory;
+pub const CycleError = cycle_lib.CycleError;
+pub const cycle = cycle_lib.cycle;
+
 test {
     _ = agent;
     _ = trace;
@@ -139,6 +147,7 @@ test {
     _ = telemetry;
     _ = checkpoint;
     _ = gradient;
+    _ = cycle_lib;
     _ = skill;
     _ = builtins;
     _ = bench_skills;

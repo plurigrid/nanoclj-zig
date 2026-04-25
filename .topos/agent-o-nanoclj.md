@@ -244,27 +244,59 @@ through `Verdict.makeScalar(name, score)` for the legacy shape. Seven
 new tests pin the contract on each variant; `experiment.zig`,
 `feedback.zig`, `telemetry.zig`, `world_test.zig` all migrated cleanly.
 
-### 6.3 cycle — combinator unification of cycleUntil* (STAGED)
+### 6.3 cycle — combinator unification of cycleUntil* (PARTIALLY SHIPPED)
 
-`cycleUntil`, `cycleUntilMulti`, `cycleUntilFixedPoint`, and
-`cycleByGradient` all inhabit the same shape:
+`src/loop/cycle.zig` lands the unified entry point as an additive
+overlay; existing `cycleUntil*` and `cycleByGradient` keep their
+signatures and tests, and will reduce to 3-line wrappers as the
+combinator absorbs them.
 
+```zig
+pub fn cycle(
+    allocator,
+    experiment: *Experiment,
+    step: Step,
+    stop: Stop,
+    frontier: u32,    // 1 today; ≥2 reserved for beam-search/ProTeGi
+    max_iters: u32,
+) CycleError!Trajectory;
 ```
-cycle :: Step × Stop × Frontier → Trajectory
+
+Two orthogonal union axes:
+
+```zig
+Step = union(enum) {
+    revise:   ReviseSpec,    // SHIPPED — TargetRevision[] + ReviseFn each
+    gradient: GradientSpec,  // declared; body returns NotImplemented
+    custom:   CustomSpec,    // SHIPPED — caller-supplied closure
+};
+Stop = union(enum) {
+    iters:       u32,        // SHIPPED — exact count
+    fixed_point,             // SHIPPED — halt when no revise changes state
+    pass_rate:   f32,        // SHIPPED — halt at threshold
+    custom:      StopFn,     // SHIPPED — caller-supplied predicate
+};
 ```
 
-- `Step`: `Topology → Topology` (pure: revise via verdicts; gradient: descend)
-- `Stop`: `Trajectory → bool` (count / fixed-point / gradient norm / threshold)
-- `Frontier`: width 1 (current cycle*) or width N (beam-search, ProTeGi)
+`Trajectory` owns its `Reports[]` plus a `stopped_on_predicate` flag
+(true iff the stop axis fired vs running out of `max_iters`).
 
-A single `cycle` combinator with these three orthogonal axes makes
-beam-search a one-line specialization rather than a new rung. The four
-existing functions become `cycle(.classic, …)` / `cycle(.gradient, …)` etc.
+Five tests pin the contract: `.iters` runs exactly N; `.pass_rate`
+halts at threshold; `.fixed_point` halts on no-op revise;
+`frontier > 1` errors `NotImplemented`; `Step.gradient` errors
+`NotImplemented` (until cycleByGradient is folded in).
 
 This is *Software Design for Flexibility*'s combinator-closure pattern
 (ch. 1 "Combinators"): a small set of orthogonal axes, closed under
 composition, expanding the surface by parameter rather than by function
 count.
+
+**Remaining work** (each is a small, isolated edit):
+
+1. Fold `cycleByGradient` into `Step.gradient` (≈40 LOC).
+2. Implement `frontier ≥ 2` (beam-search / ProTeGi peer-pool).
+3. Reduce existing `cycleUntil` / `cycleUntilMulti` / `cycleUntilFixedPoint`
+   to wrappers that just construct (Step, Stop) and call `cycle`.
 
 ---
 
