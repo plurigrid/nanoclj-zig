@@ -522,6 +522,170 @@ test "Evaluator-Optimizer: overshoot at score=1.05 triggers 'lower' feedback" {
     try std.testing.expect(final >= 95 and final < 105);
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// ProTeGi-coplay curriculum — Verdict.semantic exercised under
+// Step.peer_pool (1-step beam search).
+//
+// Reference: Pryzant et al. 2023 (arXiv:2305.03495), "Automatic Prompt
+// Optimization with 'Gradient Descent' and Beam Search". The original
+// algorithm maintains a beam of prompt candidates and at each iteration
+// expands each with LLM-generated textual gradients, then bandit-selects
+// top-b. Here we encode the SHAPE without an LLM:
+//
+//   - Each peer is a candidate "edit" with a tagged semantic gradient
+//     (string describing the mutation's intent).
+//   - Each peer constructs a Verdict.semantic { gradient: <string> }
+//     to prove the variant is wire-compatible with curriculum code,
+//     even though peer_pool's selection uses the scalar pass_rate.
+//   - peer_pool runs at frontier=peers.len; the highest-pass-rate peer
+//     wins each iteration.
+//
+// What's missing vs full ProTeGi:
+//   - No LLM-generated gradients (peers are hand-coded mutations).
+//   - No persistent beam SET across iterations — each iter is a 1-step
+//     beam (the current peer_pool semantics in cycle.zig).
+//   - No bandit selection over candidates — strict argmax.
+// All three would land if/when an LLM bridge appears in nanoclj-zig
+// and cycle.zig grows persistent beam state. The curriculum here
+// demonstrates the variant + step combo at fixed shape.
+// ─────────────────────────────────────────────────────────────────────
+
+const ProtegiPeer = struct {
+    gradient: []const u8,
+    delta: i48,
+};
+
+/// A peer's "semantic gradient" + the state delta it represents.
+/// Defined as constants so each peer body can refer to its own
+/// gradient text without runtime allocation.
+const protegi_peer_inc_lo = ProtegiPeer{ .gradient = "raise low-order quality", .delta = 1 };
+const protegi_peer_inc_hi = ProtegiPeer{ .gradient = "raise high-order quality", .delta = 10 };
+const protegi_peer_dec_lo = ProtegiPeer{ .gradient = "trim low-order verbosity", .delta = -1 };
+const protegi_peer_overshoot = ProtegiPeer{ .gradient = "double down on quality", .delta = 25 };
+
+/// Construct the peer's Verdict.semantic and apply its state delta.
+/// The verdict is constructed for protocol-validation (it appears in
+/// real curriculum code) — peer_pool's scorer doesn't read it; that
+/// role is reserved for a future Verdict.semantic-aware Evaluator.
+fn applyProtegiPeer(experiment: *Experiment, peer: ProtegiPeer) !void {
+    const optimizer = experiment.topology.getAgent("optimizer") orelse return;
+
+    const verdict = eval_lib.Verdict{ .semantic = .{
+        .evaluator_name = "protegi-grad",
+        .gradient = peer.gradient,
+    } };
+    // Validate that the variant's dispatch methods work on this construction.
+    if (!std.mem.eql(u8, verdict.name(), "protegi-grad")) return error.Invoke;
+    // Verdict.semantic.passes() is unconditional true — the gradient
+    // string itself is the revision direction; no scalar threshold.
+    if (!verdict.passes(99.0)) return error.Invoke;
+
+    const cur: i48 = if (optimizer.state) |s| s.asInt() else 0;
+    optimizer.state = Value.makeInt(cur + peer.delta);
+}
+
+fn protegiPeerIncLo(experiment: *Experiment) anyerror!void {
+    return applyProtegiPeer(experiment, protegi_peer_inc_lo);
+}
+fn protegiPeerIncHi(experiment: *Experiment) anyerror!void {
+    return applyProtegiPeer(experiment, protegi_peer_inc_hi);
+}
+fn protegiPeerDecLo(experiment: *Experiment) anyerror!void {
+    return applyProtegiPeer(experiment, protegi_peer_dec_lo);
+}
+fn protegiPeerOvershoot(experiment: *Experiment) anyerror!void {
+    return applyProtegiPeer(experiment, protegi_peer_overshoot);
+}
+
+test "Verdict.semantic: dispatch methods round-trip through curriculum constructors" {
+    const v = eval_lib.Verdict{ .semantic = .{
+        .evaluator_name = "protegi-grad",
+        .gradient = "raise high-order quality",
+    } };
+    try std.testing.expectEqualStrings("protegi-grad", v.name());
+    try std.testing.expectEqual(@as(f32, 0.0), v.primaryScore());
+    try std.testing.expect(v.passes(0.0));
+    try std.testing.expect(v.passes(99.0)); // semantic always passes
+}
+
+fn passAt10Scorer(v: Value) eval_lib.EvalError!f32 {
+    // Score = state - 10. Pass when state >= 11 (score > 0). Negative
+    // overshoot at state >> 10 still passes; the test below uses a
+    // pass_rate threshold to stop at the first peer that lands all
+    // examples positive.
+    return @as(f32, @floatFromInt(v.asInt())) - 10.0;
+}
+
+test "ProTeGi-coplay: peer_pool selects the smallest-delta peer that achieves 100% pass" {
+    var topo = Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+
+    _ = try topo.newAgent("optimizer", echoStateBody);
+    topo.nodes.items[0].agent.state = Value.makeInt(0); // bad seed
+
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "protegi");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(0), null, "");
+
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("scoreAt10", passAt10Scorer)};
+    var exp = Experiment.init(std.testing.allocator, "protegi", &topo, &trace_store, &ds, &evs, "optimizer");
+
+    const peers = [_]cycle_lib.Step.PeerFn{
+        protegiPeerIncLo, // +1
+        protegiPeerIncHi, // +10
+        protegiPeerDecLo, // -1
+        protegiPeerOvershoot, // +25
+    };
+
+    var traj = try cycle_lib.cycle(
+        std.testing.allocator,
+        &exp,
+        .{ .peer_pool = .{ .peers = &peers } },
+        .{ .iters = 3 },
+        1,
+        3,
+    );
+    defer traj.deinit();
+
+    // iter 0: state=0 (no pass). Peers try state=1, 10, -1, 25.
+    //   pass_rate at each: 1→fail, 10→fail (score=0, not >0), -1→fail,
+    //   25→pass(rate=1.0). Overshoot wins → state=25.
+    // iter 1: state=25. All four peers reach pass_rate=1.0; ties → first
+    //   peer (+1) wins → state=26.
+    // iter 2: state=26 (run, no further step).
+    try std.testing.expectEqual(@as(u32, 3), traj.iterations);
+    const final_state = topo.nodes.items[0].agent.state.?.asInt();
+    try std.testing.expectEqual(@as(i48, 26), final_state);
+    try std.testing.expectEqual(@as(f32, 1.0), traj.passRate());
+}
+
+test "ProTeGi-coplay: every peer body successfully constructs Verdict.semantic" {
+    var topo = Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("optimizer", echoStateBody);
+    topo.nodes.items[0].agent.state = Value.makeInt(0);
+
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "smoke");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(0), null, "");
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("ok", alwaysPositiveScorer)};
+    var exp = Experiment.init(std.testing.allocator, "smoke", &topo, &trace_store, &ds, &evs, "optimizer");
+
+    // Each peer body internally errors if the Verdict.semantic dispatch
+    // breaks. Calling them all proves the construction is sound.
+    try protegiPeerIncLo(&exp);
+    try protegiPeerIncHi(&exp);
+    try protegiPeerDecLo(&exp);
+    try protegiPeerOvershoot(&exp);
+
+    // Net effect: 0 +1 +10 -1 +25 = 35
+    try std.testing.expectEqual(@as(i48, 35), topo.nodes.items[0].agent.state.?.asInt());
+}
+
 test "Solo-MAGICORE: refiner is a no-op on already-perfect chain" {
     var topo = Topology.init(std.testing.allocator);
     defer topo.deinit();
