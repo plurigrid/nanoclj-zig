@@ -34,6 +34,7 @@ pub const cycle_lib = @import("loop/cycle.zig");
 pub const skill = @import("loop/skill.zig");
 pub const builtins = @import("loop/builtins.zig");
 pub const bench_skills = @import("loop/bench_skills.zig");
+pub const parallel_skills = @import("loop/parallel_skills.zig");
 
 /// Skill registry — SDF-style extension surface.
 /// Extending: add to a submodule's `skills` slice; this fold picks it up.
@@ -42,8 +43,8 @@ pub const SkillFn = skill.SkillFn;
 pub const skillCombine = skill.combine;
 pub const skillLookup = skill.lookup;
 pub const skills: []const Skill = skill.combine(
-    &builtins.skills,
-    &bench_skills.skills,
+    skill.combine(&builtins.skills, &bench_skills.skills),
+    &parallel_skills.skills,
 );
 
 /// Rung 1: Agent primitive.
@@ -151,5 +152,6 @@ test {
     _ = skill;
     _ = builtins;
     _ = bench_skills;
+    _ = parallel_skills;
     _ = @import("loop/world_test.zig");
 }
