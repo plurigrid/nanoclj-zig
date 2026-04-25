@@ -31,6 +31,7 @@ pub const telemetry = @import("loop/telemetry.zig");
 pub const checkpoint = @import("loop/checkpoint.zig");
 pub const gradient = @import("loop/gradient.zig");
 pub const cycle_lib = @import("loop/cycle.zig");
+pub const curricula = @import("loop/curricula.zig");
 pub const skill = @import("loop/skill.zig");
 pub const builtins = @import("loop/builtins.zig");
 pub const bench_skills = @import("loop/bench_skills.zig");
@@ -149,6 +150,7 @@ test {
     _ = checkpoint;
     _ = gradient;
     _ = cycle_lib;
+    _ = curricula;
     _ = skill;
     _ = builtins;
     _ = bench_skills;
