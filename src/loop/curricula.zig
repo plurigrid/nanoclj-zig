@@ -237,3 +237,178 @@ test "law-merged Nash: imbalanced (2,2,0) converges by nudging c twice" {
     try std.testing.expect(lawHolds(&trits));
     try std.testing.expectEqual(@as(i2, -1), stateToTrit(topo.nodes.items[2].agent.state));
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Solo-MAGICORE curriculum — Solver/Reviewer/Refiner triad with
+// step-wise PRM scoring via Verdict.vector.
+//
+// Reference: Sachin Kumar et al. 2024, "MAGICORE: Multi-Agent Iteration
+// for Coarse-to-fine Refinement". Three-agent feedback loop where:
+//   - Solver  produces a k-step reasoning chain
+//   - Reviewer scores each step (PRM = process reward model)
+//   - Refiner uses the per-step scores to decide which step to fix
+//
+// Concrete Zig encoding without an LLM:
+//   - "Chain" = an i48 state interpreted as a 5-digit decimal value
+//   - "PRM"   = digitwise scorer; each digit's score = digit / 9.0,
+//               so high digits (closer to 9) mean "high quality step"
+//   - "Refiner" = the Step.custom body that increments the
+//                 lowest-scoring digit's "place value" until the chain's
+//                 minimum digit clears the threshold
+//
+// The curriculum demonstrates Verdict.vector being constructed in
+// real curriculum code and dispatched through `primaryScore()` (which
+// projects the vector to its mean for legacy passes). The refiner
+// reads the raw vector to do step-wise repair, not just mean-based
+// gating — that's the whole point of MAGICORE over a scalar reward.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Decompose an i48 chain into 5 digits, MSB first. State outside
+/// [0, 99999] is clamped to [0, 99999].
+pub fn chainDigits(state: ?Value) [5]u8 {
+    const s_raw: i48 = if (state) |v| v.asInt() else 0;
+    var s: i48 = if (s_raw < 0) 0 else if (s_raw > 99999) 99999 else s_raw;
+    var out: [5]u8 = .{ 0, 0, 0, 0, 0 };
+    var i: usize = 5;
+    while (i > 0) {
+        i -= 1;
+        out[i] = @intCast(@mod(s, 10));
+        s = @divFloor(s, 10);
+    }
+    return out;
+}
+
+/// PRM (process reward model): each digit's reward = digit / 9.0 ∈ [0, 1].
+/// Returns a Verdict.vector whose `steps` borrow `out_buf` — caller owns
+/// the buffer and must keep it alive while the verdict is examined.
+pub fn digitwisePRM(state: ?Value, name: []const u8, out_buf: *[5]f32) eval_lib.Verdict {
+    const digits = chainDigits(state);
+    for (digits, 0..) |d, i| {
+        out_buf[i] = @as(f32, @floatFromInt(d)) / 9.0;
+    }
+    return .{ .vector = .{
+        .evaluator_name = name,
+        .steps = out_buf[0..],
+    } };
+}
+
+/// Refiner step: read the solver's current chain, score each digit
+/// via the PRM, find the worst-scoring digit, and bump that place's
+/// value by +1 in the i48 state. Stops being a no-op once every
+/// digit's score ≥ 7/9 ≈ 0.78 (i.e., every digit is ≥ 7).
+pub fn magicoreRefineStep(experiment: *Experiment, _: *const Report) anyerror!void {
+    const topo = experiment.topology;
+    const solver = topo.getAgent("solver") orelse return;
+
+    var scores: [5]f32 = undefined;
+    const verdict = digitwisePRM(solver.state, "prm", &scores);
+
+    // primaryScore() = mean of vector; cycle stop predicates can use it.
+    // Here we use the raw steps for the refiner decision.
+    const v = verdict.vector;
+    var worst_idx: usize = 0;
+    var worst_score: f32 = v.steps[0];
+    for (v.steps[1..], 1..) |s, i| {
+        if (s < worst_score) {
+            worst_score = s;
+            worst_idx = i;
+        }
+    }
+    if (worst_score >= 7.0 / 9.0) return; // already at fixed point
+
+    // Place value of digit at index worst_idx (MSB=0): 10^(4-worst_idx).
+    const place: i48 = std.math.pow(i48, 10, @intCast(4 - worst_idx));
+    const cur: i48 = if (solver.state) |s| s.asInt() else 0;
+    solver.state = Value.makeInt(cur + place);
+}
+
+test "chainDigits decomposes 12345 → [1,2,3,4,5]" {
+    const d = chainDigits(Value.makeInt(12345));
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4, 5 }, &d);
+}
+
+test "chainDigits clamps negatives to zero, large to 99999" {
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0 }, &chainDigits(Value.makeInt(-7)));
+    try std.testing.expectEqualSlices(u8, &.{ 9, 9, 9, 9, 9 }, &chainDigits(Value.makeInt(123456789)));
+}
+
+test "digitwisePRM yields Verdict.vector with per-digit reward" {
+    var buf: [5]f32 = undefined;
+    const v = digitwisePRM(Value.makeInt(99999), "prm", &buf);
+    try std.testing.expectEqualStrings("prm", v.name());
+    // primaryScore is mean-of-steps; 9/9 averaged = 1.0
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), v.primaryScore(), 1e-6);
+    // mean of zero digits = 0
+    var buf2: [5]f32 = undefined;
+    const v2 = digitwisePRM(Value.makeInt(0), "prm", &buf2);
+    try std.testing.expectEqual(@as(f32, 0.0), v2.primaryScore());
+}
+
+test "Solo-MAGICORE: refiner converges to all-7+ chain" {
+    var topo = Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+
+    _ = try topo.newAgent("solver", echoStateBody);
+    _ = try topo.newAgent("reviewer", echoStateBody);
+    _ = try topo.newAgent("refiner", echoStateBody);
+    try topo.connect("solver", "reviewer");
+    try topo.connect("reviewer", "refiner");
+
+    // Seed: 11111 → digits [1,1,1,1,1], all scores 1/9. Worst=any; refiner
+    // bumps a place each iter. Needs ~5 nudges per place × (7-1) bump =
+    // 30+ iters. Give it 60 to converge.
+    topo.nodes.items[0].agent.state = Value.makeInt(11111);
+
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "magicore");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(0), null, "");
+
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("ok", alwaysPositiveScorer)};
+    var exp = Experiment.init(std.testing.allocator, "magicore", &topo, &trace_store, &ds, &evs, "solver");
+
+    var traj = try cycle_lib.cycle(
+        std.testing.allocator,
+        &exp,
+        .{ .custom = .{ .body = magicoreRefineStep } },
+        .{ .iters = 60 },
+        1,
+        60,
+    );
+    defer traj.deinit();
+
+    // After convergence, every digit of solver.state should be ≥ 7.
+    const final_state = topo.nodes.items[0].agent.state.?;
+    const digits = chainDigits(final_state);
+    for (digits) |d| try std.testing.expect(d >= 7);
+}
+
+test "Solo-MAGICORE: refiner is a no-op on already-perfect chain" {
+    var topo = Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+
+    _ = try topo.newAgent("solver", echoStateBody);
+    topo.nodes.items[0].agent.state = Value.makeInt(99999);
+
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "perfect");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(0), null, "");
+
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("ok", alwaysPositiveScorer)};
+    var exp = Experiment.init(std.testing.allocator, "perfect", &topo, &trace_store, &ds, &evs, "solver");
+
+    var traj = try cycle_lib.cycle(
+        std.testing.allocator,
+        &exp,
+        .{ .custom = .{ .body = magicoreRefineStep } },
+        .{ .iters = 5 },
+        1,
+        5,
+    );
+    defer traj.deinit();
+
+    try std.testing.expectEqual(@as(i48, 99999), topo.nodes.items[0].agent.state.?.asInt());
+}
