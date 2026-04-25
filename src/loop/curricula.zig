@@ -384,6 +384,144 @@ test "Solo-MAGICORE: refiner converges to all-7+ chain" {
     for (digits) |d| try std.testing.expect(d >= 7);
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Evaluator-Optimizer curriculum — Verdict.record exercised in
+// Step.custom, mirroring the mcp-agent / PraisonAI pattern.
+//
+// Single optimizer agent holds a "draft" state (i48 quality metric).
+// Step.custom reads the latest output, constructs a Verdict.record
+// containing { score, feedback }, and uses BOTH the scalar score AND
+// the feedback string to decide the revision direction:
+//   feedback == "OK"   → no-op (fixed point)
+//   feedback == "raise"→ bump state +5  (drive score up)
+//   feedback == "lower"→ bump state -5  (drive score down — used in
+//                                         the overshoot recovery test)
+//
+// The verdict's `passes(threshold)` projects through primaryScore (=
+// the record's `.score` field), so the existing scalar-threshold
+// machinery still works — but the feedback string carries direction
+// information that a pure scalar can't.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Decide the feedback string given a normalized score.
+/// OK band is [0.95, 1.05); above is "lower" (overshoot), below is "raise".
+fn feedbackFor(score: f32) []const u8 {
+    if (score >= 1.05) return "lower";
+    if (score >= 0.95) return "OK";
+    return "raise";
+}
+
+pub fn evalOptimizerStep(experiment: *Experiment, report: *const Report) anyerror!void {
+    const topo = experiment.topology;
+    const optimizer = topo.getAgent("optimizer") orelse return;
+
+    if (report.examples.len == 0) return;
+    const out = report.examples[0].output;
+    const raw: i48 = if (out.isInt()) out.asInt() else 0;
+    const score: f32 = @as(f32, @floatFromInt(raw)) / 100.0;
+
+    const feedback = feedbackFor(score);
+    const verdict = eval_lib.Verdict{ .record = .{
+        .evaluator_name = "judge",
+        .score = score,
+        .feedback = feedback,
+    } };
+    _ = verdict; // constructed for the demonstration; the curriculum
+    // gates on the feedback STRING (the .record-only signal) rather
+    // than on `passes(threshold)` since a scalar threshold can't
+    // distinguish under-shoot from overshoot.
+
+    // No-op iff the feedback says we're in the OK band.
+    if (std.mem.eql(u8, feedback, "OK")) return;
+
+    const cur: i48 = if (optimizer.state) |s| s.asInt() else 0;
+    const delta: i48 = if (std.mem.eql(u8, feedback, "lower")) -5 else 5;
+    optimizer.state = Value.makeInt(cur + delta);
+}
+
+test "feedbackFor: thresholds dispatch correctly" {
+    try std.testing.expectEqualStrings("raise", feedbackFor(0.0));
+    try std.testing.expectEqualStrings("raise", feedbackFor(0.5));
+    try std.testing.expectEqualStrings("raise", feedbackFor(0.94));
+    try std.testing.expectEqualStrings("OK", feedbackFor(0.95));
+    try std.testing.expectEqualStrings("OK", feedbackFor(1.0));
+    try std.testing.expectEqualStrings("lower", feedbackFor(1.05));
+    try std.testing.expectEqualStrings("lower", feedbackFor(2.0));
+}
+
+test "Verdict.record carries score + feedback and projects via primaryScore" {
+    const v = eval_lib.Verdict{ .record = .{
+        .evaluator_name = "judge",
+        .score = 0.85,
+        .feedback = "raise",
+    } };
+    try std.testing.expectEqualStrings("judge", v.name());
+    try std.testing.expectEqual(@as(f32, 0.85), v.primaryScore());
+    try std.testing.expect(!v.passes(0.95));
+    try std.testing.expect(v.passes(0.5));
+}
+
+test "Evaluator-Optimizer: bad seed (state=0) converges to score ≥ 0.95" {
+    var topo = Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("optimizer", echoStateBody);
+    topo.nodes.items[0].agent.state = Value.makeInt(0);
+
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "evopt");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(0), null, "");
+
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("ok", alwaysPositiveScorer)};
+    var exp = Experiment.init(std.testing.allocator, "evopt", &topo, &trace_store, &ds, &evs, "optimizer");
+
+    var traj = try cycle_lib.cycle(
+        std.testing.allocator,
+        &exp,
+        .{ .custom = .{ .body = evalOptimizerStep } },
+        .{ .iters = 30 },
+        1,
+        30,
+    );
+    defer traj.deinit();
+
+    // Path: 0 → 5 → 10 → … → 95 → "OK" → no-op. Need 19 nudges; budget 30.
+    const final: i48 = topo.nodes.items[0].agent.state.?.asInt();
+    try std.testing.expect(final >= 95);
+}
+
+test "Evaluator-Optimizer: overshoot at score=1.05 triggers 'lower' feedback" {
+    var topo = Topology.init(std.testing.allocator);
+    defer topo.deinit();
+    var trace_store = trace_lib.TraceStore.init(std.testing.allocator);
+    defer trace_store.deinit();
+    _ = try topo.newAgent("optimizer", echoStateBody);
+    // Seed at 110 → score 1.10. Should walk DOWN to 95–104 (the OK band).
+    topo.nodes.items[0].agent.state = Value.makeInt(110);
+
+    var ds = dataset_lib.Dataset.init(std.testing.allocator, "over");
+    defer ds.deinit();
+    try ds.addExample(Value.makeInt(0), null, "");
+
+    const evs = [_]eval_lib.Evaluator{eval_lib.individual("ok", alwaysPositiveScorer)};
+    var exp = Experiment.init(std.testing.allocator, "over", &topo, &trace_store, &ds, &evs, "optimizer");
+
+    var traj = try cycle_lib.cycle(
+        std.testing.allocator,
+        &exp,
+        .{ .custom = .{ .body = evalOptimizerStep } },
+        .{ .iters = 10 },
+        1,
+        10,
+    );
+    defer traj.deinit();
+
+    const final: i48 = topo.nodes.items[0].agent.state.?.asInt();
+    // Path: 110 (1.10 'lower') → 105 (1.05 'lower') → 100 (1.0 'OK') → no-op
+    try std.testing.expect(final >= 95 and final < 105);
+}
+
 test "Solo-MAGICORE: refiner is a no-op on already-perfect chain" {
     var topo = Topology.init(std.testing.allocator);
     defer topo.deinit();
