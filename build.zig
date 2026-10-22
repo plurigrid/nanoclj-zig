@@ -242,6 +242,56 @@ pub fn build(b: *std.Build) void {
     const embed_safe_step = b.step("embed-safe", "Build/run the bounded embedded profile");
     embed_safe_step.dependOn(&embed_safe_run.step);
 
+    // Isolated freestanding probe: never depends on the default install step,
+    // hosted entry point, or the optional sibling zig-syrup checkout.
+    const rv32_target = b.resolveTargetQuery(.{
+        .cpu_arch = .riscv32,
+        .os_tag = .freestanding,
+        .abi = .none,
+        .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 },
+        .cpu_features_add = std.Target.riscv.featureSet(&.{ .m, .a, .c }),
+    });
+    const rv32_options = addBuildOptions(b, rv32_target, .ReleaseSmall, .embed_safe);
+    const probe_module_options: std.Build.Module.CreateOptions = .{
+        .root_source_file = b.path("src/baochip_probe.zig"),
+        .target = rv32_target,
+        .optimize = .ReleaseSmall,
+        .link_libc = false,
+        .single_threaded = true,
+        .strip = false, // Keep symbols for instruction-emulator measurements.
+        .unwind_tables = .none,
+        .imports = &.{.{ .name = "build_options", .module = rv32_options }},
+    };
+    const probe = b.addObject(.{
+        .name = "nanoclj-baochip-probe",
+        .root_module = b.createModule(probe_module_options),
+    });
+    const probe_install = b.addInstallFileWithDir(probe.getEmittedBin(), .lib, "nanoclj-baochip-probe.o");
+    b.step("baochip-probe", "Cross-compile the reader/evaluator probe for RV32IMAC").dependOn(&probe_install.step);
+
+    const probe_elf = b.addExecutable(.{
+        .name = "nanoclj-baochip-probe.elf",
+        .root_module = b.createModule(probe_module_options),
+    });
+    probe_elf.stack_size = 64 * 1024;
+    probe_elf.root_module.addAssemblyFile(b.path("src/baochip_probe_start.S"));
+    probe_elf.setLinkerScript(b.path("src/baochip_probe.ld"));
+    const probe_elf_install = b.addInstallArtifact(probe_elf, .{});
+    b.step("baochip", "Link the RV32IMAC feasibility ELF (not flashable firmware)").dependOn(&probe_elf_install.step);
+
+    const host_probe = b.addExecutable(.{
+        .name = "nanoclj-baochip-host-smoke",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/baochip_probe.zig"),
+            .target = b.graph.host,
+            .optimize = .ReleaseSafe,
+            .link_libc = true, // Native diagnostic sink only; RV32 remains libc-free.
+            .single_threaded = true,
+            .imports = &.{.{ .name = "build_options", .module = rv32_options }},
+        }),
+    });
+    b.step("baochip-smoke", "Run the same deterministic suite on the build host").dependOn(&b.addRunArtifact(host_probe).step);
+
     // Tests
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{

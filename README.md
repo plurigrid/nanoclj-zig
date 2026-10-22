@@ -57,7 +57,15 @@ Zig-unique disk I/O (positional, no seek state — thread-safe):
 | `zig build embed-safe` | `nanoclj-embed-safe` | Bounded embedded profile |
 | `zig build mcp` | `nanoclj-mcp` | MCP server (Syrup framing via zig-syrup) |
 | `zig build gorj` | `gorj-mcp` | MCP with Clojure-defined tools |
+| `zig build baochip` | `nanoclj-baochip-probe.elf` | RV32IMAC freestanding feasibility probe; no libc or Linux |
+| `zig build baochip-smoke` | Host smoke runner | Same 13 cases, ReleaseSafe |
 | `zig build wasm` | `nanoclj.wasm` | WASM (disk I/O stubbed to `Unsupported`) |
+
+The hosted `embed-min`/`embed-safe` sizes do not establish board compatibility.
+The separate Baochip probe links the existing reader/evaluator with seven pure
+builtins and a fixed arena. It has passed instruction emulation, not hardware
+validation, and is not a signed/flashable firmware image. See
+[measurements, reproduction, and integration limits](docs/baochip-feasibility.md).
 
 Embed from Zig: add this repo as a dependency, `@import("nanoclj")`, call `eval(source)`.
 
