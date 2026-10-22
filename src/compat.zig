@@ -7,7 +7,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const is_wasm = builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64;
+// Memory-backed I/O also supports freestanding embedded evaluators.
+const no_host_io = builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64;
 
 /// Type alias for Value lists
 pub const ValList = std.ArrayListUnmanaged(@import("value.zig").Value);
@@ -62,12 +63,14 @@ pub const Mutex = struct {
 /// Cross-version stdout/stdin/stderr write helpers.
 /// 0.15: std.fs.File with .writeAll()
 /// 0.16: std.io.File — no direct writeAll, use system call
-/// WASM: buffer to memory (no file descriptors)
-const has_fs_file = if (is_wasm) false else @hasDecl(std.fs, "File");
+/// WASM/freestanding: buffer to memory (no file descriptors)
+const has_fs_file = if (no_host_io) false else @hasDecl(std.fs, "File");
 
-/// WASM output buffer: stdout and stderr both write here.
+/// Memory output buffer: stdout and stderr both write here.
+/// Historical wasm* API names are preserved for existing callers.
 /// The host reads wasm_output_buf[0..wasm_output_len] after nanoclj_eval.
-var wasm_output_backing: [64 * 1024]u8 = undefined;
+const output_capacity = if (builtin.os.tag == .freestanding and builtin.cpu.arch != .wasm32 and builtin.cpu.arch != .wasm64) 4096 else 64 * 1024;
+var wasm_output_backing: [output_capacity]u8 = undefined;
 pub var wasm_output_buf: [*]u8 = &wasm_output_backing;
 pub var wasm_output_len: u32 = 0;
 
@@ -87,7 +90,7 @@ fn wasmAppend(bytes: []const u8) void {
 }
 
 pub fn stdoutWrite(bytes: []const u8) void {
-    if (is_wasm) {
+    if (no_host_io) {
         wasmAppend(bytes);
     } else if (has_fs_file) {
         const f = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
@@ -98,7 +101,7 @@ pub fn stdoutWrite(bytes: []const u8) void {
 }
 
 pub fn stderrWrite(bytes: []const u8) void {
-    if (is_wasm) {
+    if (no_host_io) {
         wasmAppend(bytes);
     } else if (has_fs_file) {
         const f = std.fs.File{ .handle = std.posix.STDERR_FILENO };
@@ -120,7 +123,7 @@ fn writeAllFd(fd: std.posix.fd_t, bytes: []const u8) void {
 
 /// Cross-version GeneralPurposeAllocator / DebugAllocator.
 /// (Not used on WASM — wasm_alloc.zig provides the allocator.)
-const has_gpa = if (is_wasm) false else @hasDecl(std.heap, "GeneralPurposeAllocator");
+const has_gpa = if (no_host_io) false else @hasDecl(std.heap, "GeneralPurposeAllocator");
 
 pub fn DebugAllocator() type {
     if (has_gpa) {
@@ -141,8 +144,8 @@ pub fn makeDebugAllocator() DebugAllocator() {
 /// Cross-version File type alias.
 /// 0.15: std.fs.File
 /// 0.16: std.io.File
-/// WASM: dummy struct (no real files)
-pub const File = if (is_wasm) WasmFile else if (has_fs_file) std.fs.File else std.Io.File;
+/// WASM/freestanding: dummy struct (no real files)
+pub const File = if (no_host_io) WasmFile else if (has_fs_file) std.fs.File else std.Io.File;
 
 /// Dummy file type for WASM — all writes go to wasm_output_backing.
 pub const WasmFile = struct {
@@ -150,7 +153,7 @@ pub const WasmFile = struct {
 };
 
 pub fn stdoutFile() File {
-    if (is_wasm) {
+    if (no_host_io) {
         return .{ .kind = .stdout };
     } else if (has_fs_file) {
         return std.fs.File{ .handle = std.posix.STDOUT_FILENO };
@@ -160,7 +163,7 @@ pub fn stdoutFile() File {
 }
 
 pub fn stderrFile() File {
-    if (is_wasm) {
+    if (no_host_io) {
         return .{ .kind = .stderr };
     } else if (has_fs_file) {
         return std.fs.File{ .handle = std.posix.STDERR_FILENO };
@@ -170,7 +173,7 @@ pub fn stderrFile() File {
 }
 
 pub fn stdinFile() File {
-    if (is_wasm) {
+    if (no_host_io) {
         return .{ .kind = .stdin };
     } else if (has_fs_file) {
         return std.fs.File{ .handle = std.posix.STDIN_FILENO };
@@ -180,7 +183,7 @@ pub fn stdinFile() File {
 }
 
 /// Cross-version writeAll for a File.
-pub const fileWriteAll = if (is_wasm) fileWriteAllWasm else fileWriteAllNative;
+pub const fileWriteAll = if (no_host_io) fileWriteAllWasm else fileWriteAllNative;
 
 fn fileWriteAllWasm(_: File, bytes: []const u8) void {
     wasmAppend(bytes);
@@ -195,7 +198,7 @@ fn fileWriteAllNative(f: File, bytes: []const u8) void {
 }
 
 /// Cross-version read for a File. Returns bytes read.
-pub const fileRead = if (is_wasm) fileReadWasm else fileReadNative;
+pub const fileRead = if (no_host_io) fileReadWasm else fileReadNative;
 
 fn fileReadWasm(_: File, _: []u8) usize {
     return 0;
@@ -212,7 +215,7 @@ fn fileReadNative(f: File, buf: []u8) usize {
 }
 
 /// Cross-version stdin reader.  Returns bytes read into buf.
-pub const stdinRead = if (is_wasm) stdinReadWasm else stdinReadNative;
+pub const stdinRead = if (no_host_io) stdinReadWasm else stdinReadNative;
 
 fn stdinReadWasm(_: []u8) usize {
     return 0;

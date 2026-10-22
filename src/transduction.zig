@@ -1048,7 +1048,7 @@ fn getItemsDomain(val: Value) ?[]Value {
     };
 }
 
-const evalBoundedPeval = if (@import("builtin").cpu.arch == .wasm32 or @import("builtin").cpu.arch == .wasm64)
+const evalBoundedPeval = if (!@import("profile.zig").enable_peval or @import("builtin").os.tag == .freestanding or @import("builtin").cpu.arch == .wasm32 or @import("builtin").cpu.arch == .wasm64)
     evalBoundedPevalWasm
 else
     evalBoundedPevalNative;

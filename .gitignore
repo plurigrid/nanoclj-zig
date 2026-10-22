@@ -8,3 +8,5 @@ zig-cache/
 \#*\#
 .\#*
 test_stdout
+
+.venv-baochip/

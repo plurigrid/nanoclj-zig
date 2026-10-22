@@ -81,6 +81,27 @@ fn wasmNilStub(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
 var builtin_table: std.StringHashMap(BuiltinFn) = undefined;
 var initialized = false;
 
+/// Small pure registry for freestanding readers/evaluators. No host I/O,
+/// clocks, RNG, threads, Syrup, or application-specific extension registry.
+/// Use one live interpreter at a time (the builtin table is process-global).
+pub fn initMinimalCore(env: *Env, gc: *GC) !void {
+    if (initialized) return error.AlreadyInitialized;
+    builtin_table = std.StringHashMap(BuiltinFn).init(gc.allocator);
+    initialized = true;
+    errdefer deinitCore();
+    const builtins = .{
+        .{ "+", &add },       .{ "-", &sub }, .{ "*", &mul },
+        .{ "=", &eql },       .{ "<", &lt },  .{ "count", &count },
+        .{ "first", &first },
+    };
+    inline for (builtins) |b| {
+        try builtin_table.put(b[0], b[1]);
+        const id = try gc.internString(b[0]);
+        try env.set(b[0], Value.makeKeyword(id));
+        try env.setById(id, Value.makeKeyword(id));
+    }
+}
+
 pub fn initCore(env: *Env, gc: *GC) !void {
     if (!initialized) {
         builtin_table = std.StringHashMap(BuiltinFn).init(gc.allocator);

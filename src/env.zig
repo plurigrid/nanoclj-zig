@@ -32,9 +32,10 @@ pub const Env = struct {
     /// fast-path body eval (e.g. via a nested let/loop) matches the GC's
     /// allocator on destroy. Previously hard-coded page_allocator here leaked a
     /// child into gc.envs allocated with the wrong allocator, causing an
-    /// "Invalid free" panic in gc.deinit.
-    pub fn initSmall(parent: ?*Env) Env {
-        const alloc = if (parent) |p| p.allocator else std.heap.page_allocator;
+    /// "Invalid free" panic in gc.deinit. A small child always requires a
+    /// parent; root environments use init with an explicit allocator.
+    pub fn initSmall(parent: *Env) Env {
+        const alloc = parent.allocator;
         return .{
             .parent = parent,
             .bindings = std.StringHashMap(Value).init(alloc),
