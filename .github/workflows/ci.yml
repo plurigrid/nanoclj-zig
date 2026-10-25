@@ -18,3 +18,17 @@ jobs:
       - run: zig fmt --check .
       - run: zig build
       - run: zig build test --summary all
+
+  surprisal:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        optimize: [Debug, ReleaseSafe]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: zig fmt --check src/surprisal*.zig src/core.zig build.zig
+      - run: zig build surprisal-test -Doptimize=${{ matrix.optimize }} --summary all
+      - run: zig build surprisal -Doptimize=${{ matrix.optimize }} -- examples/surprisal.clj
