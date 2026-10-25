@@ -81,6 +81,19 @@ fn wasmNilStub(_: []Value, _: *GC, _: *Env, _: *Resources) anyerror!Value {
 var builtin_table: std.StringHashMap(BuiltinFn) = undefined;
 var initialized = false;
 
+/// Register an explicit builtin surface for an embedded evaluator. Callers own
+/// the single interpreter lifetime and must call deinitCore before GC teardown.
+pub fn registerBuiltin(name: []const u8, function: BuiltinFn, env: *Env, gc: *GC) !void {
+    if (!initialized) {
+        builtin_table = std.StringHashMap(BuiltinFn).init(gc.allocator);
+        initialized = true;
+    }
+    try builtin_table.put(name, function);
+    const id = try gc.internString(name);
+    try env.set(name, Value.makeKeyword(id));
+    try env.setById(id, Value.makeKeyword(id));
+}
+
 pub fn initCore(env: *Env, gc: *GC) !void {
     if (!initialized) {
         builtin_table = std.StringHashMap(BuiltinFn).init(gc.allocator);
@@ -566,6 +579,8 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         try env.set(b[0], Value.makeKeyword(id));
         try env.setById(id, Value.makeKeyword(id));
     }
+
+    try @import("surprisal_value.zig").register(env, gc);
 
     // ── Loop / agent-o-nanoclj Skill registry ─────────────────────────
     // SDF-style extension surface. Each `loop/*.zig` submodule contributes

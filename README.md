@@ -50,6 +50,23 @@ Zig-unique disk I/O (positional, no seek state — thread-safe):
 
 ## Interoperate
 
+Contextual surprisal is available as native `surprisal/*` builtins:
+
+```clojure
+(def m (surprisal/model :area/v1 [15 15 15 15 15 15 15 15]))
+(surprisal/bits (surprisal/event m [0])) ; 3.0 bits
+```
+
+The focused host uses the existing reader and bounded evaluator with only this
+namespace registered; it does not require the Syrup sibling or nREPL:
+
+```sh
+zig build surprisal -- examples/surprisal.clj
+zig build surprisal-test -Doptimize=ReleaseSafe
+```
+
+See [the API, context checks, and validation limits](docs/SURPRISAL.md).
+
 | Target | Binary | Use |
 |---|---|---|
 | `zig build run` | `nanoclj` | REPL |

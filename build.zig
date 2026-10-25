@@ -258,6 +258,39 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
+    // Pure namespace tested through the real reader and both evaluators. This
+    // target does not initialize networking, nREPL, MCP, or the Syrup bridge.
+    const surprisal_options = addBuildOptions(b, target, optimize, .embed_safe);
+    const surprisal_tests = b.addTest(.{
+        .filters = &.{"surprisal"},
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/surprisal_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{.{ .name = "build_options", .module = surprisal_options }},
+        }),
+    });
+    const run_surprisal_tests = b.addRunArtifact(surprisal_tests);
+    const surprisal_test_step = b.step("surprisal-test", "Test contextual surprisal through the Clojure evaluator");
+    surprisal_test_step.dependOn(&run_surprisal_tests.step);
+    test_step.dependOn(&run_surprisal_tests.step);
+
+    const surprisal_exe = b.addExecutable(.{
+        .name = "nanoclj-surprisal",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/surprisal_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{.{ .name = "build_options", .module = surprisal_options }},
+        }),
+    });
+    const surprisal_run = b.addRunArtifact(surprisal_exe);
+    if (b.args) |args| surprisal_run.addArgs(args);
+    const surprisal_step = b.step("surprisal", "Evaluate a file or -e expression with the pure surprisal namespace");
+    surprisal_step.dependOn(&surprisal_run.step);
+
     // loop.zig standalone tests (agent-o-nanoclj feedback-loop core)
     const loop_tests = b.addTest(.{
         .root_module = b.createModule(.{
