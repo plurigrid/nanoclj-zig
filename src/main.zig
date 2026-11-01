@@ -862,6 +862,7 @@ test {
     _ = @import("simd_str.zig");
     _ = @import("namespace.zig");
     _ = @import("colorspace.zig");
+    _ = @import("color_uri.zig");
     _ = @import("persistent_vector.zig");
     _ = @import("persistent_map.zig");
     _ = @import("ies.zig");
@@ -901,6 +902,48 @@ fn arrayApiTestEnv(env: *Env, gc: *GC) !void {
     core.deinitCore();
     try core.initCore(env, gc);
     loadMacroPrelude(env, gc);
+}
+
+test "color URI: evaluator exposes native colors, rule context and structured failures" {
+    var gc = GC.init(std.testing.allocator);
+    defer gc.deinit();
+    var env = Env.init(std.testing.allocator, null);
+    env.is_root = true;
+    defer env.deinit();
+    core.deinitCore();
+    try core.initCore(&env, &gc);
+    defer core.deinitCore();
+
+    const checks = [_][]const u8{
+        // `trit` is also a builtin sentinel in the tree evaluator; use get.
+        "(= -1 (get (color/resolve \"color://trit/-1\") :trit))",
+        "(= 0 (get (color/resolve \"color://trit/0\") :trit))",
+        "(= 1 (get (color/resolve \"color://trit/1\") :trit))",
+        "(= \"color://trit/1\" (:address (color/resolve \"color://trit/1\")))",
+        "(= :trit (:domain (color/resolve \"color://trit/1\")))",
+        "(= :oklch_equal_sectors_v1 (:rule (color/resolve \"color://trit/1\")))",
+        "(color? (:oklab (color/resolve \"color://trit/1\")))",
+        "(= -1 (hue-to-trit (color-hue (:oklab (color/resolve \"color://trit/-1\")))))",
+        "(= 0 (hue-to-trit (color-hue (:oklab (color/resolve \"color://trit/0\")))))",
+        "(= 1 (hue-to-trit (color-hue (:oklab (color/resolve \"color://trit/1\")))))",
+        "(= :InvalidScheme (:error (color/resolve \"http://trit/1\")))",
+        "(= :MalformedPath (:error (color/resolve \"color://trit/1/\")))",
+        "(= :UnsupportedDomain (:error (color/resolve \"color://world/a\")))",
+        "(= :InvalidTrit (:error (color/resolve \"color://trit/+1\")))",
+        "(= \"color://trit/2\" (:address (color/resolve \"color://trit/2\")))",
+        "(nil? (get (color/resolve \"color://trit/2\") :trit))",
+        "(nil? (:oklab (color/resolve \"color://trit/2\")))",
+        "(nil? (:error (color/resolve \"color://trit/1\")))",
+        "(= 0.0 (color-distance (:oklab (color/resolve \"color://trit/1\")) (:oklab (color/resolve \"color://trit/1\"))))",
+    };
+    for (checks) |source| {
+        const result = try evalSource(source, &env, &gc);
+        if (!result.isBool() or !result.asBool()) std.debug.print("failed evaluator check: {s}\n", .{source});
+        try std.testing.expect(result.isBool() and result.asBool());
+    }
+    try std.testing.expectError(error.EvalFailed, evalSource("(color/resolve)", &env, &gc));
+    try std.testing.expectError(error.EvalFailed, evalSource("(color/resolve 1)", &env, &gc));
+    try std.testing.expectError(error.EvalFailed, evalSource("(color/resolve \"color://trit/1\" 2)", &env, &gc));
 }
 
 test "array api: make-array + aset-long + vec" {
