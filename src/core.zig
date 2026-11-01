@@ -14,6 +14,7 @@ const eval_mod = @import("eval.zig");
 const semantics = @import("semantics.zig");
 const sorted = @import("sorted.zig");
 const substrate = @import("substrate.zig");
+const color_uri = @import("color_uri.zig");
 const gay_skills = @import("gay_skills.zig");
 const profile = @import("profile.zig");
 // OS-dependent modules: only import on native targets
@@ -557,7 +558,7 @@ pub fn initCore(env: *Env, gc: *GC) !void {
         // nREPL port allocation by color entropy
         .{ "nrepl-port-for", &time_units.nreplPortForFn },                            .{ "nrepl-color", &time_units.nreplColorFn },
         .{ "nrepl-spread", &time_units.nreplSpreadFn },
-    };
+    } ++ .{.{ "color/resolve", &colorResolveFn }};
 
     inline for (builtins) |b| {
         try builtin_table.put(b[0], b[1]);
@@ -3978,6 +3979,30 @@ fn requireFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
 // ============================================================================
 
 const colorspace_mod = @import("colorspace.zig");
+
+/// URI failures remain structured data because eval.apply collapses builtin
+/// errors to EvalFailed. Invocation errors keep the usual arity/type behavior.
+fn colorResolveFn(args: []Value, gc: *GC, _: *Env, _: *Resources) anyerror!Value {
+    if (args.len != 1) return error.ArityError;
+    if (!args[0].isString()) return error.TypeError;
+    const uri = gc.getString(args[0].asStringId());
+    const obj = try gc.allocObj(.map);
+    try colorResolutionField(obj, gc, "address", args[0]);
+    const result = color_uri.resolve(uri) catch |err| {
+        try colorResolutionField(obj, gc, "error", Value.makeKeyword(try gc.internString(@errorName(err))));
+        return Value.makeObj(obj);
+    };
+    try colorResolutionField(obj, gc, "domain", Value.makeKeyword(try gc.internString(@tagName(result.domain))));
+    try colorResolutionField(obj, gc, "trit", Value.makeInt(@intFromEnum(result.trit)));
+    try colorResolutionField(obj, gc, "oklab", try makeColorValue(result.oklab, gc));
+    try colorResolutionField(obj, gc, "rule", Value.makeKeyword(try gc.internString(@tagName(result.rule))));
+    return Value.makeObj(obj);
+}
+
+fn colorResolutionField(obj: *value.Obj, gc: *GC, key: []const u8, val: Value) !void {
+    try obj.data.map.keys.append(gc.allocator, Value.makeKeyword(try gc.internString(key)));
+    try obj.data.map.vals.append(gc.allocator, val);
+}
 
 fn makeColorValue(color: colorspace_mod.Color, gc: *GC) !Value {
     const obj = try gc.allocObj(.color);
